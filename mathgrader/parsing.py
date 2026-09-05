@@ -57,6 +57,19 @@ def parse_student_values(text: str) -> list:
     return values
 
 
+def values_match(a, b) -> bool:
+    """두 sympy 값이 같은 값을 나타내는지 확인한다 (무한대 등도 안전하게 처리)."""
+    try:
+        a = sp.nsimplify(a)
+        b = sp.nsimplify(b)
+        infinities = (sp.oo, -sp.oo, sp.zoo)
+        if a in infinities or b in infinities:
+            return a == b
+        return sp.simplify(a - b) == 0
+    except Exception:
+        return False
+
+
 def values_equal_sets(correct: list, student: list) -> bool:
     """두 값 목록이 순서 상관없이 같은 집합을 나타내는지 확인한다."""
     if len(correct) != len(student):
@@ -65,13 +78,29 @@ def values_equal_sets(correct: list, student: list) -> bool:
     for c in correct:
         match_idx = None
         for i, s in enumerate(remaining):
-            try:
-                if sp.simplify(sp.nsimplify(c) - sp.nsimplify(s)) == 0:
-                    match_idx = i
-                    break
-            except Exception:
-                continue
+            if values_match(c, s):
+                match_idx = i
+                break
         if match_idx is None:
             return False
         remaining.pop(match_idx)
     return True
+
+
+def split_top_level(text: str, sep: str = ",") -> list:
+    """괄호/대괄호 안쪽은 건드리지 않고 최상위 레벨에서만 구분자로 나눈다."""
+    parts = []
+    depth = 0
+    current = []
+    for ch in text:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == sep and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return [p.strip() for p in parts]

@@ -37,7 +37,11 @@
 </head>
 <body>
 <h1>수학 채점 &amp; 해설 시스템</h1>
-<p>산술식, 일차/이차방정식, 식 정리 문제를 입력하면 채점하고 풀이 과정을 보여줍니다.</p>
+<p>산술식, 방정식, 식 정리는 그대로 입력하세요. 대학 수학(미적분학/선형대수/
+미분방정식/이산수학)은 <code>키워드: 인자, 인자</code> 형식으로 입력합니다.
+예: <code>미분: x^3+2x, x</code>, <code>적분: x^2, x, 0, 1</code>,
+<code>행렬식: [[1,2],[3,4]]</code>, <code>미분방정식: y' + y = 0</code>.
+자세한 문법은 README를 참고하세요.</p>
 
 <form method="post" action="/grade">
   <label for="problem">문제</label>
