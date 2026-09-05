@@ -181,6 +181,37 @@ market_news = screener.get_market_news()
 시간이 걸리므로(각 종목마다 시세+재무제표+선택적으로 뉴스 조회) `--no-ticker-news`,
 `--quiet` 옵션과 함께 쓰는 것을 권장한다.
 
+## 웹 대시보드 (자동 갱신)
+
+CLI로 매번 실행 → JSON 저장 → 업로드하는 대신, 로컬에서 계속 실행해두면
+백그라운드에서 주기적으로 알아서 다시 계산해 화면이 자동 갱신되는 웹 대시보드도
+있습니다.
+
+```bash
+uvicorn stockscreener.web.main:app --reload
+```
+
+브라우저에서 `http://localhost:8000` 을 열어두면 됩니다. 서버가 켜져 있는 동안
+백그라운드에서 주기적으로 시세·재무제표·뉴스를 다시 가져와 재계산하고, 페이지는
+그 결과를 주기적으로 폴링해서 자동으로 화면을 갱신합니다 (브라우저가 외부
+사이트에 직접 접속하는 게 아니라, 이 로컬 서버가 대신 가져와 줍니다). "지금
+갱신" 버튼으로 즉시 재계산을 요청할 수도 있습니다.
+
+환경변수로 동작을 조정할 수 있습니다.
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `STOCKSCREENER_TICKERS` | (없음) | 쉼표로 구분한 티커 목록. 지정하면 최우선 적용 |
+| `STOCKSCREENER_SP500` | (없음) | `1`로 설정하면 번들된 S&P 500 전체(약 500종목) 사용 |
+| `STOCKSCREENER_REFRESH_SECONDS` | `1800` (30분) | 자동 갱신 주기(초). `--sp500` 사용 시 한 주기가 오래 걸리므로 `7200` 이상 권장 |
+| `STOCKSCREENER_NO_TICKER_NEWS` | `1` (건너뜀) | `0`으로 설정하면 종목별 뉴스도 매 주기마다 조회 (느려짐) |
+
+예시 (S&P 500 전체를 2시간마다 자동 갱신):
+
+```bash
+STOCKSCREENER_SP500=1 STOCKSCREENER_REFRESH_SECONDS=7200 uvicorn stockscreener.web.main:app
+```
+
 ## 데이터 소스와 한계
 
 - 시세/재무제표는 기본적으로 야후 파이낸스(`yfinance`, 무료, API 키 불필요)를
@@ -210,4 +241,6 @@ market_news = screener.get_market_news()
 - `stockscreener/report.py` — 콘솔 출력 및 JSON 직렬화
 - `stockscreener/universe.py`, `stockscreener/data/universe/sp500.txt` — S&P 500
   종목 유니버스 스냅샷과 로더
-- `stockscreener/cli.py` — CLI 진입점
+- `stockscreener/cli.py` — CLI 진입점 (1회 실행 후 JSON 저장)
+- `stockscreener/web/main.py` — 백그라운드에서 주기적으로 재계산하는 FastAPI
+  웹 대시보드 (자동 갱신)

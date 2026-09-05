@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>그레이엄 밸류 스크리너</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f5f6f0;
+  --paper-raised:#ffffff;
+  --paper-sunken:#eaeee2;
+  --ink:#1c2520;
+  --ink-soft:#57624f;
+  --ink-faint:#8b957f;
+  --rule:#d5dbc7;
+  --rule-strong:#aab598;
+  --accent:#7c5e21;
+  --accent-soft:#eee2c4;
+  --good:#1f7a4d;
+  --good-soft:#dcefe1;
+  --warn:#a06a12;
+  --warn-soft:#f5e6c8;
+  --critical:#a3403a;
+  --critical-soft:#f3ded9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#12160f; --paper-raised:#181d15; --paper-sunken:#1e2419;
+    --ink:#edf1e6; --ink-soft:#aab89e; --ink-faint:#727f66;
+    --rule:#2b3324; --rule-strong:#3c4632;
+    --accent:#d8b968; --accent-soft:#3a2f14;
+    --good:#5fbf8a; --good-soft:#1c3025;
+    --warn:#e0ab4c; --warn-soft:#3a2c11;
+    --critical:#e08076; --critical-soft:#3a201d;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#12160f; --paper-raised:#181d15; --paper-sunken:#1e2419;
+  --ink:#edf1e6; --ink-soft:#aab89e; --ink-faint:#727f66;
+  --rule:#2b3324; --rule-strong:#3c4632;
+  --accent:#d8b968; --accent-soft:#3a2f14;
+  --good:#5fbf8a; --good-soft:#1c3025;
+  --warn:#e0ab4c; --warn-soft:#3a2c11;
+  --critical:#e08076; --critical-soft:#3a201d;
+}
+*{box-sizing:border-box;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"Work Sans", -apple-system, "Malgun Gothic", sans-serif;
+  line-height:1.5;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:2.5rem 1.5rem 5rem;}
+.mono{font-family:"IBM Plex Mono", ui-monospace, monospace;}
+.tnum{font-variant-numeric:tabular-nums;}
+.eyebrow{font-family:"IBM Plex Mono", monospace; font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 .6rem;}
+h1{font-family:"Fraunces", Georgia, serif; font-weight:600; font-size:clamp(1.9rem, 3.4vw, 2.7rem); line-height:1.08; letter-spacing:-.01em; margin:0 0 .55rem; text-wrap:balance;}
+.subtitle{color:var(--ink-soft); font-size:1rem; max-width:62ch; margin:0 0 1.4rem;}
+.masthead-rule{border:none; border-top:1px solid var(--rule-strong); border-bottom:1px solid var(--rule); height:3px; margin:0 0 1.7rem;}
+
+.statusbar{display:flex; flex-wrap:wrap; align-items:center; gap:.9rem; padding:.85rem 1.1rem; background:var(--paper-raised); border:1px solid var(--rule); border-left:3px solid var(--accent); margin-bottom:1.6rem; font-size:.88rem;}
+.statusbar.is-refreshing{border-left-color:var(--warn); background:var(--warn-soft);}
+.statusbar.is-error{border-left-color:var(--critical); background:var(--critical-soft);}
+.statusbar strong{font-weight:600;}
+.statusbar .status-text{flex:1 1 260px; color:var(--ink);}
+.statusbar .status-meta{color:var(--ink-soft); font-size:.82rem;}
+.refresh-btn{flex:none; border:1px solid var(--rule-strong); background:var(--paper-raised); color:var(--ink); font:inherit; font-size:.82rem; padding:.4rem 1.1rem; cursor:pointer;}
+.refresh-btn:hover{border-color:var(--accent); color:var(--accent);}
+.refresh-btn:disabled{opacity:.5; cursor:default;}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); border-top:1px solid var(--rule-strong); border-bottom:1px solid var(--rule-strong); margin-bottom:2rem;}
+.stat{padding:1rem 1.3rem; border-left:1px solid var(--rule);}
+.stat:first-child{border-left:none;}
+.stat .stat-label{font-family:"IBM Plex Mono", monospace; font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:.35rem;}
+.stat .stat-value{font-family:"Fraunces", serif; font-weight:600; font-size:2rem; font-variant-numeric:tabular-nums; line-height:1;}
+.stat .stat-value.good{color:var(--good);}
+.stat .stat-value.critical{color:var(--critical);}
+
+.market-news{margin-bottom:2rem; border:1px solid var(--rule); padding:1rem 1.2rem; background:var(--paper-raised);}
+.market-news h3{font-family:"Fraunces", serif; font-size:1.05rem; font-weight:600; margin:0 0 .2rem;}
+.market-news .caption{font-size:.78rem; color:var(--ink-faint); margin-bottom:.7rem;}
+.news-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.5rem;}
+.news-list a{color:var(--accent); text-decoration:none; font-size:.85rem;}
+.news-list a:hover{text-decoration:underline;}
+.news-list .src{color:var(--ink-faint); font-size:.75rem;}
+.empty-note{color:var(--ink-faint); font-size:.82rem; font-style:italic;}
+
+.controls{display:flex; flex-wrap:wrap; gap:.7rem; align-items:center; margin-bottom:1.1rem;}
+.search-input{font:inherit; font-family:"IBM Plex Mono", monospace; font-size:.85rem; padding:.5rem .7rem; border:1px solid var(--rule-strong); background:var(--paper-raised); color:var(--ink); min-width:200px;}
+.search-input:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
+.chip{font:inherit; font-size:.82rem; padding:.45rem .9rem; border:1px solid var(--rule-strong); background:var(--paper-raised); color:var(--ink-soft); cursor:pointer;}
+.chip[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--paper-raised);}
+.controls .spacer{flex:1;}
+.result-count{font-size:.82rem; color:var(--ink-soft);}
+.score-info{font-size:.78rem; color:var(--ink-faint); margin:-.6rem 0 1.5rem;}
+
+.table-scroll{overflow-x:auto; border-top:1px solid var(--rule-strong);}
+table{width:100%; border-collapse:collapse; font-size:.87rem; min-width:900px;}
+thead th{position:sticky; top:0; background:var(--paper); text-align:left; font-family:"IBM Plex Mono", monospace; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); font-weight:500; padding:.6rem .7rem; border-bottom:1px solid var(--rule-strong); cursor:pointer; white-space:nowrap;}
+thead th:hover{color:var(--ink);}
+thead th.sorted{color:var(--accent);}
+thead th .arrow{margin-left:.25rem; opacity:.7;}
+thead th.num, tbody td.num{text-align:right;}
+tbody tr.row{border-bottom:1px solid var(--rule); cursor:pointer;}
+tbody tr.row:hover{background:var(--paper-sunken);}
+tbody tr.row.is-open{background:var(--paper-sunken);}
+tbody td{padding:.6rem .7rem; vertical-align:middle;}
+td.ticker-cell{font-family:"IBM Plex Mono", monospace; font-weight:600; letter-spacing:.02em;}
+
+.badge{display:inline-block; font-family:"IBM Plex Mono", monospace; font-size:.72rem; padding:.15rem .55rem; border:1px solid transparent; white-space:nowrap;}
+.badge.good{background:var(--good-soft); color:var(--good); border-color:var(--good);}
+.badge.warn{background:var(--warn-soft); color:var(--warn); border-color:var(--warn);}
+.badge.critical{background:var(--critical-soft); color:var(--critical); border-color:var(--critical);}
+
+.mos-cell{display:flex; align-items:center; gap:.5rem; justify-content:flex-end;}
+.mos-track{position:relative; width:64px; height:8px; background:var(--paper-sunken); border:1px solid var(--rule); flex:none;}
+.mos-track::after{content:""; position:absolute; top:-2px; bottom:-2px; left:50%; width:1px; background:var(--rule-strong);}
+.mos-fill{position:absolute; top:0; bottom:0;}
+.mos-fill.good{background:var(--good);}
+.mos-fill.critical{background:var(--critical);}
+.mos-label{font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; min-width:3.6em; text-align:right;}
+
+.criteria-dots{display:flex; gap:3px;}
+.dot{width:9px; height:9px; border:1px solid var(--rule-strong); flex:none;}
+.dot.pass{background:var(--good); border-color:var(--good);}
+.dot.fail{background:var(--critical); border-color:var(--critical);}
+.dot.na{background:transparent;}
+
+tr.detail-row td{background:var(--paper-sunken); padding:1.1rem 1.4rem 1.4rem; border-bottom:1px solid var(--rule-strong);}
+.detail-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(230px,1fr)); gap:1.4rem;}
+.detail-block h4{font-family:"IBM Plex Mono", monospace; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 .55rem;}
+.criteria-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.4rem;}
+.criteria-list li{display:flex; gap:.5rem; font-size:.83rem; align-items:baseline;}
+.criteria-list .mark{flex:none; width:1.1em; font-family:"IBM Plex Mono", monospace;}
+.criteria-list .mark.pass{color:var(--good);}
+.criteria-list .mark.fail{color:var(--critical);}
+.criteria-list .mark.na{color:var(--ink-faint);}
+.criteria-list .cdetail{color:var(--ink-soft); display:block; font-size:.78rem;}
+.kv{display:flex; flex-direction:column; gap:.4rem; font-size:.85rem;}
+.kv .row{display:flex; justify-content:space-between; gap:1rem;}
+.kv .row .k{color:var(--ink-soft);}
+.kv .row .v{font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums;}
+
+.errors{margin-top:1.6rem;}
+.errors summary{cursor:pointer; font-family:"IBM Plex Mono", monospace; font-size:.8rem; color:var(--critical); padding:.5rem 0;}
+.errors ul{list-style:none; margin:.3rem 0 0; padding:0; display:flex; flex-direction:column; gap:.3rem;}
+.errors li{font-size:.82rem; color:var(--ink-soft); display:flex; gap:.6rem;}
+.errors .etick{font-family:"IBM Plex Mono", monospace; font-weight:600; color:var(--ink); flex:none;}
+
+footer{margin-top:3rem; padding-top:1.2rem; border-top:1px solid var(--rule); color:var(--ink-faint); font-size:.78rem; max-width:70ch;}
+footer p{margin:.3rem 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">GRAHAM VALUE SCREENER · 절댓값 기반 분석 · 로컬 자동 갱신</p>
+  <h1>그레이엄 밸류 스크리너</h1>
+  <p class="subtitle">
+    애널리스트 의견이나 목표주가는 쓰지 않습니다. 재무제표에서 뽑은 안전마진,
+    그레이엄 넘버, 방어적 투자자 7원칙만으로 저평가 여부를 판단합니다.
+    이 서버가 백그라운드에서 주기적으로 다시 계산합니다.
+  </p>
+  <hr class="masthead-rule">
+
+  <div class="statusbar" id="statusbar"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="market-news" id="marketNewsBox" hidden>
+    <h3>증시 영향 뉴스</h3>
+    <p class="caption" id="marketNewsCaption"></p>
+    <ul class="news-list" id="marketNewsList"></ul>
+  </div>
+
+  <div class="controls">
+    <input class="search-input mono" id="searchInput" type="text" placeholder="티커 검색…" aria-label="티커 검색">
+    <button class="chip" id="undervaluedChip" aria-pressed="false">저평가 후보만</button>
+    <span class="spacer"></span>
+    <span class="result-count" id="resultCount"></span>
+  </div>
+  <p class="score-info">점수 = 안전마진 60% + 그레이엄 7원칙 충족비율 40% (참고용 보조지표 · 최종 저평가 판정은 안전마진과 그레이엄 넘버 두 조건이 모두 충족될 때만 표시됩니다)</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr id="headRow"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <details class="errors" id="errorsBox" hidden>
+    <summary></summary>
+    <ul id="errorsList"></ul>
+  </details>
+
+  <footer>
+    <p>이 페이지는 투자 자문이 아니며 어떤 종목의 매수·매도도 권유하지 않습니다.
+    모든 수치는 이 서버가 계산한 재무제표 절댓값(과거 실적) 기반 참고용 지표이며,
+    미래 수익을 보장하지 않습니다.</p>
+    <p id="footerMeta"></p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+var COLUMNS = [
+  {key:"ticker", label:"티커", num:false},
+  {key:"price", label:"현재가", num:true},
+  {key:"per", label:"PER", num:true},
+  {key:"pbr", label:"PBR", num:true},
+  {key:"graham_number", label:"그레이엄 넘버", num:true},
+  {key:"margin_of_safety", label:"안전마진", num:true},
+  {key:"criteria", label:"그레이엄 7원칙", num:false, sortKey:"criteria_ratio"},
+  {key:"score", label:"점수", num:true}
+];
+
+var state = {
+  reports: [],
+  marketNews: [],
+  generatedAt: null,
+  sortKey: "score",
+  sortDir: "desc",
+  search: "",
+  onlyUndervalued: false,
+  openTicker: null
+};
+
+function fmtNum(v, digits, suffix){
+  if(v === null || v === undefined || Number.isNaN(v)) return "—";
+  return v.toLocaleString("en-US", {minimumFractionDigits:digits, maximumFractionDigits:digits}) + (suffix||"");
+}
+function categorize(score){
+  if(score >= 65) return "저평가 후보";
+  if(score >= 40) return "적정~관망";
+  return "고평가/주의";
+}
+function badgeClass(category){
+  if(category === "저평가 후보") return "good";
+  if(category === "적정~관망") return "warn";
+  return "critical";
+}
+function scoreOf(report){
+  if(typeof report.composite_score === "number"){
+    return {score:report.composite_score, category:report.score_category || categorize(report.composite_score)};
+  }
+  var v = report.valuation || {};
+  var mos = typeof v.margin_of_safety === "number" ? v.margin_of_safety : null;
+  var mosScore = mos === null ? 50 : (Math.max(-50, Math.min(50, mos*100)) + 50);
+  var criteria = (report.graham && report.graham.criteria) || [];
+  var evaluable = criteria.filter(function(c){return c.passed !== null;}).length;
+  var passed = criteria.filter(function(c){return c.passed === true;}).length;
+  var grahamScore = evaluable === 0 ? 50 : (passed/evaluable*100);
+  var score = Math.round((0.6*mosScore + 0.4*grahamScore)*10)/10;
+  return {score:score, category:categorize(score)};
+}
+function perPbrOf(report){
+  var criteria = (report.graham && report.graham.criteria) || [];
+  var c = criteria.filter(function(c){return c.key === "pe_times_pb";})[0];
+  if(!c || !c.detail) return {per:null, pbr:null};
+  var m = c.detail.match(/PER ([\-\d.]+), PBR ([\-\d.]+)/);
+  if(!m) return {per:null, pbr:null};
+  return {per:parseFloat(m[1]), pbr:parseFloat(m[2])};
+}
+function criteriaRatio(report){
+  var criteria = (report.graham && report.graham.criteria) || [];
+  var evaluable = criteria.filter(function(c){return c.passed !== null;}).length;
+  var passed = criteria.filter(function(c){return c.passed === true;}).length;
+  return evaluable === 0 ? -1 : passed/evaluable;
+}
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+
+function fmtDate(iso){
+  if(!iso) return "정보 없음";
+  try{
+    var d = new Date(iso);
+    return d.toLocaleString("ko-KR", {year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"});
+  }catch(e){ return iso; }
+}
+function fmtMinutes(sec){
+  if(sec == null) return "";
+  var m = Math.round(sec/60);
+  return m + "분";
+}
+
+function applyDataset(payload){
+  var reports = (payload.reports || []).map(function(r){
+    var pp = perPbrOf(r);
+    var sc = r.error ? {score:null, category:null} : scoreOf(r);
+    return Object.assign({}, r, {
+      _per: pp.per, _pbr: pp.pbr, _score: sc.score, _category: sc.category,
+      _criteriaRatio: criteriaRatio(r)
+    });
+  });
+  state.reports = reports;
+  state.marketNews = payload.market_news || [];
+  state.generatedAt = payload.generated_at || null;
+}
+
+var lastGeneratedAt = null;
+var lastStatus = null;
+
+async function pollStatus(){
+  try{
+    var res = await fetch("/api/status");
+    var status = await res.json();
+    lastStatus = status;
+    renderStatusBar(status);
+    if(status.last_refreshed_at && status.last_refreshed_at !== lastGeneratedAt){
+      await fetchData();
+    }
+  }catch(e){
+    renderStatusBar(null);
+  }
+}
+
+async function fetchData(){
+  try{
+    var res = await fetch("/api/data");
+    var payload = await res.json();
+    applyDataset(payload);
+    lastGeneratedAt = payload.generated_at;
+    renderAll();
+  }catch(e){ /* 다음 폴링 때 재시도 */ }
+}
+
+function renderStatusBar(status){
+  var el = document.getElementById("statusbar");
+  if(!status){
+    el.className = "statusbar is-error";
+    el.innerHTML = '<span class="status-text">서버 상태를 가져오지 못했습니다. 서버가 켜져 있는지 확인해주세요.</span>';
+    return;
+  }
+  el.className = "statusbar" + (status.is_refreshing ? " is-refreshing" : "") + (status.last_error ? " is-error" : "");
+  var text;
+  if(status.is_refreshing){
+    text = "종목 " + (status.ticker_count||0) + "개 갱신 중… (완료되면 자동으로 화면이 바뀝니다)";
+  } else if(status.last_refreshed_at){
+    text = "마지막 갱신: " + fmtDate(status.last_refreshed_at) + " · 종목 " + (status.ticker_count||0) + "개";
+  } else {
+    text = "첫 데이터 수집 중입니다… 잠시만 기다려주세요.";
+  }
+  if(status.last_error){
+    text += " · 최근 갱신 중 오류 발생 (이전 데이터 유지): " + status.last_error;
+  }
+  el.innerHTML =
+    '<span class="status-text">' + esc(text) + '</span>' +
+    '<span class="status-meta">자동 갱신 주기: ' + fmtMinutes(status.refresh_interval_seconds) + '</span>' +
+    '<button class="refresh-btn" id="refreshBtn"' + (status.is_refreshing ? ' disabled' : '') + '>지금 갱신</button>';
+  var btn = document.getElementById("refreshBtn");
+  if(btn){
+    btn.addEventListener("click", async function(){
+      btn.disabled = true;
+      try{ await fetch("/api/refresh", {method:"POST"}); }catch(e){}
+    });
+  }
+}
+
+function renderStats(){
+  var ok = state.reports.filter(function(r){return !r.error;});
+  var undervalued = ok.filter(function(r){return r.valuation && r.valuation.is_undervalued;});
+  var errors = state.reports.filter(function(r){return r.error;});
+  var el = document.getElementById("stats");
+  el.innerHTML =
+    '<div class="stat"><div class="stat-label">조회 종목</div><div class="stat-value tnum">' + state.reports.length + '</div></div>' +
+    '<div class="stat"><div class="stat-label">저평가 후보</div><div class="stat-value tnum good">' + undervalued.length + '</div></div>' +
+    '<div class="stat"><div class="stat-label">조회 실패</div><div class="stat-value tnum' + (errors.length? ' critical':'') + '">' + errors.length + '</div></div>';
+}
+
+function renderMarketNews(){
+  var box = document.getElementById("marketNewsBox");
+  if(!state.marketNews.length){ box.hidden = true; return; }
+  box.hidden = false;
+  document.getElementById("marketNewsCaption").textContent = "갱신 시각 기준 · " + fmtDate(state.generatedAt);
+  var list = document.getElementById("marketNewsList");
+  list.innerHTML = state.marketNews.slice(0,8).map(function(n){
+    return '<li><a href="'+esc(n.link)+'" target="_blank" rel="noopener">'+esc(n.title)+'</a> <span class="src">· '+esc(n.source)+'</span></li>';
+  }).join("");
+}
+
+function sortedFilteredReports(){
+  var q = state.search.trim().toUpperCase();
+  var rows = state.reports.filter(function(r){ return !r.error; });
+  if(q) rows = rows.filter(function(r){ return r.ticker.toUpperCase().indexOf(q) !== -1; });
+  if(state.onlyUndervalued) rows = rows.filter(function(r){ return r.valuation && r.valuation.is_undervalued; });
+
+  var key = state.sortKey, dir = state.sortDir === "asc" ? 1 : -1;
+  function val(r){
+    if(key === "ticker") return r.ticker;
+    if(key === "price") return r.valuation ? r.valuation.price : null;
+    if(key === "per") return r._per;
+    if(key === "pbr") return r._pbr;
+    if(key === "graham_number") return r.valuation ? r.valuation.graham_number : null;
+    if(key === "margin_of_safety") return r.valuation ? r.valuation.margin_of_safety : null;
+    if(key === "criteria") return r._criteriaRatio;
+    if(key === "score") return r._score;
+    return null;
+  }
+  rows.sort(function(a,b){
+    var va = val(a), vb = val(b);
+    var na = (va === null || va === undefined);
+    var nb = (vb === null || vb === undefined);
+    if(na && nb) return 0;
+    if(na) return 1;
+    if(nb) return -1;
+    if(typeof va === "string") return va.localeCompare(vb) * dir;
+    return (va - vb) * dir;
+  });
+  return rows;
+}
+
+function renderHead(){
+  var row = document.getElementById("headRow");
+  row.innerHTML = COLUMNS.map(function(c){
+    var sortKey = c.sortKey || c.key;
+    var sorted = state.sortKey === sortKey;
+    var arrow = sorted ? (state.sortDir === "asc" ? "↑" : "↓") : "";
+    return '<th class="'+(c.num?'num ':'')+(sorted?'sorted':'')+'" data-sort="'+sortKey+'">'+esc(c.label)+' <span class="arrow">'+arrow+'</span></th>';
+  }).join("") + '<th></th>';
+
+  Array.prototype.forEach.call(row.querySelectorAll("th[data-sort]"), function(th){
+    th.addEventListener("click", function(){
+      var k = th.getAttribute("data-sort");
+      if(state.sortKey === k){ state.sortDir = state.sortDir === "asc" ? "desc" : "asc"; }
+      else { state.sortKey = k; state.sortDir = "desc"; }
+      renderHead();
+      renderTable();
+    });
+  });
+}
+
+function mosBar(mos){
+  if(mos === null || mos === undefined) return '<span class="mos-label">—</span>';
+  var pct = Math.max(-50, Math.min(50, mos*100));
+  var w = Math.abs(pct);
+  var left = pct >= 0 ? 50 : 50 - w;
+  var cls = pct >= 0 ? "good" : "critical";
+  return '<div class="mos-cell">' +
+    '<div class="mos-track"><div class="mos-fill '+cls+'" style="left:'+left+'%; width:'+w+'%;"></div></div>' +
+    '<span class="mos-label tnum">'+fmtNum(mos*100,1,"%")+'</span></div>';
+}
+function criteriaDots(criteria){
+  criteria = criteria || [];
+  return '<div class="criteria-dots">' +
+    criteria.map(function(c){
+      var cls = c.passed === true ? "pass" : (c.passed === false ? "fail" : "na");
+      return '<span class="dot '+cls+'"></span>';
+    }).join("") + '</div>';
+}
+function detailRowHtml(r){
+  var v = r.valuation || {};
+  var t = r.trend || {};
+  var criteriaHtml = (r.graham && r.graham.criteria || []).map(function(c){
+    var mark = c.passed === true ? "✓" : (c.passed === false ? "✕" : "·");
+    var cls = c.passed === true ? "pass" : (c.passed === false ? "fail" : "na");
+    return '<li><span class="mark '+cls+'">'+mark+'</span><span><span>'+esc(c.label)+'</span><span class="cdetail">'+esc(c.detail)+'</span></span></li>';
+  }).join("");
+  var trendHtml = t.insufficient_data ?
+    '<p class="empty-note">데이터 부족 (확보 '+ (t.years_available||0) +'개년)</p>' :
+    '<div class="kv">' +
+      '<div class="row"><span class="k">확보 기간</span><span class="v">'+ (t.fiscal_year_range? t.fiscal_year_range[0]+"–"+t.fiscal_year_range[1] : "—") +' ('+t.years_available+'개년)</span></div>' +
+      '<div class="row"><span class="k">매출 CAGR</span><span class="v">'+ fmtNum(t.revenue_cagr!=null?t.revenue_cagr*100:null,1,"%") +'</span></div>' +
+      '<div class="row"><span class="k">순이익 CAGR</span><span class="v">'+ fmtNum(t.net_income_cagr!=null?t.net_income_cagr*100:null,1,"%") +'</span></div>' +
+      '<div class="row"><span class="k">EPS 성장률</span><span class="v">'+ fmtNum(t.eps_growth_pct,1,"%") +'</span></div>' +
+      '<div class="row"><span class="k">적자 연도</span><span class="v">'+ (t.loss_years||0) +'개</span></div>' +
+    '</div>';
+  var valuationHtml = '<div class="kv">' +
+    '<div class="row"><span class="k">EPS(사용값)</span><span class="v">'+fmtNum(v.eps_used,2)+'</span></div>' +
+    '<div class="row"><span class="k">추정 성장률</span><span class="v">'+fmtNum(v.growth_rate_pct_used,1,"%")+'</span></div>' +
+    '<div class="row"><span class="k">내재가치</span><span class="v">'+fmtNum(v.intrinsic_value,2)+'</span></div>' +
+    '<div class="row"><span class="k">그레이엄 넘버</span><span class="v">'+fmtNum(v.graham_number,2)+'</span></div>' +
+    '<div class="row"><span class="k">주가 &lt; 그레이엄 넘버</span><span class="v">'+ (v.price_below_graham_number===true?"예":(v.price_below_graham_number===false?"아니오":"—")) +'</span></div>' +
+  '</div>';
+  var newsHtml = (r.news && r.news.length) ?
+    '<ul class="news-list">' + r.news.slice(0,5).map(function(n){
+      return '<li><a href="'+esc(n.link)+'" target="_blank" rel="noopener">'+esc(n.title)+'</a> <span class="src">· '+esc(n.source)+'</span></li>';
+    }).join("") + '</ul>' :
+    '<p class="empty-note">이 종목에 대한 뉴스가 없습니다</p>';
+  return '<div class="detail-grid">' +
+    '<div class="detail-block"><h4>그레이엄 7원칙</h4><ul class="criteria-list">'+criteriaHtml+'</ul></div>' +
+    '<div class="detail-block"><h4>내재가치 계산</h4>'+valuationHtml+'</div>' +
+    '<div class="detail-block"><h4>재무 추세</h4>'+trendHtml+'</div>' +
+    '<div class="detail-block"><h4>관련 뉴스</h4>'+newsHtml+'</div>' +
+  '</div>';
+}
+
+function renderTable(){
+  var rows = sortedFilteredReports();
+  document.getElementById("resultCount").textContent = rows.length + "개 종목 표시";
+  var tbody = document.getElementById("tbody");
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="9"><p class="empty-note" style="padding:1.4rem 0;">'+
+      (state.reports.length ? "조건에 맞는 종목이 없습니다." : "아직 데이터가 없습니다. 첫 갱신을 기다려주세요.") +
+      '</p></td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(function(r){
+    var v = r.valuation || {};
+    var isOpen = state.openTicker === r.ticker;
+    var main =
+      '<tr class="row'+(isOpen?' is-open':'')+'" data-ticker="'+esc(r.ticker)+'">' +
+        '<td class="ticker-cell">'+esc(r.ticker)+'</td>' +
+        '<td class="num tnum mono">'+fmtNum(v.price,2)+'</td>' +
+        '<td class="num tnum mono">'+fmtNum(r._per,1)+'</td>' +
+        '<td class="num tnum mono">'+fmtNum(r._pbr,1)+'</td>' +
+        '<td class="num tnum mono">'+fmtNum(v.graham_number,2)+'</td>' +
+        '<td class="num">'+ mosBar(v.margin_of_safety) +'</td>' +
+        '<td>'+ criteriaDots(r.graham ? r.graham.criteria : []) +'</td>' +
+        '<td class="num tnum mono">'+ (r._score==null?"—":r._score.toFixed(1)) +'</td>' +
+        '<td><span class="badge '+badgeClass(r._category)+'">'+esc(r._category||"—")+'</span></td>' +
+      '</tr>';
+    var detail = '<tr class="detail-row" '+(isOpen?'':'hidden')+'><td colspan="9">'+ (isOpen ? detailRowHtml(r) : '') +'</td></tr>';
+    return main + detail;
+  }).join("");
+
+  Array.prototype.forEach.call(tbody.querySelectorAll("tr.row"), function(tr){
+    tr.addEventListener("click", function(){
+      var ticker = tr.getAttribute("data-ticker");
+      state.openTicker = state.openTicker === ticker ? null : ticker;
+      renderTable();
+    });
+  });
+}
+
+function renderErrors(){
+  var errors = state.reports.filter(function(r){return r.error;});
+  var box = document.getElementById("errorsBox");
+  if(!errors.length){ box.hidden = true; return; }
+  box.hidden = false;
+  box.querySelector("summary").textContent = "조회 실패 종목 ("+errors.length+")";
+  document.getElementById("errorsList").innerHTML = errors.map(function(r){
+    return '<li><span class="etick">'+esc(r.ticker)+'</span><span>'+esc(r.error)+'</span></li>';
+  }).join("");
+}
+
+function renderFooterMeta(){
+  document.getElementById("footerMeta").textContent = "표시 기준 생성 시각: " + fmtDate(state.generatedAt);
+}
+
+function renderAll(){
+  renderStats();
+  renderMarketNews();
+  renderHead();
+  renderTable();
+  renderErrors();
+  renderFooterMeta();
+}
+
+document.getElementById("searchInput").addEventListener("input", function(e){
+  state.search = e.target.value;
+  renderTable();
+});
+document.getElementById("undervaluedChip").addEventListener("click", function(){
+  state.onlyUndervalued = !state.onlyUndervalued;
+  this.setAttribute("aria-pressed", state.onlyUndervalued ? "true" : "false");
+  renderTable();
+});
+
+renderHead();
+renderTable();
+pollStatus();
+fetchData();
+setInterval(pollStatus, 5000);
+</script>
+</body>
+</html>
