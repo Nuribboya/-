@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+sympy
+jinja2
+python-multipart
+pytest
+httpx

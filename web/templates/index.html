@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>수학 채점 &amp; 해설 시스템</title>
+<style>
+  body {
+    font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    max-width: 640px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #222;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  label { display: block; font-weight: bold; margin-top: 12px; }
+  input[type=text] {
+    width: 100%;
+    padding: 8px;
+    font-size: 1rem;
+    box-sizing: border-box;
+    margin-top: 4px;
+  }
+  button {
+    margin-top: 16px;
+    padding: 8px 20px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  .result { margin-top: 24px; padding: 16px; border-radius: 8px; }
+  .correct { background: #e6f6e6; border: 1px solid #2e7d32; }
+  .incorrect { background: #fdecea; border: 1px solid #c62828; }
+  .unknown { background: #f0f0f0; border: 1px solid #999; }
+  ol { padding-left: 20px; }
+  .error { color: #c62828; }
+</style>
+</head>
+<body>
+<h1>수학 채점 &amp; 해설 시스템</h1>
+<p>산술식, 일차/이차방정식, 식 정리 문제를 입력하면 채점하고 풀이 과정을 보여줍니다.</p>
+
+<form method="post" action="/grade">
+  <label for="problem">문제</label>
+  <input type="text" id="problem" name="problem" placeholder="예: 2x + 3 = 11" value="{{ problem }}" required>
+
+  <label for="student_answer">학생 답안</label>
+  <input type="text" id="student_answer" name="student_answer" placeholder="예: x = 4" value="{{ student_answer }}" required>
+
+  <button type="submit">채점하기</button>
+</form>
+
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+
+{% if result %}
+<div class="result {{ 'correct' if result.is_correct == True else ('incorrect' if result.is_correct == False else 'unknown') }}">
+  <p>
+    <strong>
+    {% if result.is_correct == True %}정답입니다.
+    {% elif result.is_correct == False %}오답입니다.
+    {% else %}채점 불가{% endif %}
+    </strong>
+  </p>
+  <p>정답: {{ result.correct_answer }}</p>
+  {% if result.note %}<p>{{ result.note }}</p>{% endif %}
+  <h3>풀이 과정</h3>
+  <ol>
+  {% for step in result.steps %}
+    <li>{{ step }}</li>
+  {% endfor %}
+  </ol>
+</div>
+{% endif %}
+</body>
+</html>
