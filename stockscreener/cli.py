@@ -75,6 +75,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _analyze_with_progress(screener: Screener, tickers: list[str]) -> list:
+    """screener.analyze()와 동일하지만, 종목이 많을 때 진행 상황을 stderr에 표시한다.
+
+    quiet 모드에서도 진행 중임을 알 수 있도록 종목 하나가 끝날 때마다 한 줄을
+    같은 자리에 덮어써서 보여준다 (표준 출력/JSON 저장 내용에는 영향 없음).
+    """
+    total = len(tickers)
+    show_progress = total > 10 and sys.stderr.isatty()
+    reports = []
+    for i, ticker in enumerate(tickers, start=1):
+        reports.append(screener.analyze_ticker(ticker))
+        if show_progress:
+            print(f"\r진행 중: {i}/{total} 종목 처리됨 ({i/total*100:.0f}%) — 현재: {ticker:<10}",
+                  end="", file=sys.stderr, flush=True)
+    if show_progress:
+        print(file=sys.stderr)
+    return reports
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     parser = build_parser()
@@ -103,7 +122,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(report_fmt.format_market_news(market_news))
     print()
 
-    reports = screener.analyze(tickers)
+    reports = _analyze_with_progress(screener, tickers)
 
     if not args.quiet:
         for r in reports:
