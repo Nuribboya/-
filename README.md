@@ -103,3 +103,177 @@ pytest
 - `mathgrader/parsing.py` — 수식/답안 문자열 파싱, 답안 비교
 - `mathgrader/grader.py` — 분류 → 풀이 → 채점을 총괄하는 진입점
 - `web/` — FastAPI 기반 웹 UI 및 API
+
+---
+
+# 그레이엄 지표 기반 주식 스크리너 (`stockscreener/`)
+
+벤저민 그레이엄의 방어적 투자자 기준과 내재가치 공식을 이용해, **애널리스트의
+투자의견·목표주가 같은 주관적 지표를 전혀 사용하지 않고** 재무제표 절댓값만으로
+저평가 종목을 찾아주는 프로그램입니다. 종목별 최근 5~10개년 재무제표 추세,
+그레이엄의 7가지 정량 기준 + 부채비율/잉여현금흐름 강화 필터, 그레이엄
+넘버·내재가치·안전마진을 계산하고, 증시에 영향을 주는 뉴스를 호출할 때마다
+실시간으로 새로 가져옵니다.
+
+## 주요 기능
+
+- **그레이엄 지표**: 그레이엄 넘버(`sqrt(22.5 x EPS x BVPS)`), 유동비율,
+  장기부채 대비 순운전자본, PER/PBR, EPS 성장률, 이익 안정성, 배당 기록 등
+  `The Intelligent Investor`의 방어적 투자자 7원칙을 자동 평가합니다.
+  데이터가 부족한 항목은 "실패"가 아니라 "판단 불가(N/A)"로 별도 표시합니다.
+- **강화 필터 (부채비율/잉여현금흐름)**: 총부채가 자기자본의 100%(기본값,
+  `--max-debt-to-equity`로 조정 가능)를 넘으면 아무리 저평가로 보여도
+  "저평가"로 표시하지 않습니다. 잉여현금흐름(FCF, 영업현금흐름 - 설비투자)도
+  최근 연도 값과 추세(CAGR)를 함께 보여줍니다.
+- **5~10개년 재무제표 분석**: 매출/순이익/FCF CAGR, EPS 성장률(시작·종료
+  구간 3개년 평균 비교), 적자 연도 수를 계산해 추세의 안정성을 판단합니다.
+- **절댓값 기반 내재가치 계산**: 그레이엄의 1962년 개정 공식
+  `V = EPS x (8.5 + 2g) x 4.4 / Y` (g=과거 실적으로 추정한 성장률, Y=채권
+  수익률)로 내재가치와 안전마진을 계산하며, 애널리스트 추정치는 입력값으로
+  사용하지 않습니다.
+- **실시간 뉴스**: 구글 뉴스 검색 RSS를 이용해 증시 전반에 영향을 주는 뉴스와
+  종목별 뉴스를 실행할 때마다 새로 조회합니다(캐시 없음). 개별 피드가
+  실패해도 나머지 결과에는 영향을 주지 않습니다.
+- **저평가 종목 목록**: 안전마진(내재가치 대비), 그레이엄 넘버 대비 주가,
+  부채비율 세 가지 절댓값 신호가 모두 기준을 충족하는 종목만 안전마진이
+  높은 순으로 정렬해 보여줍니다.
+- **오류 격리**: 종목 하나의 데이터 조회 실패(상장폐지, 네트워크 오류 등)가
+  전체 스크리닝을 중단시키지 않습니다. 실패한 종목은 사유와 함께 목록에서
+  제외되고 나머지 종목 분석은 계속 진행됩니다.
+
+## 사용법
+
+```bash
+pip install -r requirements.txt
+
+# 기본 예시 종목군으로 실행
+python -m stockscreener.cli
+
+# 원하는 종목 지정 (한국 종목은 .KS/.KQ 접미사 사용)
+python -m stockscreener.cli --tickers AAPL,MSFT,005930.KS,000660.KS
+
+# 파일에서 티커 목록 읽기 (한 줄에 하나씩, #으로 주석 처리 가능)
+python -m stockscreener.cli --tickers-file watchlist.txt
+
+# S&P 500 전체(약 500종목, 레포에 번들된 스냅샷) 스크리닝 — 종목이 많으므로
+# 종목별 뉴스 조회는 꺼서 속도를 높이는 것을 권장
+python -m stockscreener.cli --sp500 --no-ticker-news --quiet --json sp500_result.json
+
+# 결과를 JSON으로도 저장
+python -m stockscreener.cli --tickers AAPL --json result.json
+
+# 안전마진 기준을 더 보수적으로(예: 40%) 조정
+python -m stockscreener.cli --min-margin-of-safety 0.4
+
+# 부채비율 필터를 더 강하게(부채가 자기자본의 50% 이하인 종목만 저평가로 인정)
+python -m stockscreener.cli --max-debt-to-equity 0.5
+```
+
+라이브러리로 직접 사용할 수도 있습니다.
+
+```python
+from stockscreener.screener import Screener
+
+screener = Screener()
+reports = screener.analyze(["AAPL", "MSFT", "005930.KS"])
+undervalued = screener.undervalued(reports)
+market_news = screener.get_market_news()
+```
+
+## S&P 500 전체 스크리닝
+
+`stockscreener/data/universe/sp500.txt` 에 S&P 500 구성종목 티커 스냅샷을
+번들해두었다(`stockscreener.universe.load_sp500_tickers()`로 로드). `--sp500`
+옵션으로 500종목 전체를 한 번에 스크리닝할 수 있다. 지수 구성종목은 주기적으로
+바뀌므로, 최신 목록이 필요하면 해당 파일을 갱신하면 된다. 500종목 조회는
+시간이 걸리므로(각 종목마다 시세+재무제표+선택적으로 뉴스 조회) `--no-ticker-news`,
+`--quiet` 옵션과 함께 쓰는 것을 권장한다.
+
+## 웹 대시보드 (자동 갱신)
+
+CLI로 매번 실행 → JSON 저장 → 업로드하는 대신, 로컬에서 계속 실행해두면
+백그라운드에서 주기적으로 알아서 다시 계산해 화면이 자동 갱신되는 웹 대시보드도
+있습니다.
+
+```bash
+uvicorn stockscreener.web.main:app --reload
+```
+
+브라우저에서 `http://localhost:8000` 을 열어두면 됩니다. 서버가 켜져 있는 동안
+백그라운드에서 주기적으로 시세·재무제표·뉴스를 다시 가져와 재계산하고, 페이지는
+그 결과를 주기적으로 폴링해서 자동으로 화면을 갱신합니다 (브라우저가 외부
+사이트에 직접 접속하는 게 아니라, 이 로컬 서버가 대신 가져와 줍니다). "지금
+갱신" 버튼으로 즉시 재계산을 요청할 수도 있습니다.
+
+환경변수로 동작을 조정할 수 있습니다.
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `STOCKSCREENER_TICKERS` | (없음) | 쉼표로 구분한 티커 목록. 지정하면 최우선 적용 |
+| `STOCKSCREENER_SP500` | (없음) | `1`로 설정하면 번들된 S&P 500 전체(약 500종목) 사용 |
+| `STOCKSCREENER_REFRESH_SECONDS` | `1800` (30분) | 자동 갱신 주기(초). `--sp500` 사용 시 한 주기가 오래 걸리므로 `7200` 이상 권장 |
+| `STOCKSCREENER_NO_TICKER_NEWS` | `1` (건너뜀) | `0`으로 설정하면 종목별 뉴스도 매 주기마다 조회 (느려짐) |
+
+예시 (S&P 500 전체를 2시간마다 자동 갱신):
+
+```bash
+STOCKSCREENER_SP500=1 STOCKSCREENER_REFRESH_SECONDS=7200 uvicorn stockscreener.web.main:app
+```
+
+### 윈도우에서 터미널 명령어 없이 실행하기
+
+매번 터미널을 열어 명령어를 치기 번거롭다면, 레포 최상위에 있는 실행 파일을
+더블클릭하면 됩니다.
+
+- **`run_web.bat`** — 더블클릭하면 터미널 창이 뜬 채로 S&P 500 전체를
+  2시간 주기로 갱신하는 서버가 시작됩니다. 끄려면 그 창에서 `Ctrl+C`.
+- **`run_web_quick.bat`** — 기본 종목 10개, 30분 주기로 빠르게 테스트할 때.
+- **`run_web_hidden.vbs`** — `run_web.bat`을 창(터미널)이 아예 안 보이는
+  완전 백그라운드로 실행합니다. 창이 없으므로 `Ctrl+C`로 끌 수 없고,
+  작업관리자에서 `python.exe` 프로세스를 종료해야 멈춥니다.
+
+**컴퓨터를 켤 때마다 자동으로 시작**되게 하려면 (완전히 손 안 대도 되는 방식):
+
+1. 윈도우 검색에서 "작업 스케줄러" 실행
+2. "기본 작업 만들기" → 이름 아무거나 입력
+3. 트리거: "로그온할 때"
+4. 동작: "프로그램 시작" → 프로그램/스크립트에 `wscript.exe`,
+   인수에 `"C:\Users\사용자명\stock-analyzer\run_web_hidden.vbs"` 입력
+   (실제 레포 경로로 바꿔서)
+5. 마침
+
+이후로는 컴퓨터를 켜면 로그인과 동시에 서버가 조용히 백그라운드에서 켜집니다.
+
+## 데이터 소스와 한계
+
+- 시세/재무제표는 기본적으로 야후 파이낸스(`yfinance`, 무료, API 키 불필요)를
+  사용합니다. 야후 파이낸스 무료 API는 연간 재무제표를 보통 **최근 4~5개년치**
+  까지만 제공합니다. 10개년 전체 이력이 꼭 필요하다면
+  `stockscreener/data/provider.py`의 `DataProvider` 프로토콜에 맞춰 유료
+  데이터 공급자(예: Financial Modeling Prep)를 구현해
+  `Screener(data_provider=...)` 에 주입하면 됩니다.
+- 뉴스는 구글 뉴스 검색 RSS(`news.google.com/rss/search`)를 사용합니다.
+  API 키가 필요 없고 검색어 기반이라 특정 언론사 RSS가 개편되어도 계속
+  동작합니다.
+- **이 프로그램은 투자 자문이 아니며, 어떤 매수·매도도 권유하지 않습니다.**
+  모든 지표는 과거 재무제표 수치로 계산한 참고용 정량 지표입니다.
+
+## 구조
+
+- `stockscreener/models.py` — 재무제표/시세/뉴스/분석 결과 데이터 모델
+- `stockscreener/data/` — 시세·재무제표 공급자 (`yfinance_provider.py` 기본
+  구현, `provider.py`에 교체 가능한 인터페이스 정의)
+- `stockscreener/news/rss_provider.py` — 실시간 뉴스 조회 (캐시 없음, 피드별
+  오류 격리)
+- `stockscreener/analysis/graham.py` — 그레이엄 넘버, 방어적 투자자 7원칙 +
+  부채비율/잉여현금흐름 강화 필터
+- `stockscreener/analysis/financial_trend.py` — 5~10개년 매출/순이익/EPS/FCF 추세
+- `stockscreener/analysis/valuation.py` — 내재가치, 안전마진, 저평가 판정
+- `stockscreener/screener.py` — 데이터 조회 → 분석 → 뉴스를 종목별로 조립하고
+  오류를 격리하는 오케스트레이터
+- `stockscreener/report.py` — 콘솔 출력 및 JSON 직렬화
+- `stockscreener/universe.py`, `stockscreener/data/universe/sp500.txt` — S&P 500
+  종목 유니버스 스냅샷과 로더
+- `stockscreener/cli.py` — CLI 진입점 (1회 실행 후 JSON 저장)
+- `stockscreener/web/main.py` — 백그라운드에서 주기적으로 재계산하는 FastAPI
+  웹 대시보드 (자동 갱신)
