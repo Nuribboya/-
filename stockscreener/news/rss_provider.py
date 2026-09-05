@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.request
 from datetime import datetime, timezone
 from time import mktime
 from typing import Iterable, Optional
@@ -27,17 +28,34 @@ DEFAULT_MARKET_QUERIES = [
     "inflation economy",
 ]
 
+# feedparser.parse(url)에 URL을 직접 넘기면 내부 urllib에 타임아웃이 걸리지 않아
+# 네트워크가 응답 없이 멈출 경우 프로그램 전체가 무한정 멈출 수 있다. 직접
+# urlopen으로 받아온 바이트를 넘겨 반드시 타임아웃이 걸리게 한다.
+FETCH_TIMEOUT_SECONDS = 10.0
+
 
 def _google_news_rss_url(query: str, lang: str, country: str) -> str:
     ceid = f"{country}:{lang.split('-')[0]}"
     return f"https://news.google.com/rss/search?q={quote(query)}&hl={lang}&gl={country}&ceid={ceid}"
 
 
+def _fetch_bytes(url: str, timeout: float = FETCH_TIMEOUT_SECONDS) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        return resp.read()
+
+
 def _parse_entries(feed_url: str, source_label: str, limit: int) -> list[NewsItem]:
     try:
-        parsed = feedparser.parse(feed_url)
+        raw = _fetch_bytes(feed_url)
     except Exception as exc:
         logger.warning("뉴스 피드 조회 실패 (%s): %s", feed_url, exc)
+        return []
+
+    try:
+        parsed = feedparser.parse(raw)
+    except Exception as exc:
+        logger.warning("뉴스 피드 파싱 실패 (%s): %s", feed_url, exc)
         return []
 
     if getattr(parsed, "bozo", False) and not parsed.entries:

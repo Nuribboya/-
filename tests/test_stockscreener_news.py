@@ -20,11 +20,17 @@ class _FakeParsed:
         self.bozo_exception = bozo_exception
 
 
+def _stub_fetch(monkeypatch):
+    """네트워크를 타지 않도록 _fetch_bytes를 더미 바이트로 대체한다."""
+    monkeypatch.setattr(rss_mod, "_fetch_bytes", lambda url, timeout=10.0: b"<rss></rss>")
+
+
 def test_get_market_news_aggregates_and_dedupes(monkeypatch):
+    _stub_fetch(monkeypatch)
     t1 = time.gmtime(1700000000)
     t2 = time.gmtime(1700003600)
 
-    def fake_parse(url):
+    def fake_parse(raw):
         return _FakeParsed(
             [
                 _FakeEntry("기사 A", "https://example.com/a", t1),
@@ -44,12 +50,13 @@ def test_get_market_news_aggregates_and_dedupes(monkeypatch):
 
 
 def test_one_broken_feed_does_not_break_others(monkeypatch):
+    _stub_fetch(monkeypatch)
     calls = {"n": 0}
 
-    def fake_parse(url):
+    def fake_parse(raw):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise RuntimeError("network error")
+            raise RuntimeError("parse error")
         return _FakeParsed([_FakeEntry("OK 기사", "https://example.com/ok")])
 
     monkeypatch.setattr(rss_mod.feedparser, "parse", fake_parse)
@@ -61,8 +68,32 @@ def test_one_broken_feed_does_not_break_others(monkeypatch):
     assert news[0].title == "OK 기사"
 
 
+def test_fetch_failure_isolated_from_other_feeds(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_fetch(url, timeout=10.0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("network timed out")
+        return b"<rss></rss>"
+
+    monkeypatch.setattr(rss_mod, "_fetch_bytes", fake_fetch)
+    monkeypatch.setattr(
+        rss_mod.feedparser, "parse",
+        lambda raw: _FakeParsed([_FakeEntry("OK 기사", "https://example.com/ok")]),
+    )
+
+    provider = RSSNewsProvider(market_queries=["broken", "ok"])
+    news = provider.get_market_news()
+
+    assert len(news) == 1
+    assert news[0].title == "OK 기사"
+
+
 def test_bozo_with_no_entries_returns_empty(monkeypatch):
-    def fake_parse(url):
+    _stub_fetch(monkeypatch)
+
+    def fake_parse(raw):
         return _FakeParsed([], bozo=True, bozo_exception="malformed xml")
 
     monkeypatch.setattr(rss_mod.feedparser, "parse", fake_parse)
@@ -74,14 +105,25 @@ def test_bozo_with_no_entries_returns_empty(monkeypatch):
 def test_get_ticker_news_uses_company_name_in_query(monkeypatch):
     captured_urls = []
 
-    def fake_parse(url):
+    def fake_fetch(url, timeout=10.0):
         captured_urls.append(url)
-        return _FakeParsed([_FakeEntry("삼성전자 뉴스", "https://example.com/samsung")])
+        return b"<rss></rss>"
 
-    monkeypatch.setattr(rss_mod.feedparser, "parse", fake_parse)
+    monkeypatch.setattr(rss_mod, "_fetch_bytes", fake_fetch)
+    monkeypatch.setattr(
+        rss_mod.feedparser, "parse",
+        lambda raw: _FakeParsed([_FakeEntry("삼성전자 뉴스", "https://example.com/samsung")]),
+    )
 
     provider = RSSNewsProvider()
     news = provider.get_ticker_news("005930.KS", company_name="Samsung Electronics")
 
     assert len(news) == 1
     assert "Samsung" in captured_urls[0] or "Samsung%20Electronics" in captured_urls[0]
+
+
+def test_fetch_bytes_passes_timeout_so_it_can_never_hang_forever():
+    import inspect
+    sig = inspect.signature(rss_mod._fetch_bytes)
+    assert "timeout" in sig.parameters
+    assert sig.parameters["timeout"].default == rss_mod.FETCH_TIMEOUT_SECONDS
