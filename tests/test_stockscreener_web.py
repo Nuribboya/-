@@ -51,6 +51,7 @@ def _reset_state():
                 "is_refreshing": False,
                 "last_error": None,
                 "ticker_count": 0,
+                "processed_count": 0,
             }
         )
 
@@ -90,6 +91,7 @@ def test_run_cycle_populates_state_on_success(monkeypatch):
     assert status["is_refreshing"] is False
     assert status["last_error"] is None
     assert status["ticker_count"] == 2
+    assert status["processed_count"] == 2
     assert status["last_refreshed_at"] is not None
 
     data = client.get("/api/data").json()

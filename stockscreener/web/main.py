@@ -72,6 +72,7 @@ _state: dict = {
     "is_refreshing": False,
     "last_error": None,
     "ticker_count": 0,
+    "processed_count": 0,
 }
 
 
@@ -80,11 +81,20 @@ def _run_cycle() -> None:
     with _state_lock:
         _state["is_refreshing"] = True
         _state["ticker_count"] = len(tickers)
+        _state["processed_count"] = 0
 
     try:
         screener = Screener(fetch_ticker_news=FETCH_TICKER_NEWS)
         market_news = screener.get_market_news()
-        reports = screener.analyze(tickers)
+
+        # 종목이 많으면 한 번에 끝날 때까지 진행 상황이 전혀 안 보여 멈춘 것처럼
+        # 보이므로, 한 종목씩 처리하며 진행 카운트를 갱신한다.
+        reports = []
+        for ticker in tickers:
+            reports.append(screener.analyze_ticker(ticker))
+            with _state_lock:
+                _state["processed_count"] += 1
+
         payload = json.loads(report_fmt.to_json(reports, market_news))
         with _state_lock:
             _state["payload"] = payload
@@ -127,6 +137,7 @@ async def api_status() -> dict:
             "last_refreshed_at": _state["last_refreshed_at"],
             "last_error": _state["last_error"],
             "ticker_count": _state["ticker_count"],
+            "processed_count": _state["processed_count"],
             "refresh_interval_seconds": REFRESH_INTERVAL_SECONDS,
             "server_time": datetime.now(timezone.utc).isoformat(),
         }

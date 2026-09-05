@@ -335,7 +335,10 @@ function renderStatusBar(status){
   el.className = "statusbar" + (status.is_refreshing ? " is-refreshing" : "") + (status.last_error ? " is-error" : "");
   var text;
   if(status.is_refreshing){
-    text = "종목 " + (status.ticker_count||0) + "개 갱신 중… (완료되면 자동으로 화면이 바뀝니다)";
+    var total = status.ticker_count||0;
+    var done = status.processed_count||0;
+    var pct = total ? Math.round(done/total*100) : 0;
+    text = "갱신 중: " + done + "/" + total + "종목 (" + pct + "%) — 완료되면 자동으로 화면이 바뀝니다";
   } else if(status.last_refreshed_at){
     text = "마지막 갱신: " + fmtDate(status.last_refreshed_at) + " · 종목 " + (status.ticker_count||0) + "개";
   } else {
