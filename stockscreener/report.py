@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
+from stockscreener.analysis.scoring import composite_score, score_category
 from stockscreener.models import NewsItem, StockReport
 
 
@@ -103,6 +104,18 @@ def format_undervalued_list(reports: Sequence[StockReport]) -> str:
     return "\n".join(lines)
 
 
+def _report_to_dict(report: StockReport) -> dict:
+    data = asdict(report)
+    if report.ok:
+        score = composite_score(report.valuation, report.graham)
+        data["composite_score"] = score
+        data["score_category"] = score_category(score)
+    else:
+        data["composite_score"] = None
+        data["score_category"] = None
+    return data
+
+
 def to_json(reports: Sequence[StockReport], market_news: Sequence[NewsItem]) -> str:
     def default(obj):
         if isinstance(obj, datetime):
@@ -111,7 +124,7 @@ def to_json(reports: Sequence[StockReport], market_news: Sequence[NewsItem]) -> 
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "reports": [asdict(r) for r in reports],
+        "reports": [_report_to_dict(r) for r in reports],
         "market_news": [asdict(n) for n in market_news],
     }
     return json.dumps(payload, default=default, ensure_ascii=False, indent=2)
