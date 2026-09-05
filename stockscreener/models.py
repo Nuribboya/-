@@ -24,6 +24,8 @@ class YearlyFinancials:
     total_liabilities: Optional[float] = None
     long_term_debt: Optional[float] = None
     dividend_per_share: Optional[float] = None
+    total_equity: Optional[float] = None
+    free_cash_flow: Optional[float] = None
 
     @property
     def working_capital(self) -> Optional[float]:
@@ -38,6 +40,13 @@ class YearlyFinancials:
         if self.total_current_assets is None:
             return None
         return self.total_current_assets / self.total_current_liabilities
+
+    @property
+    def debt_to_equity(self) -> Optional[float]:
+        """총부채(total_liabilities) / 자기자본(total_equity)."""
+        if not self.total_equity or self.total_liabilities is None:
+            return None
+        return self.total_liabilities / self.total_equity
 
 
 @dataclass(frozen=True)
@@ -99,6 +108,8 @@ class FinancialTrend:
     loss_years: int
     is_stable: bool
     insufficient_data: bool
+    latest_free_cash_flow: Optional[float] = None
+    fcf_cagr: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +125,8 @@ class ValuationResult:
     margin_of_safety: Optional[float]
     price_below_graham_number: Optional[bool]
     is_undervalued: bool
+    debt_to_equity: Optional[float] = None
+    debt_to_equity_ok: Optional[bool] = None
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ from typing import Optional, Sequence
 
 from stockscreener import config
 from stockscreener.analysis.financial_trend import analyze_financial_trend
-from stockscreener.analysis.graham import evaluate_graham_criteria
+from stockscreener.analysis.graham import MAX_DEBT_TO_EQUITY, evaluate_graham_criteria
 from stockscreener.analysis.valuation import evaluate_valuation
 from stockscreener.data.provider import DataProvider, DataUnavailableError
 from stockscreener.data.yfinance_provider import YFinanceProvider
@@ -32,6 +32,7 @@ class Screener:
         max_financial_years: int = config.MAX_FINANCIAL_YEARS,
         aaa_bond_yield_pct: float = config.DEFAULT_AAA_BOND_YIELD_PCT,
         min_margin_of_safety: float = config.DEFAULT_MIN_MARGIN_OF_SAFETY,
+        max_debt_to_equity: float = MAX_DEBT_TO_EQUITY,
         news_per_ticker: int = config.DEFAULT_NEWS_PER_TICKER,
         fetch_ticker_news: bool = True,
     ):
@@ -40,6 +41,7 @@ class Screener:
         self.max_financial_years = max_financial_years
         self.aaa_bond_yield_pct = aaa_bond_yield_pct
         self.min_margin_of_safety = min_margin_of_safety
+        self.max_debt_to_equity = max_debt_to_equity
         self.news_per_ticker = news_per_ticker
         self.fetch_ticker_news = fetch_ticker_news
 
@@ -71,6 +73,7 @@ class Screener:
         latest = years[-1] if years else None
         eps = latest.eps if latest else None
         bvps = latest.book_value_per_share if latest else None
+        debt_to_equity = latest.debt_to_equity if latest else None
         valuation = evaluate_valuation(
             ticker=ticker,
             price=price_snapshot.price,
@@ -79,6 +82,8 @@ class Screener:
             trend=trend,
             aaa_bond_yield_pct=self.aaa_bond_yield_pct,
             min_margin_of_safety=self.min_margin_of_safety,
+            debt_to_equity=debt_to_equity,
+            max_debt_to_equity=self.max_debt_to_equity,
         )
 
         news: tuple = ()

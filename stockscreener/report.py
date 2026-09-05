@@ -40,6 +40,12 @@ def format_stock_report(report: StockReport) -> str:
                     t.loss_years,
                 )
             )
+        lines.append(
+            "  잉여현금흐름(FCF): 최근연도 {} (CAGR {})".format(
+                _fmt(t.latest_free_cash_flow),
+                _fmt(t.fcf_cagr * 100 if t.fcf_cagr is not None else None, 1, "%"),
+            )
+        )
 
     if report.graham:
         g = report.graham
@@ -54,12 +60,13 @@ def format_stock_report(report: StockReport) -> str:
     if report.valuation:
         v = report.valuation
         lines.append(
-            "  내재가치: {} (추정 성장률 {}), 안전마진: {}, 저평가 여부: {}".format(
+            "  내재가치: {} (추정 성장률 {}), 안전마진: {}, 부채비율: {}, 저평가 여부: {}".format(
                 _fmt(v.intrinsic_value),
                 _fmt(v.growth_rate_pct_used, 1, "%"),
                 _fmt(
                     v.margin_of_safety * 100 if v.margin_of_safety is not None else None, 1, "%"
                 ),
+                _fmt(v.debt_to_equity * 100 if v.debt_to_equity is not None else None, 1, "%"),
                 "예" if v.is_undervalued else "아니오",
             )
         )
@@ -91,13 +98,14 @@ def format_undervalued_list(reports: Sequence[StockReport]) -> str:
     for r in reports:
         v = r.valuation
         lines.append(
-            "  - {}: 주가 {}, 내재가치 {}, 안전마진 {}, 그레이엄 넘버 {}".format(
+            "  - {}: 주가 {}, 내재가치 {}, 안전마진 {}, 부채비율 {}, 그레이엄 넘버 {}".format(
                 r.ticker,
                 _fmt(v.price),
                 _fmt(v.intrinsic_value),
                 _fmt(
                     v.margin_of_safety * 100 if v.margin_of_safety is not None else None, 1, "%"
                 ),
+                _fmt(v.debt_to_equity * 100 if v.debt_to_equity is not None else None, 1, "%"),
                 _fmt(v.graham_number),
             )
         )

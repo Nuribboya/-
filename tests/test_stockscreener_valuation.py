@@ -45,19 +45,21 @@ def _trend(net_income_cagr=None, revenue_cagr=None):
     )
 
 
-def test_evaluate_valuation_undervalued_requires_both_signals():
+def test_evaluate_valuation_undervalued_requires_all_signals():
     trend = _trend(net_income_cagr=0.05)
-    # 주가가 매우 낮아 안전마진과 그레이엄 넘버 두 조건을 모두 충족하는 경우
+    # 주가가 매우 낮아 안전마진/그레이엄 넘버를 충족하고, 부채비율도 낮은 경우
     result = evaluate_valuation(
         ticker="TEST",
         price=5.0,
         eps=2.0,
         book_value_per_share=10.0,
         trend=trend,
+        debt_to_equity=0.5,
     )
     assert result.graham_number is not None
     assert result.price_below_graham_number is True
     assert result.margin_of_safety is not None
+    assert result.debt_to_equity_ok is True
     assert result.is_undervalued is True
 
 
@@ -69,7 +71,53 @@ def test_evaluate_valuation_not_undervalued_when_price_high():
         eps=2.0,
         book_value_per_share=10.0,
         trend=trend,
+        debt_to_equity=0.5,
     )
+    assert result.is_undervalued is False
+
+
+def test_evaluate_valuation_blocked_when_debt_to_equity_too_high():
+    trend = _trend(net_income_cagr=0.05)
+    # 안전마진/그레이엄 넘버는 통과하지만 부채비율이 기준(기본 1.0)을 초과
+    result = evaluate_valuation(
+        ticker="TEST",
+        price=5.0,
+        eps=2.0,
+        book_value_per_share=10.0,
+        trend=trend,
+        debt_to_equity=2.5,
+    )
+    assert result.debt_to_equity_ok is False
+    assert result.is_undervalued is False
+
+
+def test_evaluate_valuation_blocked_when_debt_to_equity_unknown():
+    trend = _trend(net_income_cagr=0.05)
+    # 부채비율을 확인할 수 없으면(None) 성급히 저평가로 판정하지 않는다
+    result = evaluate_valuation(
+        ticker="TEST",
+        price=5.0,
+        eps=2.0,
+        book_value_per_share=10.0,
+        trend=trend,
+        debt_to_equity=None,
+    )
+    assert result.debt_to_equity_ok is None
+    assert result.is_undervalued is False
+
+
+def test_evaluate_valuation_custom_max_debt_to_equity_threshold():
+    trend = _trend(net_income_cagr=0.05)
+    result = evaluate_valuation(
+        ticker="TEST",
+        price=5.0,
+        eps=2.0,
+        book_value_per_share=10.0,
+        trend=trend,
+        debt_to_equity=0.4,
+        max_debt_to_equity=0.3,
+    )
+    assert result.debt_to_equity_ok is False
     assert result.is_undervalued is False
 
 

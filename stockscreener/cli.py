@@ -14,6 +14,7 @@ from typing import Optional
 
 from stockscreener import config
 from stockscreener import report as report_fmt
+from stockscreener.analysis.graham import MAX_DEBT_TO_EQUITY
 from stockscreener.screener import Screener
 from stockscreener.universe import load_sp500_tickers
 
@@ -61,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=config.DEFAULT_AAA_BOND_YIELD_PCT,
         help="내재가치 계산에 쓸 AAA 회사채 수익률(%%) (기본 4.4)",
+    )
+    parser.add_argument(
+        "--max-debt-to-equity",
+        type=float,
+        default=MAX_DEBT_TO_EQUITY,
+        help="저평가 판정에 허용할 최대 부채비율(총부채/자기자본) (기본 1.0 = 100%%, 이보다 부채가 많으면 아무리 싸도 저평가로 표시하지 않음)",
     )
     parser.add_argument("--no-news", action="store_true", help="시장 뉴스+종목별 뉴스 조회를 모두 건너뛴다")
     parser.add_argument(
@@ -115,6 +122,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_financial_years=args.years,
         aaa_bond_yield_pct=args.bond_yield,
         min_margin_of_safety=args.min_margin_of_safety,
+        max_debt_to_equity=args.max_debt_to_equity,
         fetch_ticker_news=not (args.no_news or args.no_ticker_news),
     )
 

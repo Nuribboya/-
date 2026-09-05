@@ -159,7 +159,7 @@ footer p{margin:.3rem 0;}
   <h1>그레이엄 밸류 스크리너</h1>
   <p class="subtitle">
     애널리스트 의견이나 목표주가는 쓰지 않습니다. 재무제표에서 뽑은 안전마진,
-    그레이엄 넘버, 방어적 투자자 7원칙만으로 저평가 여부를 판단합니다.
+    그레이엄 넘버, 방어적 투자자 7원칙 + 부채비율/잉여현금흐름 강화 필터로 저평가 여부를 판단합니다.
     이 서버가 백그라운드에서 주기적으로 다시 계산합니다.
   </p>
   <hr class="masthead-rule">
@@ -180,7 +180,7 @@ footer p{margin:.3rem 0;}
     <span class="spacer"></span>
     <span class="result-count" id="resultCount"></span>
   </div>
-  <p class="score-info">점수 = 안전마진 60% + 그레이엄 7원칙 충족비율 40% (참고용 보조지표 · 최종 저평가 판정은 안전마진과 그레이엄 넘버 두 조건이 모두 충족될 때만 표시됩니다)</p>
+  <p class="score-info">점수 = 안전마진 60% + 그레이엄 기준 충족비율 40% (참고용 보조지표 · 최종 저평가 판정은 안전마진과 그레이엄 넘버 두 조건이 모두 충족될 때만 표시됩니다)</p>
 
   <div class="table-scroll">
     <table>
@@ -212,7 +212,7 @@ var COLUMNS = [
   {key:"pbr", label:"PBR", num:true},
   {key:"graham_number", label:"그레이엄 넘버", num:true},
   {key:"margin_of_safety", label:"안전마진", num:true},
-  {key:"criteria", label:"그레이엄 7원칙", num:false, sortKey:"criteria_ratio"},
+  {key:"criteria", label:"그레이엄 기준", num:false, sortKey:"criteria_ratio"},
   {key:"score", label:"점수", num:true}
 ];
 
@@ -467,6 +467,8 @@ function detailRowHtml(r){
       '<div class="row"><span class="k">순이익 CAGR</span><span class="v">'+ fmtNum(t.net_income_cagr!=null?t.net_income_cagr*100:null,1,"%") +'</span></div>' +
       '<div class="row"><span class="k">EPS 성장률</span><span class="v">'+ fmtNum(t.eps_growth_pct,1,"%") +'</span></div>' +
       '<div class="row"><span class="k">적자 연도</span><span class="v">'+ (t.loss_years||0) +'개</span></div>' +
+      '<div class="row"><span class="k">잉여현금흐름(FCF) 최근연도</span><span class="v">'+ fmtNum(t.latest_free_cash_flow,0) +'</span></div>' +
+      '<div class="row"><span class="k">FCF CAGR</span><span class="v">'+ fmtNum(t.fcf_cagr!=null?t.fcf_cagr*100:null,1,"%") +'</span></div>' +
     '</div>';
   var valuationHtml = '<div class="kv">' +
     '<div class="row"><span class="k">EPS(사용값)</span><span class="v">'+fmtNum(v.eps_used,2)+'</span></div>' +
@@ -474,6 +476,7 @@ function detailRowHtml(r){
     '<div class="row"><span class="k">내재가치</span><span class="v">'+fmtNum(v.intrinsic_value,2)+'</span></div>' +
     '<div class="row"><span class="k">그레이엄 넘버</span><span class="v">'+fmtNum(v.graham_number,2)+'</span></div>' +
     '<div class="row"><span class="k">주가 &lt; 그레이엄 넘버</span><span class="v">'+ (v.price_below_graham_number===true?"예":(v.price_below_graham_number===false?"아니오":"—")) +'</span></div>' +
+    '<div class="row"><span class="k">부채비율(부채/자기자본)</span><span class="v">'+ fmtNum(v.debt_to_equity!=null?v.debt_to_equity*100:null,1,"%") +'</span></div>' +
   '</div>';
   var newsHtml = (r.news && r.news.length) ?
     '<ul class="news-list">' + r.news.slice(0,5).map(function(n){
@@ -481,7 +484,7 @@ function detailRowHtml(r){
     }).join("") + '</ul>' :
     '<p class="empty-note">이 종목에 대한 뉴스가 없습니다</p>';
   return '<div class="detail-grid">' +
-    '<div class="detail-block"><h4>그레이엄 7원칙</h4><ul class="criteria-list">'+criteriaHtml+'</ul></div>' +
+    '<div class="detail-block"><h4>그레이엄 기준</h4><ul class="criteria-list">'+criteriaHtml+'</ul></div>' +
     '<div class="detail-block"><h4>내재가치 계산</h4>'+valuationHtml+'</div>' +
     '<div class="detail-block"><h4>재무 추세</h4>'+trendHtml+'</div>' +
     '<div class="detail-block"><h4>관련 뉴스</h4>'+newsHtml+'</div>' +

@@ -6,11 +6,14 @@ from stockscreener.data.yfinance_provider import YFinanceProvider
 
 
 class FakeTicker:
-    def __init__(self, fast_info=None, info=None, income=None, balance=None, dividends=None):
+    def __init__(
+        self, fast_info=None, info=None, income=None, balance=None, dividends=None, cashflow=None
+    ):
         self.fast_info = fast_info if fast_info is not None else {}
         self.info = info if info is not None else {}
         self._income = income
         self._balance = balance
+        self._cashflow = cashflow
         self.dividends = dividends if dividends is not None else pd.Series(dtype=float)
 
     def get_income_stmt(self, freq="yearly"):
@@ -18,6 +21,9 @@ class FakeTicker:
 
     def get_balance_sheet(self, freq="yearly"):
         return self._balance
+
+    def get_cash_flow(self, freq="yearly"):
+        return self._cashflow
 
 
 def _provider_for(fake_ticker):
@@ -86,6 +92,36 @@ def test_get_annual_financials_parses_known_row_labels():
     assert first.long_term_debt == 100.0
     assert first.book_value_per_share == 800.0 / 100.0
     assert second.book_value_per_share == 900.0 / 100.0
+    assert first.total_equity == 800.0
+    assert second.total_equity == 900.0
+    assert first.debt_to_equity == 600.0 / 800.0
+    assert first.free_cash_flow is None  # 이 테스트엔 현금흐름표가 없다
+
+
+def test_get_annual_financials_parses_free_cash_flow_direct_row():
+    income, balance = _sample_frames()
+    cols = list(income.columns)
+    cashflow = pd.DataFrame(
+        {cols[0]: [120.0], cols[1]: [140.0]},
+        index=["Free Cash Flow"],
+    )
+    fake = FakeTicker(income=income, balance=balance, cashflow=cashflow)
+    years = _provider_for(fake).get_annual_financials("FAKE", max_years=10)
+    assert years[0].free_cash_flow == 120.0
+    assert years[1].free_cash_flow == 140.0
+
+
+def test_get_annual_financials_computes_free_cash_flow_from_ocf_and_capex():
+    income, balance = _sample_frames()
+    cols = list(income.columns)
+    cashflow = pd.DataFrame(
+        {cols[0]: [150.0, -30.0], cols[1]: [180.0, -40.0]},
+        index=["Operating Cash Flow", "Capital Expenditure"],
+    )
+    fake = FakeTicker(income=income, balance=balance, cashflow=cashflow)
+    years = _provider_for(fake).get_annual_financials("FAKE", max_years=10)
+    assert years[0].free_cash_flow == 150.0 - 30.0
+    assert years[1].free_cash_flow == 180.0 - 40.0
 
 
 def test_get_annual_financials_handles_missing_balance_sheet():

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from stockscreener.analysis.graham import graham_number
+from stockscreener.analysis.graham import MAX_DEBT_TO_EQUITY, graham_number
 from stockscreener.models import FinancialTrend, ValuationResult
 
 # V = EPS x (8.5 + 2g) x 4.4 / Y  (그레이엄, 1962년 개정 공식)
@@ -61,6 +61,8 @@ def evaluate_valuation(
     trend: Optional[FinancialTrend],
     aaa_bond_yield_pct: float = DEFAULT_AAA_BOND_YIELD_PCT,
     min_margin_of_safety: float = DEFAULT_MIN_MARGIN_OF_SAFETY,
+    debt_to_equity: Optional[float] = None,
+    max_debt_to_equity: float = MAX_DEBT_TO_EQUITY,
 ) -> ValuationResult:
     growth_pct = _implied_growth_rate_pct(trend)
     intrinsic = intrinsic_value_graham(eps, growth_pct, aaa_bond_yield_pct)
@@ -71,10 +73,19 @@ def evaluate_valuation(
     if gn is not None and price is not None:
         price_below_gn = price < gn
 
-    # 두 절댓값 지표(내재가치 안전마진, 그레이엄 넘버) 모두 저평가를 가리킬 때만
-    # 저평가로 판정한다 — 한쪽 데이터만으로 성급히 결론 내리지 않는다.
+    debt_to_equity_ok = None
+    if debt_to_equity is not None:
+        debt_to_equity_ok = debt_to_equity <= max_debt_to_equity
+
+    # 세 절댓값 조건(내재가치 안전마진, 그레이엄 넘버, 부채비율) 모두 저평가/
+    # 재무 건전성을 가리킬 때만 저평가로 판정한다 — 부채가 많으면 아무리 싸
+    # 보여도 저평가로 표시하지 않는다. 데이터가 없어 확인이 안 되는 조건이
+    # 있으면(=None) 성급히 통과시키지 않고 저평가 판정을 보류한다.
     is_undervalued = bool(
-        mos is not None and mos >= min_margin_of_safety and price_below_gn is True
+        mos is not None
+        and mos >= min_margin_of_safety
+        and price_below_gn is True
+        and debt_to_equity_ok is True
     )
 
     return ValuationResult(
@@ -87,4 +98,6 @@ def evaluate_valuation(
         margin_of_safety=mos,
         price_below_graham_number=price_below_gn,
         is_undervalued=is_undervalued,
+        debt_to_equity=debt_to_equity,
+        debt_to_equity_ok=debt_to_equity_ok,
     )

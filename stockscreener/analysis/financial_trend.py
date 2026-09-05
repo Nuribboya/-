@@ -43,6 +43,7 @@ def analyze_financial_trend(years: list[YearlyFinancials]) -> FinancialTrend:
 
     fiscal_year_range = (years[0].fiscal_year, years[-1].fiscal_year)
     loss_years = sum(1 for y in years if y.net_income is not None and y.net_income < 0)
+    latest_fcf = years[-1].free_cash_flow
 
     if n < MIN_YEARS_FOR_TREND:
         return FinancialTrend(
@@ -54,11 +55,14 @@ def analyze_financial_trend(years: list[YearlyFinancials]) -> FinancialTrend:
             loss_years=loss_years,
             is_stable=False,
             insufficient_data=True,
+            latest_free_cash_flow=latest_fcf,
+            fcf_cagr=None,
         )
 
     periods = n - 1
     revenue_cagr = _cagr(years[0].revenue, years[-1].revenue, periods)
     net_income_cagr = _cagr(years[0].net_income, years[-1].net_income, periods)
+    fcf_cagr = _cagr(years[0].free_cash_flow, years[-1].free_cash_flow, periods)
 
     # 그레이엄 방식: 시작/종료 시점 각각 최대 3개년 평균으로 변동성을 완화한다.
     window = min(3, n)
@@ -79,4 +83,6 @@ def analyze_financial_trend(years: list[YearlyFinancials]) -> FinancialTrend:
         loss_years=loss_years,
         is_stable=is_stable,
         insufficient_data=False,
+        latest_free_cash_flow=latest_fcf,
+        fcf_cagr=fcf_cagr,
     )

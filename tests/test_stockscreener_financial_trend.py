@@ -4,8 +4,14 @@ from stockscreener.analysis.financial_trend import analyze_financial_trend
 from stockscreener.models import YearlyFinancials
 
 
-def _make_year(fy, revenue=None, net_income=None, eps=None):
-    return YearlyFinancials(fiscal_year=fy, revenue=revenue, net_income=net_income, eps=eps)
+def _make_year(fy, revenue=None, net_income=None, eps=None, free_cash_flow=None):
+    return YearlyFinancials(
+        fiscal_year=fy,
+        revenue=revenue,
+        net_income=net_income,
+        eps=eps,
+        free_cash_flow=free_cash_flow,
+    )
 
 
 def test_no_years_is_insufficient():
@@ -17,22 +23,25 @@ def test_no_years_is_insufficient():
 
 def test_below_minimum_years_is_insufficient_but_reports_loss_years():
     years = [
-        _make_year(2020, revenue=100, net_income=-10, eps=-0.1),
-        _make_year(2021, revenue=110, net_income=5, eps=0.05),
+        _make_year(2020, revenue=100, net_income=-10, eps=-0.1, free_cash_flow=-5.0),
+        _make_year(2021, revenue=110, net_income=5, eps=0.05, free_cash_flow=3.0),
     ]
     trend = analyze_financial_trend(years)
     assert trend.insufficient_data is True
     assert trend.loss_years == 1
     assert trend.eps_growth_pct is None
+    # 추세 계산엔 데이터가 부족해도, 최근 연도 FCF 값 자체는 보여줄 수 있다
+    assert trend.latest_free_cash_flow == 3.0
+    assert trend.fcf_cagr is None
 
 
 def test_cagr_and_eps_growth_computed_for_enough_years():
     years = [
-        _make_year(2016, revenue=100, net_income=10, eps=1.0),
-        _make_year(2017, revenue=120, net_income=12, eps=1.1),
-        _make_year(2018, revenue=140, net_income=14, eps=1.2),
-        _make_year(2019, revenue=160, net_income=16, eps=1.4),
-        _make_year(2020, revenue=200, net_income=20, eps=2.0),
+        _make_year(2016, revenue=100, net_income=10, eps=1.0, free_cash_flow=8.0),
+        _make_year(2017, revenue=120, net_income=12, eps=1.1, free_cash_flow=9.0),
+        _make_year(2018, revenue=140, net_income=14, eps=1.2, free_cash_flow=10.0),
+        _make_year(2019, revenue=160, net_income=16, eps=1.4, free_cash_flow=12.0),
+        _make_year(2020, revenue=200, net_income=20, eps=2.0, free_cash_flow=16.0),
     ]
     trend = analyze_financial_trend(years)
     assert trend.insufficient_data is False
@@ -41,8 +50,11 @@ def test_cagr_and_eps_growth_computed_for_enough_years():
 
     expected_revenue_cagr = (200 / 100) ** (1 / 4) - 1
     expected_net_income_cagr = (20 / 10) ** (1 / 4) - 1
+    expected_fcf_cagr = (16 / 8) ** (1 / 4) - 1
     assert math.isclose(trend.revenue_cagr, expected_revenue_cagr, rel_tol=1e-9)
     assert math.isclose(trend.net_income_cagr, expected_net_income_cagr, rel_tol=1e-9)
+    assert math.isclose(trend.fcf_cagr, expected_fcf_cagr, rel_tol=1e-9)
+    assert trend.latest_free_cash_flow == 16.0
 
     start_eps_avg = (1.0 + 1.1 + 1.2) / 3
     end_eps_avg = (1.2 + 1.4 + 2.0) / 3

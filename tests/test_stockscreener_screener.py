@@ -18,6 +18,8 @@ def _healthy_years(ticker):
                 total_liabilities=600.0,
                 long_term_debt=100.0,
                 dividend_per_share=0.5,
+                total_equity=700.0,
+                free_cash_flow=50.0 + 5 * i,
             )
         )
     return years

@@ -32,6 +32,8 @@ def _healthy_years(n=6):
                 total_liabilities=600.0,
                 long_term_debt=100.0,
                 dividend_per_share=0.5,
+                total_equity=700.0,
+                free_cash_flow=50.0 + 5 * i,
             )
         )
     return years
@@ -47,6 +49,8 @@ def test_evaluate_graham_criteria_all_pass_when_healthy_and_cheap():
     assert by_key["dividend_record"].passed is True
     assert by_key["current_ratio"].passed is True
     assert by_key["debt_vs_working_capital"].passed is True
+    assert by_key["debt_to_equity"].passed is True
+    assert by_key["free_cash_flow"].passed is True
     assert analysis.graham_number is not None
     assert analysis.evaluable_count == len(analysis.criteria)
 
@@ -90,3 +94,55 @@ def test_evaluate_graham_criteria_no_years_does_not_crash():
     analysis = evaluate_graham_criteria("TEST", [], price=10.0)
     assert analysis.graham_number is None
     assert all(c.passed is None for c in analysis.criteria)
+
+
+def test_debt_to_equity_criterion_fails_when_too_leveraged():
+    years = _healthy_years(6)
+    # 마지막 연도만 자기자본 대비 부채가 지나치게 큰 경우로 교체
+    years[-1] = YearlyFinancials(
+        fiscal_year=years[-1].fiscal_year,
+        revenue=1000.0,
+        net_income=100.0,
+        eps=2.0,
+        book_value_per_share=10.0,
+        total_current_assets=500.0,
+        total_current_liabilities=200.0,
+        total_liabilities=1500.0,
+        long_term_debt=100.0,
+        dividend_per_share=0.5,
+        total_equity=700.0,  # 부채/자기자본 = 1500/700 ≈ 214% > 100%
+        free_cash_flow=50.0,
+    )
+    analysis = evaluate_graham_criteria("TEST", years, price=10.0)
+    by_key = {c.key: c for c in analysis.criteria}
+    assert by_key["debt_to_equity"].passed is False
+
+
+def test_free_cash_flow_criterion_fails_when_negative():
+    years = _healthy_years(6)
+    years[-1] = YearlyFinancials(
+        fiscal_year=years[-1].fiscal_year,
+        revenue=1000.0,
+        net_income=100.0,
+        eps=2.0,
+        book_value_per_share=10.0,
+        total_current_assets=500.0,
+        total_current_liabilities=200.0,
+        total_liabilities=600.0,
+        long_term_debt=100.0,
+        dividend_per_share=0.5,
+        total_equity=700.0,
+        free_cash_flow=-25.0,
+    )
+    analysis = evaluate_graham_criteria("TEST", years, price=10.0)
+    by_key = {c.key: c for c in analysis.criteria}
+    assert by_key["free_cash_flow"].passed is False
+
+
+def test_debt_and_fcf_criteria_are_none_when_data_missing():
+    years = _healthy_years(6)
+    years[-1] = YearlyFinancials(fiscal_year=years[-1].fiscal_year, eps=2.0)
+    analysis = evaluate_graham_criteria("TEST", years, price=10.0)
+    by_key = {c.key: c for c in analysis.criteria}
+    assert by_key["debt_to_equity"].passed is None
+    assert by_key["free_cash_flow"].passed is None

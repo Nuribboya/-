@@ -1,8 +1,9 @@
 """벤저민 그레이엄의 '방어적 투자자' 기준 계산.
 
-`The Intelligent Investor` 에서 제시한 7가지 정량 기준을 자동 평가용으로
-단순화했다. 데이터가 부족해 판단할 수 없는 항목은 실패(False)가 아니라
-None(판단 불가)으로 남겨, 정보 부족을 기준 미달로 착각하지 않게 한다.
+`The Intelligent Investor` 에서 제시한 7가지 정량 기준에, 부채비율과
+잉여현금흐름(FCF)을 보는 강화 필터 2종을 더해 자동 평가한다. 데이터가
+부족해 판단할 수 없는 항목은 실패(False)가 아니라 None(판단 불가)으로
+남겨, 정보 부족을 기준 미달로 착각하지 않게 한다.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ MIN_CURRENT_RATIO = 2.0
 MAX_PE = 15.0
 MAX_PE_TIMES_PB = 22.5
 MIN_EPS_GROWTH_PCT = 33.0
+MAX_DEBT_TO_EQUITY = 1.0  # 강화 필터: 총부채가 자기자본의 100%를 넘지 않아야 한다
 
 
 def graham_number(eps: Optional[float], book_value_per_share: Optional[float]) -> Optional[float]:
@@ -185,6 +187,46 @@ def evaluate_graham_criteria(
                 f"PER x PBR {MAX_PE_TIMES_PB:.1f} 이하",
                 combined <= MAX_PE_TIMES_PB,
                 f"PER x PBR = {combined:.1f} (PER {pe:.1f}, PBR {pb:.1f})",
+            )
+        )
+
+    debt_to_equity = latest.debt_to_equity if latest else None
+    if debt_to_equity is None:
+        criteria.append(
+            _criterion(
+                "debt_to_equity",
+                f"부채비율(총부채/자기자본) {MAX_DEBT_TO_EQUITY*100:.0f}% 이하",
+                None,
+                "총부채 또는 자기자본 데이터 부족",
+            )
+        )
+    else:
+        criteria.append(
+            _criterion(
+                "debt_to_equity",
+                f"부채비율(총부채/자기자본) {MAX_DEBT_TO_EQUITY*100:.0f}% 이하",
+                debt_to_equity <= MAX_DEBT_TO_EQUITY,
+                f"부채비율 {debt_to_equity*100:.1f}%",
+            )
+        )
+
+    fcf = latest.free_cash_flow if latest else None
+    if fcf is None:
+        criteria.append(
+            _criterion(
+                "free_cash_flow",
+                "잉여현금흐름(FCF) 흑자",
+                None,
+                "잉여현금흐름 데이터 부족",
+            )
+        )
+    else:
+        criteria.append(
+            _criterion(
+                "free_cash_flow",
+                "잉여현금흐름(FCF) 흑자",
+                fcf > 0,
+                f"FCF {fcf:,.0f}",
             )
         )
 

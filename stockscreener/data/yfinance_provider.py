@@ -55,6 +55,20 @@ _EQUITY_ROWS = [
     "Total Stockholder Equity",
 ]
 _SHARES_ROWS = ["Ordinary Shares Number", "OrdinarySharesNumber", "Share Issued", "ShareIssued"]
+_FREE_CASH_FLOW_ROWS = ["Free Cash Flow", "FreeCashFlow"]
+_OPERATING_CASH_FLOW_ROWS = [
+    "Operating Cash Flow",
+    "OperatingCashFlow",
+    "Total Cash From Operating Activities",
+    "CashFlowFromContinuingOperatingActivities",
+]
+_CAPEX_ROWS = [
+    "Capital Expenditure",
+    "CapitalExpenditure",
+    "Purchase Of PPE",
+    "PurchaseOfPPE",
+    "Net PPE Purchase And Sale",
+]
 
 _PRICE_KEYS = ["last_price", "lastPrice", "regularMarketPrice", "currentPrice"]
 _SHARES_KEYS = ["shares", "sharesOutstanding", "shares_outstanding"]
@@ -159,6 +173,12 @@ class YFinanceProvider:
         if income is None or income.empty:
             return []
 
+        try:
+            cashflow = t.get_cash_flow(freq="yearly")
+        except Exception as exc:
+            logger.warning("%s: 현금흐름표 조회 실패 (%s)", ticker, exc)
+            cashflow = None
+
         revenue_row = _find_row(income, _REVENUE_ROWS)
         net_income_row = _find_row(income, _NET_INCOME_ROWS)
         eps_row = _find_row(income, _EPS_ROWS)
@@ -168,6 +188,9 @@ class YFinanceProvider:
         long_term_debt_row = _find_row(balance, _LONG_TERM_DEBT_ROWS)
         equity_row = _find_row(balance, _EQUITY_ROWS)
         shares_row = _find_row(balance, _SHARES_ROWS)
+        fcf_row = _find_row(cashflow, _FREE_CASH_FLOW_ROWS)
+        operating_cf_row = _find_row(cashflow, _OPERATING_CASH_FLOW_ROWS)
+        capex_row = _find_row(cashflow, _CAPEX_ROWS)
 
         dividends_by_year: dict[int, float] = {}
         try:
@@ -198,6 +221,13 @@ class YFinanceProvider:
                 equity / shares if equity is not None and shares else None
             )
 
+            free_cash_flow = _cell(fcf_row, col)
+            if free_cash_flow is None:
+                operating_cf = _cell(operating_cf_row, col)
+                capex = _cell(capex_row, col)
+                if operating_cf is not None and capex is not None:
+                    free_cash_flow = operating_cf - abs(capex)
+
             years.append(
                 YearlyFinancials(
                     fiscal_year=fiscal_year,
@@ -210,6 +240,8 @@ class YFinanceProvider:
                     total_liabilities=_cell(total_liabilities_row, col),
                     long_term_debt=_cell(long_term_debt_row, col),
                     dividend_per_share=dividends_by_year.get(fiscal_year),
+                    total_equity=equity,
+                    free_cash_flow=free_cash_flow,
                 )
             )
         return years
