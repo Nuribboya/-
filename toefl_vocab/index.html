@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>토플 필수 단어장 - 하루 50개</title>
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --card: #ffffff;
+    --ink: #23201b;
+    --sub: #6b6459;
+    --line: #e4ddd0;
+    --accent: #8a5a3b;
+    --accent-ink: #ffffff;
+    --chip: #f0e9dc;
+    --syn: #2f6f4e;
+    --ant: #a3402c;
+    --done-bg: #eef6ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin: 0 0 4px;
+  }
+  .meta {
+    color: var(--sub);
+    font-size: 0.92rem;
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  button {
+    font: inherit;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .progress-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .bar {
+    flex: 1;
+    min-width: 160px;
+    height: 10px;
+    background: var(--chip);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width .2s;
+  }
+  .progress-text {
+    font-size: 0.9rem;
+    color: var(--sub);
+    white-space: nowrap;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  thead th {
+    text-align: left;
+    font-size: 0.82rem;
+    color: var(--sub);
+    background: var(--chip);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    font-size: 0.94rem;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.done { background: var(--done-bg); }
+  td.num { color: var(--sub); width: 34px; }
+  td.word { font-weight: 700; white-space: nowrap; }
+  td.pos { color: var(--sub); font-style: italic; width: 46px; }
+  .tag {
+    display: inline-block;
+    margin: 1px 4px 1px 0;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+  }
+  .tag.syn { background: #e5f2ea; color: var(--syn); }
+  .tag.ant { background: #f7e7e2; color: var(--ant); }
+  td.check { width: 30px; text-align: center; }
+  input[type="checkbox"] { width: 17px; height: 17px; cursor: pointer; }
+  footer.note {
+    margin-top: 18px;
+    color: var(--sub);
+    font-size: 0.85rem;
+  }
+
+  @media (max-width: 700px) {
+    thead { display: none; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    tbody tr { border-bottom: 2px solid var(--line); padding: 10px 12px; }
+    tbody td { border-bottom: none; padding: 3px 0; }
+    td.check { text-align: left; }
+    td.num::before { content: "#" attr(data-label) " "; }
+  }
+
+  @media print {
+    body { background: #fff; }
+    header.top .controls, .progress-card, footer.note, .no-print { display: none !important; }
+    .wrap { max-width: 100%; padding: 0; }
+    table { border: none; font-size: 11pt; }
+    thead th { background: #fff !important; border-bottom: 1.5px solid #000; }
+    tbody td { border-bottom: 1px solid #ccc; }
+    td.check { display: none; }
+    thead th:last-child { display: none; }
+    h1 { font-size: 18pt; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>토플 필수 단어장</h1>
+      <div class="meta" id="metaLine">불러오는 중...</div>
+    </div>
+    <div class="controls no-print">
+      <button id="prevBtn" title="어제 목록 보기">◀ 이전 날</button>
+      <button id="todayBtn">오늘로</button>
+      <button id="nextBtn" title="다음 날 목록 미리보기">다음 날 ▶</button>
+      <button class="primary" id="printBtn">🖨 인쇄하기</button>
+    </div>
+  </header>
+
+  <div class="progress-card no-print">
+    <div class="progress-text" id="progressText">0 / 50 암기 완료</div>
+    <div class="bar"><div class="bar-fill" id="progressBar"></div></div>
+    <button id="resetBtn" title="이 목록의 체크를 모두 해제">체크 초기화</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:34px;">#</th>
+        <th>단어</th>
+        <th>품사</th>
+        <th>뜻</th>
+        <th>동의어</th>
+        <th>반의어</th>
+        <th class="no-print">암기</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <footer class="note">
+    매일 자정을 기준으로 새로운 50개 단어가 자동으로 표시됩니다. 전체 단어은행(<span id="bankSize"></span>개)을 다
+    순환하면 처음부터 다시 시작합니다. 체크한 암기 여부는 이 브라우저에만 저장됩니다.
+    단어를 더 추가하려면 <code>words.js</code> 파일을 편집하세요.
+  </footer>
+
+</div>
+
+<script src="words.js"></script>
+<script>
+(function () {
+  const WORDS = window.TOEFL_WORDS || [];
+  const PER_DAY = 50;
+  const totalPages = Math.max(1, Math.ceil(WORDS.length / PER_DAY));
+  const EPOCH = new Date(2024, 0, 1); // 기준일 (임의)
+  EPOCH.setHours(0, 0, 0, 0);
+
+  function todayIndex() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.floor((today - EPOCH) / 86400000);
+  }
+
+  let dayOffset = 0; // 0 = 오늘, -1 = 어제, +1 = 내일 ...
+
+  function pageForDayIndex(idx) {
+    return ((idx % totalPages) + totalPages) % totalPages;
+  }
+
+  function wordsForPage(page) {
+    const start = page * PER_DAY;
+    let slice = WORDS.slice(start, start + PER_DAY);
+    if (slice.length < PER_DAY) {
+      slice = slice.concat(WORDS.slice(0, PER_DAY - slice.length));
+    }
+    return slice;
+  }
+
+  function fmtDate(idx) {
+    const d = new Date(EPOCH.getTime() + idx * 86400000);
+    return d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+  }
+
+  function storageKey(page) {
+    return "toefl_vocab_done_page_" + page;
+  }
+
+  function loadDone(page) {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey(page)) || "[]");
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveDone(page, arr) {
+    try {
+      localStorage.setItem(storageKey(page), JSON.stringify(arr));
+    } catch (e) {}
+  }
+
+  function render() {
+    const dIdx = todayIndex() + dayOffset;
+    const page = pageForDayIndex(dIdx);
+    const list = wordsForPage(page);
+    const done = new Set(loadDone(page));
+
+    const label = dayOffset === 0 ? "오늘" : dayOffset < 0 ? `${-dayOffset}일 전` : `${dayOffset}일 후`;
+    document.getElementById("metaLine").textContent =
+      `${fmtDate(dIdx)} (${label}) · Day ${page + 1} / ${totalPages} · 단어 ${list.length}개`;
+    document.getElementById("bankSize").textContent = WORDS.length;
+
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+    list.forEach((item, i) => {
+      const tr = document.createElement("tr");
+      const isDone = done.has(item.w);
+      if (isDone) tr.classList.add("done");
+
+      const syn = (item.s || []).map(x => `<span class="tag syn">${x}</span>`).join("");
+      const ant = (item.a || []).filter(Boolean).map(x => `<span class="tag ant">${x}</span>`).join("") || "-";
+
+      tr.innerHTML = `
+        <td class="num" data-label="번호">${i + 1}</td>
+        <td class="word">${item.w}</td>
+        <td class="pos">${item.p}</td>
+        <td>${item.k}</td>
+        <td>${syn}</td>
+        <td>${ant}</td>
+        <td class="check no-print"><input type="checkbox" ${isDone ? "checked" : ""} data-word="${item.w}"></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener("change", () => {
+        const d = new Set(loadDone(page));
+        if (cb.checked) d.add(cb.dataset.word); else d.delete(cb.dataset.word);
+        saveDone(page, Array.from(d));
+        cb.closest("tr").classList.toggle("done", cb.checked);
+        updateProgress(page, list.length);
+      });
+    });
+
+    updateProgress(page, list.length);
+  }
+
+  function updateProgress(page, total) {
+    const done = loadDone(page).length;
+    document.getElementById("progressText").textContent = `${done} / ${total} 암기 완료`;
+    document.getElementById("progressBar").style.width = `${total ? (done / total) * 100 : 0}%`;
+  }
+
+  document.getElementById("prevBtn").addEventListener("click", () => { dayOffset -= 1; render(); });
+  document.getElementById("nextBtn").addEventListener("click", () => { dayOffset += 1; render(); });
+  document.getElementById("todayBtn").addEventListener("click", () => { dayOffset = 0; render(); });
+  document.getElementById("printBtn").addEventListener("click", () => window.print());
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    const dIdx = todayIndex() + dayOffset;
+    const page = pageForDayIndex(dIdx);
+    saveDone(page, []);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
