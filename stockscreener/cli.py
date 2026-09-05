@@ -15,6 +15,7 @@ from typing import Optional
 from stockscreener import config
 from stockscreener import report as report_fmt
 from stockscreener.screener import Screener
+from stockscreener.universe import load_sp500_tickers
 
 
 def _load_tickers(args: argparse.Namespace) -> list[str]:
@@ -27,6 +28,8 @@ def _load_tickers(args: argparse.Namespace) -> list[str]:
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
+    if args.sp500:
+        return load_sp500_tickers()
     return list(config.DEFAULT_TICKERS)
 
 
@@ -36,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--tickers", help="쉼표로 구분한 티커 목록 (예: AAPL,MSFT,005930.KS)")
     parser.add_argument("--tickers-file", help="한 줄에 하나씩 티커가 적힌 파일 경로")
+    parser.add_argument(
+        "--sp500",
+        action="store_true",
+        help="레포에 번들된 S&P 500 스냅샷(약 500종목) 전체를 스크리닝한다 (--tickers/--tickers-file보다 우선순위 낮음, 시간이 오래 걸릴 수 있음)",
+    )
     parser.add_argument(
         "--years",
         type=int,
@@ -54,7 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=config.DEFAULT_AAA_BOND_YIELD_PCT,
         help="내재가치 계산에 쓸 AAA 회사채 수익률(%%) (기본 4.4)",
     )
-    parser.add_argument("--no-news", action="store_true", help="뉴스 조회를 건너뛴다")
+    parser.add_argument("--no-news", action="store_true", help="시장 뉴스+종목별 뉴스 조회를 모두 건너뛴다")
+    parser.add_argument(
+        "--no-ticker-news",
+        action="store_true",
+        help="종목별 개별 뉴스 조회만 건너뛴다 (시장 전체 뉴스는 유지). 대량 스크리닝(--sp500 등)에서 속도를 위해 권장",
+    )
     parser.add_argument("--json", help="JSON 결과를 저장할 파일 경로")
     parser.add_argument(
         "--quiet", action="store_true", help="개별 종목 상세 출력을 생략하고 요약만 표시"
@@ -72,11 +85,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("분석할 티커가 없습니다.", file=sys.stderr)
         return 1
 
+    if len(tickers) > 50 and not (args.no_news or args.no_ticker_news):
+        print(
+            f"참고: {len(tickers)}개 종목을 스크리닝합니다 — 종목별 뉴스까지 조회하면 시간이 "
+            "오래 걸릴 수 있습니다. 속도를 원하면 --no-ticker-news 를 함께 사용하세요.",
+            file=sys.stderr,
+        )
+
     screener = Screener(
         max_financial_years=args.years,
         aaa_bond_yield_pct=args.bond_yield,
         min_margin_of_safety=args.min_margin_of_safety,
-        fetch_ticker_news=not args.no_news,
+        fetch_ticker_news=not (args.no_news or args.no_ticker_news),
     )
 
     market_news = [] if args.no_news else screener.get_market_news()

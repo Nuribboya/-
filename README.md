@@ -150,6 +150,10 @@ python -m stockscreener.cli --tickers AAPL,MSFT,005930.KS,000660.KS
 # 파일에서 티커 목록 읽기 (한 줄에 하나씩, #으로 주석 처리 가능)
 python -m stockscreener.cli --tickers-file watchlist.txt
 
+# S&P 500 전체(약 500종목, 레포에 번들된 스냅샷) 스크리닝 — 종목이 많으므로
+# 종목별 뉴스 조회는 꺼서 속도를 높이는 것을 권장
+python -m stockscreener.cli --sp500 --no-ticker-news --quiet --json sp500_result.json
+
 # 결과를 JSON으로도 저장
 python -m stockscreener.cli --tickers AAPL --json result.json
 
@@ -167,6 +171,15 @@ reports = screener.analyze(["AAPL", "MSFT", "005930.KS"])
 undervalued = screener.undervalued(reports)
 market_news = screener.get_market_news()
 ```
+
+## S&P 500 전체 스크리닝
+
+`stockscreener/data/universe/sp500.txt` 에 S&P 500 구성종목 티커 스냅샷을
+번들해두었다(`stockscreener.universe.load_sp500_tickers()`로 로드). `--sp500`
+옵션으로 500종목 전체를 한 번에 스크리닝할 수 있다. 지수 구성종목은 주기적으로
+바뀌므로, 최신 목록이 필요하면 해당 파일을 갱신하면 된다. 500종목 조회는
+시간이 걸리므로(각 종목마다 시세+재무제표+선택적으로 뉴스 조회) `--no-ticker-news`,
+`--quiet` 옵션과 함께 쓰는 것을 권장한다.
 
 ## 데이터 소스와 한계
 
@@ -195,4 +208,6 @@ market_news = screener.get_market_news()
 - `stockscreener/screener.py` — 데이터 조회 → 분석 → 뉴스를 종목별로 조립하고
   오류를 격리하는 오케스트레이터
 - `stockscreener/report.py` — 콘솔 출력 및 JSON 직렬화
+- `stockscreener/universe.py`, `stockscreener/data/universe/sp500.txt` — S&P 500
+  종목 유니버스 스냅샷과 로더
 - `stockscreener/cli.py` — CLI 진입점
