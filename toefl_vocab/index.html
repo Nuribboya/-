@@ -176,6 +176,7 @@
       <button id="prevBtn" title="어제 목록 보기">◀ 이전 날</button>
       <button id="todayBtn">오늘로</button>
       <button id="nextBtn" title="다음 날 목록 미리보기">다음 날 ▶</button>
+      <button id="shuffleBtn" title="날짜와 상관없이 지금 바로 무작위 50개">🔀 랜덤으로 새로 뽑기</button>
       <button class="primary" id="printBtn">🖨 인쇄하기</button>
     </div>
   </header>
@@ -202,9 +203,10 @@
   </table>
 
   <footer class="note">
-    매일 자정을 기준으로 새로운 50개 단어가 자동으로 표시됩니다. 전체 단어은행(<span id="bankSize"></span>개)을 다
-    순환하면 처음부터 다시 시작합니다. 체크한 암기 여부는 이 브라우저에만 저장됩니다.
-    단어를 더 추가하려면 <code>words.js</code> 파일을 편집하세요.
+    매일 자정을 기준으로 새로운 50개 단어가 무작위 순서로 표시됩니다. 전체 단어은행(<span id="bankSize"></span>개)을
+    겹치지 않게 한 바퀴 다 돌면 다음 바퀴는 다시 새로 섞입니다. 당장 새 단어를 보고 싶으면
+    <strong>🔀 랜덤으로 새로 뽑기</strong>를 누르면 그 자리에서 바로 무작위 50개를 다시 뽑아줍니다.
+    체크한 암기 여부는 이 브라우저에만 저장됩니다. 단어를 더 추가하려면 <code>words.js</code> 파일을 편집하세요.
   </footer>
 
 </div>
@@ -225,18 +227,56 @@
   }
 
   let dayOffset = 0; // 0 = 오늘, -1 = 어제, +1 = 내일 ...
+  let manualDraw = null; // { id, list } — "랜덤으로 새로 뽑기"를 누르면 설정됨
 
-  function pageForDayIndex(idx) {
-    return ((idx % totalPages) + totalPages) % totalPages;
+  // 매 사이클(단어은행 전체 길이만큼)마다 다른 시드로 카드 순서를 무작위로 섞는다.
+  // 같은 사이클 안에서는 겹치는 단어 없이 전체를 한 바퀴 돈 뒤, 다음 사이클엔 다시 새로 섞인다.
+  function floorDiv(a, b) { return Math.floor(a / b); }
+  function mod(a, b) { return ((a % b) + b) % b; }
+
+  function mulberry32(seed) {
+    let s = seed >>> 0;
+    return function () {
+      s |= 0; s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
-  function wordsForPage(page) {
-    const start = page * PER_DAY;
-    let slice = WORDS.slice(start, start + PER_DAY);
-    if (slice.length < PER_DAY) {
-      slice = slice.concat(WORDS.slice(0, PER_DAY - slice.length));
+  function shuffleIndices(n, rand) {
+    const a = Array.from({ length: n }, (_, i) => i);
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
     }
-    return slice;
+    return a;
+  }
+
+  const cycleCache = {};
+  function orderForCycle(cycle) {
+    if (!cycleCache[cycle]) cycleCache[cycle] = shuffleIndices(WORDS.length, mulberry32(cycle));
+    return cycleCache[cycle];
+  }
+
+  function wordsForDayIndex(dIdx) {
+    const cycle = floorDiv(dIdx, totalPages);
+    const page = mod(dIdx, totalPages);
+    const order = orderForCycle(cycle);
+    const start = page * PER_DAY;
+    let idxSlice = order.slice(start, start + PER_DAY);
+    if (idxSlice.length < PER_DAY) idxSlice = idxSlice.concat(order.slice(0, PER_DAY - idxSlice.length));
+    return { cycle, page, list: idxSlice.map(i => WORDS[i]) };
+  }
+
+  // 완전 무작위 추첨: 매번 진짜 난수로 새로 섞어 50개를 뽑는다 (날짜와 무관).
+  function drawRandomSet() {
+    const rand = (window.crypto && crypto.getRandomValues)
+      ? () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296
+      : Math.random;
+    const order = shuffleIndices(WORDS.length, rand);
+    const list = order.slice(0, PER_DAY).map(i => WORDS[i]);
+    return { id: Date.now(), list };
   }
 
   function fmtDate(idx) {
@@ -244,33 +284,39 @@
     return d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
   }
 
-  function storageKey(page) {
-    return "toefl_vocab_done_page_" + page;
+  function storageKey(key) {
+    return "toefl_vocab_done_" + key;
   }
 
-  function loadDone(page) {
+  function loadDone(key) {
     try {
-      return JSON.parse(localStorage.getItem(storageKey(page)) || "[]");
+      return JSON.parse(localStorage.getItem(storageKey(key)) || "[]");
     } catch (e) {
       return [];
     }
   }
 
-  function saveDone(page, arr) {
+  function saveDone(key, arr) {
     try {
-      localStorage.setItem(storageKey(page), JSON.stringify(arr));
+      localStorage.setItem(storageKey(key), JSON.stringify(arr));
     } catch (e) {}
   }
 
-  function render() {
+  function currentView() {
+    if (manualDraw) {
+      return { key: "manual_" + manualDraw.id, list: manualDraw.list, meta: `🔀 랜덤 추첨 · 단어은행 ${WORDS.length}개 중 무작위 ${manualDraw.list.length}개` };
+    }
     const dIdx = todayIndex() + dayOffset;
-    const page = pageForDayIndex(dIdx);
-    const list = wordsForPage(page);
-    const done = new Set(loadDone(page));
-
+    const { cycle, page, list } = wordsForDayIndex(dIdx);
     const label = dayOffset === 0 ? "오늘" : dayOffset < 0 ? `${-dayOffset}일 전` : `${dayOffset}일 후`;
-    document.getElementById("metaLine").textContent =
-      `${fmtDate(dIdx)} (${label}) · Day ${page + 1} / ${totalPages} · 단어 ${list.length}개`;
+    return { key: "d" + dIdx, list, meta: `${fmtDate(dIdx)} (${label}) · Cycle ${cycle + 1} · Day ${page + 1} / ${totalPages} · 단어 ${list.length}개` };
+  }
+
+  function render() {
+    const { key, list, meta } = currentView();
+    const done = new Set(loadDone(key));
+
+    document.getElementById("metaLine").textContent = meta;
     document.getElementById("bankSize").textContent = WORDS.length;
 
     const tbody = document.getElementById("tbody");
@@ -297,31 +343,31 @@
 
     tbody.querySelectorAll('input[type="checkbox"]').forEach(cb => {
       cb.addEventListener("change", () => {
-        const d = new Set(loadDone(page));
+        const d = new Set(loadDone(key));
         if (cb.checked) d.add(cb.dataset.word); else d.delete(cb.dataset.word);
-        saveDone(page, Array.from(d));
+        saveDone(key, Array.from(d));
         cb.closest("tr").classList.toggle("done", cb.checked);
-        updateProgress(page, list.length);
+        updateProgress(key, list.length);
       });
     });
 
-    updateProgress(page, list.length);
+    updateProgress(key, list.length);
   }
 
-  function updateProgress(page, total) {
-    const done = loadDone(page).length;
+  function updateProgress(key, total) {
+    const done = loadDone(key).length;
     document.getElementById("progressText").textContent = `${done} / ${total} 암기 완료`;
     document.getElementById("progressBar").style.width = `${total ? (done / total) * 100 : 0}%`;
   }
 
-  document.getElementById("prevBtn").addEventListener("click", () => { dayOffset -= 1; render(); });
-  document.getElementById("nextBtn").addEventListener("click", () => { dayOffset += 1; render(); });
-  document.getElementById("todayBtn").addEventListener("click", () => { dayOffset = 0; render(); });
+  document.getElementById("prevBtn").addEventListener("click", () => { manualDraw = null; dayOffset -= 1; render(); });
+  document.getElementById("nextBtn").addEventListener("click", () => { manualDraw = null; dayOffset += 1; render(); });
+  document.getElementById("todayBtn").addEventListener("click", () => { manualDraw = null; dayOffset = 0; render(); });
+  document.getElementById("shuffleBtn").addEventListener("click", () => { manualDraw = drawRandomSet(); render(); });
   document.getElementById("printBtn").addEventListener("click", () => window.print());
   document.getElementById("resetBtn").addEventListener("click", () => {
-    const dIdx = todayIndex() + dayOffset;
-    const page = pageForDayIndex(dIdx);
-    saveDone(page, []);
+    const { key } = currentView();
+    saveDone(key, []);
     render();
   });
 
