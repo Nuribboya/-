@@ -103,3 +103,96 @@ pytest
 - `mathgrader/parsing.py` — 수식/답안 문자열 파싱, 답안 비교
 - `mathgrader/grader.py` — 분류 → 풀이 → 채점을 총괄하는 진입점
 - `web/` — FastAPI 기반 웹 UI 및 API
+
+---
+
+# 그레이엄 지표 기반 주식 스크리너 (`stockscreener/`)
+
+벤저민 그레이엄의 방어적 투자자 기준과 내재가치 공식을 이용해, **애널리스트의
+투자의견·목표주가 같은 주관적 지표를 전혀 사용하지 않고** 재무제표 절댓값만으로
+저평가 종목을 찾아주는 프로그램입니다. 종목별 최근 5~10개년 재무제표 추세,
+그레이엄의 7가지 정량 기준, 그레이엄 넘버·내재가치·안전마진을 계산하고,
+증시에 영향을 주는 뉴스를 호출할 때마다 실시간으로 새로 가져옵니다.
+
+## 주요 기능
+
+- **그레이엄 지표**: 그레이엄 넘버(`sqrt(22.5 x EPS x BVPS)`), 유동비율,
+  장기부채 대비 순운전자본, PER/PBR, EPS 성장률, 이익 안정성, 배당 기록 등
+  `The Intelligent Investor`의 방어적 투자자 7원칙을 자동 평가합니다.
+  데이터가 부족한 항목은 "실패"가 아니라 "판단 불가(N/A)"로 별도 표시합니다.
+- **5~10개년 재무제표 분석**: 매출/순이익 CAGR, EPS 성장률(시작·종료 구간
+  3개년 평균 비교), 적자 연도 수를 계산해 추세의 안정성을 판단합니다.
+- **절댓값 기반 내재가치 계산**: 그레이엄의 1962년 개정 공식
+  `V = EPS x (8.5 + 2g) x 4.4 / Y` (g=과거 실적으로 추정한 성장률, Y=채권
+  수익률)로 내재가치와 안전마진을 계산하며, 애널리스트 추정치는 입력값으로
+  사용하지 않습니다.
+- **실시간 뉴스**: 구글 뉴스 검색 RSS를 이용해 증시 전반에 영향을 주는 뉴스와
+  종목별 뉴스를 실행할 때마다 새로 조회합니다(캐시 없음). 개별 피드가
+  실패해도 나머지 결과에는 영향을 주지 않습니다.
+- **저평가 종목 목록**: 안전마진(내재가치 대비)과 그레이엄 넘버 대비 주가,
+  두 가지 절댓값 신호가 모두 저평가를 가리키는 종목만 안전마진이 높은 순으로
+  정렬해 보여줍니다.
+- **오류 격리**: 종목 하나의 데이터 조회 실패(상장폐지, 네트워크 오류 등)가
+  전체 스크리닝을 중단시키지 않습니다. 실패한 종목은 사유와 함께 목록에서
+  제외되고 나머지 종목 분석은 계속 진행됩니다.
+
+## 사용법
+
+```bash
+pip install -r requirements.txt
+
+# 기본 예시 종목군으로 실행
+python -m stockscreener.cli
+
+# 원하는 종목 지정 (한국 종목은 .KS/.KQ 접미사 사용)
+python -m stockscreener.cli --tickers AAPL,MSFT,005930.KS,000660.KS
+
+# 파일에서 티커 목록 읽기 (한 줄에 하나씩, #으로 주석 처리 가능)
+python -m stockscreener.cli --tickers-file watchlist.txt
+
+# 결과를 JSON으로도 저장
+python -m stockscreener.cli --tickers AAPL --json result.json
+
+# 안전마진 기준을 더 보수적으로(예: 40%) 조정
+python -m stockscreener.cli --min-margin-of-safety 0.4
+```
+
+라이브러리로 직접 사용할 수도 있습니다.
+
+```python
+from stockscreener.screener import Screener
+
+screener = Screener()
+reports = screener.analyze(["AAPL", "MSFT", "005930.KS"])
+undervalued = screener.undervalued(reports)
+market_news = screener.get_market_news()
+```
+
+## 데이터 소스와 한계
+
+- 시세/재무제표는 기본적으로 야후 파이낸스(`yfinance`, 무료, API 키 불필요)를
+  사용합니다. 야후 파이낸스 무료 API는 연간 재무제표를 보통 **최근 4~5개년치**
+  까지만 제공합니다. 10개년 전체 이력이 꼭 필요하다면
+  `stockscreener/data/provider.py`의 `DataProvider` 프로토콜에 맞춰 유료
+  데이터 공급자(예: Financial Modeling Prep)를 구현해
+  `Screener(data_provider=...)` 에 주입하면 됩니다.
+- 뉴스는 구글 뉴스 검색 RSS(`news.google.com/rss/search`)를 사용합니다.
+  API 키가 필요 없고 검색어 기반이라 특정 언론사 RSS가 개편되어도 계속
+  동작합니다.
+- **이 프로그램은 투자 자문이 아니며, 어떤 매수·매도도 권유하지 않습니다.**
+  모든 지표는 과거 재무제표 수치로 계산한 참고용 정량 지표입니다.
+
+## 구조
+
+- `stockscreener/models.py` — 재무제표/시세/뉴스/분석 결과 데이터 모델
+- `stockscreener/data/` — 시세·재무제표 공급자 (`yfinance_provider.py` 기본
+  구현, `provider.py`에 교체 가능한 인터페이스 정의)
+- `stockscreener/news/rss_provider.py` — 실시간 뉴스 조회 (캐시 없음, 피드별
+  오류 격리)
+- `stockscreener/analysis/graham.py` — 그레이엄 넘버, 방어적 투자자 7원칙
+- `stockscreener/analysis/financial_trend.py` — 5~10개년 매출/순이익/EPS 추세
+- `stockscreener/analysis/valuation.py` — 내재가치, 안전마진, 저평가 판정
+- `stockscreener/screener.py` — 데이터 조회 → 분석 → 뉴스를 종목별로 조립하고
+  오류를 격리하는 오케스트레이터
+- `stockscreener/report.py` — 콘솔 출력 및 JSON 직렬화
+- `stockscreener/cli.py` — CLI 진입점
