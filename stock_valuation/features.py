@@ -47,6 +47,7 @@ def add_sector_relative_zscores(df: pd.DataFrame, sector_map: pd.DataFrame) -> p
     relative to same-period, same-sector peers instead.
     """
     out = df.merge(sector_map, on="ticker", how="left")
+    out[RATIO_COLUMNS] = out[RATIO_COLUMNS].apply(pd.to_numeric, errors="coerce")
     for col in RATIO_COLUMNS:
         grouped = out.groupby(["period", "sector"])[col]
         mean = grouped.transform("mean")

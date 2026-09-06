@@ -47,7 +47,13 @@ def fetch_quarterly_fundamentals(ticker: str) -> pd.DataFrame:
                 out[field] = row.reindex(periods)
                 break
         else:
-            out[field] = pd.NA
+            out[field] = float("nan")
+
+    # pandas' groupby/statistics ops choke on pd.NA mixed into a numeric
+    # column (raises on the NAType itself), so coerce everything to plain
+    # float NaN here rather than downstream at every call site.
+    numeric_cols = list(RAW_LINE_ITEMS.keys())
+    out[numeric_cols] = out[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
     out.index.name = "period"
     out["ticker"] = ticker
