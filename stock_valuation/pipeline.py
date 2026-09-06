@@ -41,6 +41,12 @@ def run_pipeline(
     tickers = universe["ticker"].tolist()
 
     fundamentals = _fetch_all_fundamentals(tickers)
+    # Normalize once, up front: fundamentals/macro/price sources can each
+    # hand back a different datetime64 resolution, and every downstream
+    # merge (features<->macro, features<->labels) needs an exact dtype
+    # match on "period" or it silently joins zero rows.
+    fundamentals["period"] = pd.to_datetime(fundamentals["period"]).astype("datetime64[ns]")
+
     macro = fetch_macro_indicators(start=start)
     features = build_feature_table(fundamentals, universe[["ticker", "sector"]], macro)
 

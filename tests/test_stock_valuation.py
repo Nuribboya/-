@@ -184,3 +184,52 @@ def test_valuation_multiples_and_signal_end_to_end():
         "1차 매수",
         "관망",
     }
+
+
+def test_features_and_labels_join_survives_upstream_dtype_drift():
+    # Mirrors pipeline.run_pipeline's dataset = features.merge(labeled, ...):
+    # fundamentals/macro/price sources can each hand back a different
+    # datetime64 resolution, and a plain merge on "period" silently drops
+    # every row if the two sides don't share the exact same dtype.
+    raw_periods = pd.to_datetime(["2022-03-31", "2022-06-30", "2022-09-30", "2022-12-31"]).astype(
+        "datetime64[s]"
+    )
+    fundamentals = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "period": raw_periods,
+                    "ticker": ticker,
+                    "revenue": [100, 110, 120, 130],
+                    "operating_income": [20, 22, 24, 26],
+                    "net_income": [10, 11, 12, 13],
+                    "total_debt": [50, 50, 50, 50],
+                    "total_equity": [100, 100, 100, 100],
+                    "operating_cash_flow": [15, 16, 17, 18],
+                    "capital_expenditure": [-3, -3, -3, -3],
+                    "shares_outstanding": [1000, 1000, 1000, 1000],
+                }
+            )
+            for ticker in ("AAA", "BBB")
+        ]
+    )
+    # Simulate pipeline.run_pipeline's up-front normalization step.
+    fundamentals["period"] = pd.to_datetime(fundamentals["period"]).astype("datetime64[ns]")
+
+    sector_map = pd.DataFrame({"ticker": ["AAA", "BBB"], "sector": ["Tech", "Tech"]})
+    macro = pd.DataFrame(
+        {"treasury_10y": [4.0] * 4},
+        index=pd.to_datetime(["2022-03-30", "2022-06-29", "2022-09-29", "2022-12-30"]).astype(
+            "datetime64[us]"
+        ),
+    )
+    macro.index.name = "period"
+    features = build_feature_table(fundamentals, sector_map, macro)
+
+    price_df = pd.concat([_price_series("AAA", 100.0, 1.001), _price_series("BBB", 50.0, 1.002)])
+    periods = sorted(fundamentals["period"].unique())
+    forward_returns = compute_forward_returns(price_df, periods, horizon_days=100)
+    labeled = add_relative_return_tiers(forward_returns)
+
+    dataset = features.merge(labeled[["period", "ticker", "label"]], on=["period", "ticker"], how="inner")
+    assert len(dataset) > 0
