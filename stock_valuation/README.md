@@ -37,6 +37,7 @@ rl_env.py               분할매수 타이밍을 다루는 강화학습 환경 
 rl_agent.py             테이블 기반 Q-learning 학습/추천
 pipeline.py              위 전체를 엮는 오케스트레이션
 cli.py                  커맨드라인 실행 진입점
+dashboard.py            Streamlit 웹 대시보드 (결과 조회 + 그 자리에서 재스캔)
 ```
 
 ## 사용법
@@ -52,6 +53,42 @@ python -m stock_valuation.cli --limit 30 --start 2015-01-01 --output out.csv
   (아래 설명) 컬럼이 담깁니다.
 - 실행 로그에 각 단계별 행 개수(`fundamentals=`, `dataset=` 등)와 holdout
   accuracy가 찍히니, 결과가 이상하면 그걸로 어느 단계가 문제인지 먼저 확인하세요.
+
+### 웹 대시보드로 보기
+
+터미널 표 대신 브라우저에서 정렬/필터 가능한 표로 보고 싶으면:
+
+```bash
+pip install -r stock_valuation/requirements-dashboard.txt
+streamlit run stock_valuation/dashboard.py
+```
+
+- 왼쪽 사이드바에서 종목 수/옵션 정하고 **"지금 다시 스캔 실행"** 누르면
+  그 자리에서 새로 스캔해서 표가 갱신됩니다 (CLI 따로 안 돌려도 됨).
+- 섹터/매수단계/최소 품질점수로 필터링 가능.
+- "마지막 갱신" 시각이 파일 수정 시각 기준으로 표시됩니다.
+
+**완전 자동 갱신(예약 실행)까지 원하면**: 대시보드 자체 새로고침은 "결과
+파일이 바뀌었으면 화면에 반영"하는 것뿐이고, 실제로 최신 데이터를 다시
+스캔해서 파일을 갱신하는 건 별도로 예약해야 합니다. 예를 들어 매일 아침
+자동으로 스캔하려면 배치 파일 하나 만들고:
+
+```bat
+:: run_daily_scan.bat
+@echo off
+cd /d "C:\Users\윤여명\dl-stock-project"
+python -m stock_valuation.cli --limit 30 --output valuation_signal.csv
+```
+
+Windows 작업 스케줄러에 등록:
+
+```powershell
+schtasks /create /tn "StockScreenerDaily" /tr "C:\Users\윤여명\dl-stock-project\run_daily_scan.bat" /sc daily /st 07:00
+```
+
+이렇게 해두면 매일 아침 7시에 자동으로 재스캔되고, 대시보드의 "자동
+새로고침" 주기를 켜두면 브라우저를 열어놓기만 해도 갱신된 결과가 자동
+반영됩니다.
 
 ### 판단 근거 (`reason` 컬럼)
 
