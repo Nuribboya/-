@@ -26,6 +26,12 @@ def main() -> None:
         "too many relative to sample size lets the model overfit to text noise; raise this only "
         "once you're running with a large --limit)",
     )
+    parser.add_argument(
+        "--with-rl",
+        action="store_true",
+        help="add a tabular Q-learning staged-buy recommendation (experimental, trained "
+        "on in-sample historical data — see README caveats before trusting its output)",
+    )
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
@@ -34,6 +40,7 @@ def main() -> None:
         horizon_days=args.horizon_days,
         use_filing_text=args.with_text,
         text_components=args.text_components,
+        use_rl=args.with_rl,
     )
     result.to_csv(args.output, index=False)
 
@@ -43,7 +50,10 @@ def main() -> None:
 
     pd.set_option("display.max_colwidth", None)
     pd.set_option("display.width", 200)
-    print(result[["ticker", "sector", "quality_score", "cheapness_percentile", "buy_tier", "reason"]])
+    columns = ["ticker", "sector", "quality_score", "cheapness_percentile", "buy_tier", "reason"]
+    if args.with_rl:
+        columns.append("rl_action")
+    print(result[columns])
     print(f"\nsaved to {args.output}")
 
 

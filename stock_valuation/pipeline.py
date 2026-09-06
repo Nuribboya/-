@@ -18,8 +18,22 @@ from stock_valuation.model import (
     time_split,
     train_quality_model,
 )
+from stock_valuation.rl_agent import recommend_action, train_q_learning
+from stock_valuation.rl_env import CASH_BINS, CHEAP_BINS, QUALITY_BINS, build_episodes, discretize
 from stock_valuation.text_features import attach_text_embeddings, build_filing_lookup
-from stock_valuation.valuation import add_cheapness_percentile, build_valuation_signal, compute_valuation_multiples
+from stock_valuation.valuation import (
+    add_cheapness_percentile,
+    build_valuation_signal,
+    compute_point_in_time_multiples,
+    compute_valuation_multiples,
+)
+
+RL_ACTION_LABELS = {
+    0.0: "관망 (전액 현금 유지)",
+    0.25: "25% 매수",
+    0.5: "50% 매수",
+    1.0: "전액 매수",
+}
 
 
 def _fetch_all_fundamentals(tickers: list[str]) -> pd.DataFrame:
@@ -117,12 +131,60 @@ def attach_filing_text_features(
     return dataset_out, latest_out, text_cols
 
 
+def build_rl_recommendations(
+    dataset: pd.DataFrame,
+    model,
+    feat_cols: list[str],
+    fundamentals: pd.DataFrame,
+    prices: pd.DataFrame,
+    sector_map: pd.DataFrame,
+    current_state: pd.DataFrame,
+) -> dict[str, str]:
+    """Train a tabular Q-learning agent on historical (quality, cheapness,
+    price) trajectories and recommend a current staged-buy action per ticker.
+
+    `current_state` needs columns ticker, quality_score, cheapness_percentile
+    for the latest period. Trained entirely on in-sample historical data —
+    this is a backtest-fit experiment, not a validated forward-looking
+    strategy (see the caveats in stock_valuation/README.md).
+    """
+    hist_quality = predict_quality_score(model, dataset, feat_cols)
+    hist_multiples = compute_point_in_time_multiples(fundamentals, prices, sector_map)
+    hist_multiples = add_cheapness_percentile(hist_multiples, group_cols=("period", "sector"))
+
+    history = dataset[["ticker", "period"]].copy()
+    history["quality_score"] = hist_quality.to_numpy()
+    history = history.merge(
+        hist_multiples[["ticker", "period", "price", "cheapness_percentile"]],
+        on=["ticker", "period"],
+        how="inner",
+    )
+
+    episodes = build_episodes(history)
+    if not episodes:
+        return {}
+    q_table = train_q_learning(episodes)
+
+    recommendations = {}
+    for _, row in current_state.iterrows():
+        if pd.isna(row["quality_score"]) or pd.isna(row["cheapness_percentile"]):
+            continue
+        state = (
+            discretize(row["quality_score"], QUALITY_BINS),
+            discretize(row["cheapness_percentile"], CHEAP_BINS),
+            discretize(1.0, CASH_BINS),  # a live recommendation assumes starting fresh, 100% cash
+        )
+        recommendations[row["ticker"]] = RL_ACTION_LABELS[recommend_action(q_table, state)]
+    return recommendations
+
+
 def run_pipeline(
     tickers_limit: int | None = 30,
     start: str = "2015-01-01",
     horizon_days: int = 252,
     use_filing_text: bool = False,
     text_components: int = 4,
+    use_rl: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     universe = get_sp500_universe(limit=tickers_limit)
     tickers = universe["ticker"].tolist()
@@ -193,4 +255,17 @@ def run_pipeline(
     )
     result = build_valuation_signal(merged)
     result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
+
+    if use_rl:
+        rl_recommendations = build_rl_recommendations(
+            dataset,
+            model,
+            feat_cols,
+            fundamentals,
+            prices,
+            universe[["ticker", "sector"]],
+            result[["ticker", "quality_score", "cheapness_percentile"]],
+        )
+        result["rl_action"] = result["ticker"].map(rl_recommendations).fillna("데이터 부족")
+
     return result, metrics
