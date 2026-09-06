@@ -40,7 +40,13 @@
   <p class="error">에러: {{ error }}</p>
   {% endif %}
 
-  <p>{{ candidates|length }}개 후보 (지금까지 실행한 결과 누적, 적합도 순)</p>
+  <form method="get" action=".">
+    <label for="min_score">최소 적합도 점수 (미만인 회사는 목록에서 제외)</label>
+    <input type="text" id="min_score" name="min_score" value="{{ min_score }}" style="width:100px" />
+    <button type="submit">필터 적용</button>
+  </form>
+
+  <p>{{ candidates|length }}개 후보 (적합도 {{ min_score }}점 이상, 적합도 순)</p>
   <table>
     <tr>
       <th>회사명</th>

@@ -25,6 +25,12 @@ def main() -> None:
         default=None,
         help="앞에서부터 이 개수만 채점 (비용 확인용 테스트). 기본: 전체",
     )
+    parser.add_argument(
+        "--min-score",
+        type=int,
+        default=0,
+        help="이 점수 미만인 회사는 결과(CSV/출력)에서 제외 (부적합한 회사 소거용). 기본: 0(전체 표시)",
+    )
     args = parser.parse_args()
 
     config = LeadRadarConfig.from_yaml(args.config)
@@ -33,6 +39,7 @@ def main() -> None:
         candidates = candidates[: args.limit]
     print(f"{len(candidates)}개 후보 채점 시작...")
     results = run(config, candidates, show_progress=True)
+    results = [r for r in results if r.fit_score >= args.min_score]
     write_results_csv(results, args.out)
 
     for r in results:

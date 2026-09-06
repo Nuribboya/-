@@ -50,3 +50,26 @@ def test_update_contact_status_rejects_unknown_status(tmp_path):
 
     with pytest.raises(ValueError):
         update_contact_status(db_path, "A회사", "알수없는상태")
+
+
+def test_list_candidates_excludes_below_min_score(tmp_path):
+    db_path = tmp_path / "results.db"
+    init_db(db_path)
+    upsert_scored_candidates(
+        db_path,
+        [_scored("부적합회사", 5), _scored("애매한회사", 45), _scored("적합회사", 80)],
+    )
+
+    candidates = list_candidates(db_path, min_score=30)
+
+    assert [c.name for c in candidates] == ["적합회사", "애매한회사"]
+
+
+def test_list_candidates_min_score_zero_shows_everything(tmp_path):
+    db_path = tmp_path / "results.db"
+    init_db(db_path)
+    upsert_scored_candidates(db_path, [_scored("부적합회사", 5)])
+
+    candidates = list_candidates(db_path, min_score=0)
+
+    assert len(candidates) == 1

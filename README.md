@@ -170,6 +170,18 @@ python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.j
 python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.json --limit 10 --out test_scored.csv
 ```
 
+`--min-score`를 주면 그 점수 미만인 회사는 CSV/출력에서 아예 빠집니다 - 이름에
+키워드만 우연히 걸리고 실제로는 무관한 회사(유동화전문회사 같은 것)를 깔끔하게
+소거하는 용도입니다.
+
+```bash
+python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.json --min-score 30 --out candidates_scored.csv
+```
+
+웹앱에서도 화면 상단의 "최소 적합도 점수" 필터(기본 30점)로 같은 걸 할 수
+있습니다. 실제로 저장된 데이터가 지워지는 건 아니라서, 필터 값을 낮추면
+언제든 다시 볼 수 있습니다.
+
 첫 실행 시 전체 기업 고유번호 목록을 내려받아 `.dart_corpcodes_cache.json` 에
 캐싱해두고 재사용합니다(자주 안 바뀌는 데이터라 매번 새로 받지 않음). 회사명에
 키워드가 포함되면 상장/비상장 상관없이 후보로 포함하며(비상장사는 재무제표

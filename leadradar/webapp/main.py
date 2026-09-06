@@ -40,6 +40,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 DEFAULT_KEYWORDS = "반도체 디스플레이 자동화 제어 전장 전기 계측 검사 테스트 정밀 파워 ESS PCS 로봇 엔지니어링 배전반"
 DEFAULT_ORIGIN = "경기도 안성시"
+DEFAULT_MIN_SCORE = 30
 
 
 def _config_path() -> str:
@@ -53,16 +54,17 @@ def _results_db_path() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, error: Optional[str] = None) -> HTMLResponse:
+def index(request: Request, error: Optional[str] = None, min_score: int = DEFAULT_MIN_SCORE) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "candidates": list_candidates(_results_db_path()),
+            "candidates": list_candidates(_results_db_path(), min_score=min_score),
             "error": error,
             "keywords": DEFAULT_KEYWORDS,
             "origin": DEFAULT_ORIGIN,
             "statuses": CONTACT_STATUSES,
+            "min_score": min_score,
         },
     )
 

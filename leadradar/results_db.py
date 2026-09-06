@@ -106,9 +106,17 @@ def upsert_scored_candidates(db_path: str | Path, results: list[ScoredCandidate]
             )
 
 
-def list_candidates(db_path: str | Path = DEFAULT_DB_PATH) -> list[StoredCandidate]:
+def list_candidates(db_path: str | Path = DEFAULT_DB_PATH, min_score: int = 0) -> list[StoredCandidate]:
+    """min_score 미만인 회사는 결과에서 아예 뺀다 (부적합/무관한 회사를 깔끔하게 소거).
+
+    저장된 데이터 자체를 지우는 게 아니라 조회할 때만 걸러내는 거라, min_score를
+    낮추면 언제든 다시 볼 수 있다.
+    """
     with connect(db_path) as conn:
-        rows = conn.execute("SELECT * FROM candidates ORDER BY fit_score DESC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM candidates WHERE fit_score >= ? ORDER BY fit_score DESC",
+            (min_score,),
+        ).fetchall()
         return [
             StoredCandidate(
                 name=r["name"],
