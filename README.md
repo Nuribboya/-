@@ -204,3 +204,33 @@ uvicorn leadradar.webapp.main:app --reload
 - `leadradar/discover_cli.py` — DART 후보 발굴 커맨드라인 진입점
 - `leadradar/webapp/` — 브라우저로 발굴+채점을 실행하는 로컬 FastAPI 웹 앱
 - `leadradar/run_webapp.bat` — 윈도우에서 웹 앱을 더블클릭으로 실행하는 편의 스크립트
+
+## 재고 관리 (inventory)
+
+입고/출고를 기록하고 현재 재고를 조회하는 로컬 웹 앱입니다. SQLite 파일
+하나(기본: `inventory.db`)로 동작해서 별도 서버 설치가 필요 없습니다. 현재
+재고는 저장해두는 값이 아니라 입출고 기록의 합으로 매번 계산하기 때문에,
+기록만 정확히 남기면 재고 수치가 실제와 어긋날 일이 없습니다.
+
+### 실행
+
+```bash
+uvicorn inventory.webapp.main:app --reload --port 8001
+```
+
+브라우저에서 http://localhost:8001 접속. 윈도우에서는
+`inventory/run_webapp.bat`을 더블클릭하면 됩니다. `INVENTORY_DB` 환경변수로
+DB 파일 경로를 바꿀 수 있습니다(예: 여러 사람이 같이 보려면 공유 폴더 경로로
+지정).
+
+품목명을 입력하고 입고/출고, 수량, 메모를 넣어 "기록하기"를 누르면 되고,
+처음 보는 품목명이면 자동으로 새 품목이 만들어집니다.
+
+### 구조
+
+- `inventory/db.py` — SQLite 스키마(품목, 입출고 기록) + 현재 재고 계산 로직
+- `inventory/webapp/` — 입출고 기록 폼 + 현재 재고/최근 이력을 보여주는 FastAPI 웹 앱
+- `inventory/run_webapp.bat` — 윈도우에서 웹 앱을 더블클릭으로 실행하는 편의 스크립트
+
+이렇게 쌓인 입출고 기록은 나중에 수요예측(언제 얼마나 발주해야 하는지) 모델을
+만들 때 학습 데이터로 그대로 쓸 수 있습니다.

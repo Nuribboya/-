@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>재고 관리</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
+    fieldset { margin-bottom: 24px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input[type=text], input[type=number] { width: 100%; padding: 8px; box-sizing: border-box; }
+    .radio-row { display: flex; gap: 24px; margin-top: 6px; font-weight: normal; }
+    button { margin-top: 16px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f0f0f0; }
+    .plus { color: #0a7d28; }
+    .minus { color: #b00020; }
+    h2 { margin-top: 48px; }
+  </style>
+</head>
+<body>
+  <h1>재고 관리</h1>
+
+  <form method="post" action="/movements">
+    <fieldset>
+      <legend>입출고 기록</legend>
+
+      <label for="item_name">품목명</label>
+      <input type="text" id="item_name" name="item_name" required />
+
+      <label>구분</label>
+      <div class="radio-row">
+        <label><input type="radio" name="direction" value="in" checked /> 입고</label>
+        <label><input type="radio" name="direction" value="out" /> 출고</label>
+      </div>
+
+      <label for="quantity">수량</label>
+      <input type="number" id="quantity" name="quantity" min="1" required />
+
+      <label for="unit">단위</label>
+      <input type="text" id="unit" name="unit" value="개" />
+
+      <label for="memo">메모 (선택)</label>
+      <input type="text" id="memo" name="memo" />
+
+      <button type="submit">기록하기</button>
+    </fieldset>
+  </form>
+
+  <h2>현재 재고</h2>
+  <table>
+    <tr><th>품목명</th><th>현재 수량</th><th>단위</th></tr>
+    {% for s in stock %}
+    <tr>
+      <td>{{ s.item.name }}</td>
+      <td>{{ s.quantity }}</td>
+      <td>{{ s.item.unit }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>최근 입출고 이력</h2>
+  <table>
+    <tr><th>일시</th><th>품목명</th><th>변동</th><th>메모</th></tr>
+    {% for m in movements %}
+    <tr>
+      <td>{{ m.created_at }}</td>
+      <td>{{ m.item_name }}</td>
+      <td class="{{ 'plus' if m.change_qty > 0 else 'minus' }}">
+        {{ '+%d'|format(m.change_qty) if m.change_qty > 0 else m.change_qty }}
+      </td>
+      <td>{{ m.memo }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

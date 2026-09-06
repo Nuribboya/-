@@ -4,3 +4,10 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# 로컬 실행 산출물 (커밋 대상 아님)
+*.db
+.dart_corpcodes_cache.json
+discovered*.json
+candidates_scored.csv
+test_scored.csv
