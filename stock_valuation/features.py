@@ -38,26 +38,51 @@ def add_growth(fundamentals: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_sector_relative_zscores(df: pd.DataFrame, sector_map: pd.DataFrame) -> pd.DataFrame:
+def add_sector_relative_zscores(
+    df: pd.DataFrame, sector_map: pd.DataFrame, min_peer_group: int = 3
+) -> pd.DataFrame:
     """Z-score each ratio within its (period, sector) peer group.
 
     Absolute ratio levels differ wildly across sectors (a bank's debt/equity
     means something different from a software company's), so comparing raw
     numbers across the whole universe is misleading — everything here is
     relative to same-period, same-sector peers instead.
+
+    Falls back to the whole period's cross-section when a sector has fewer
+    than `min_peer_group` names that period (small test universes, e.g.
+    --limit 30, otherwise leave most sectors as single-member groups with an
+    undefined std and turn the whole feature column to NaN).
     """
     out = df.merge(sector_map, on="ticker", how="left")
     out[RATIO_COLUMNS] = out[RATIO_COLUMNS].apply(pd.to_numeric, errors="coerce")
     for col in RATIO_COLUMNS:
-        grouped = out.groupby(["period", "sector"])[col]
-        mean = grouped.transform("mean")
-        std = grouped.transform("std").replace(0, np.nan)
+        sector_group = out.groupby(["period", "sector"])[col]
+        sector_size = sector_group.transform("size")
+        sector_mean = sector_group.transform("mean")
+        sector_std = sector_group.transform("std")
+
+        period_group = out.groupby("period")[col]
+        period_mean = period_group.transform("mean")
+        period_std = period_group.transform("std")
+
+        use_sector = sector_size >= min_peer_group
+        mean = sector_mean.where(use_sector, period_mean)
+        std = sector_std.where(use_sector, period_std).replace(0, np.nan)
         out[f"{col}_z"] = (out[col] - mean) / std
     return out
 
 
 def merge_macro(df: pd.DataFrame, macro: pd.DataFrame) -> pd.DataFrame:
-    return df.merge(macro, on="period", how="left")
+    """Attach the macro snapshot nearest each fundamentals period.
+
+    A company's fiscal quarter-end rarely lands on the exact same calendar
+    date as FRED's resampled quarter-end, so an exact-match merge on
+    `period` would silently leave every macro column NaN. `merge_asof`
+    matches each row to its nearest macro date instead.
+    """
+    df_sorted = df.sort_values("period")
+    macro_sorted = macro.reset_index().sort_values("period")
+    return pd.merge_asof(df_sorted, macro_sorted, on="period", direction="nearest")
 
 
 def build_feature_table(

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from stock_valuation.features import add_growth, add_ratios, add_sector_relative_zscores, build_feature_table
+from stock_valuation.features import add_growth, add_ratios, add_sector_relative_zscores, build_feature_table, merge_macro
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.valuation import add_cheapness_percentile, assign_buy_tier, build_valuation_signal, compute_valuation_multiples
 
@@ -50,6 +50,47 @@ def test_sector_relative_zscore_centers_within_group():
     period = zscored["period"].min()
     subset = zscored[zscored["period"] == period]
     assert subset["operating_margin_z"].abs().max() < 1e-6 or subset["operating_margin_z"].isna().all()
+
+
+def test_sector_relative_zscore_falls_back_when_peer_group_too_small():
+    # AAA/BBB are the only two names in "Tech" (below min_peer_group=3), so
+    # the sector group must fall back to the whole period's cross-section
+    # instead of producing an undefined (NaN) std that wipes out every row.
+    period = pd.Timestamp("2022-03-31")
+    df = pd.DataFrame(
+        {
+            "period": [period] * 3,
+            "ticker": ["AAA", "BBB", "CCC"],
+            "operating_margin": [0.10, 0.20, 0.35],
+            "net_margin": [0.05, 0.10, 0.15],
+            "roe": [0.08, 0.12, 0.20],
+            "debt_to_equity": [0.5, 0.8, 0.3],
+            "fcf_margin": [0.03, 0.06, 0.09],
+            "revenue_growth_yoy": [0.01, 0.02, 0.03],
+            "net_income_growth_yoy": [0.01, 0.02, 0.03],
+        }
+    )
+    sector_map = pd.DataFrame(
+        {"ticker": ["AAA", "BBB", "CCC"], "sector": ["Tech", "Tech", "Energy"]}
+    )
+
+    zscored = add_sector_relative_zscores(df, sector_map, min_peer_group=3)
+    assert zscored["operating_margin_z"].notna().all()
+
+
+def test_merge_macro_matches_nearest_date_not_exact():
+    fundamentals = pd.DataFrame(
+        {"period": pd.to_datetime(["2022-03-31", "2022-06-30"]), "ticker": ["AAA", "AAA"], "revenue": [100, 105]}
+    )
+    # Off-by-one-day from the fundamentals period, like a real FRED quarter-end would be.
+    macro = pd.DataFrame(
+        {"treasury_10y": [2.0, 3.0]}, index=pd.to_datetime(["2022-03-30", "2022-06-29"])
+    )
+    macro.index.name = "period"
+
+    merged = merge_macro(fundamentals, macro)
+    assert merged["treasury_10y"].notna().all()
+    assert merged.loc[merged["period"] == pd.Timestamp("2022-03-31"), "treasury_10y"].iloc[0] == 2.0
 
 
 def test_build_feature_table_end_to_end_has_no_crash():
