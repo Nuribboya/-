@@ -5,6 +5,7 @@ import pandas as pd
 from stock_valuation.valuation import BUY_TIERS, NO_SIGNAL
 
 PORTFOLIO_COLUMNS = ["ticker", "sector", "buy_tier", "quality_score", "weight"]
+STEADY_GROWTH_COLUMNS = ["ticker", "sector", "market_cap", "revenue_consistency_reason", "weight"]
 _MAX_ITERATIONS = 50
 
 
@@ -21,6 +22,41 @@ def _redistribute(weights: pd.Series, capped_mask: pd.Series, excess: float) -> 
     else:
         weights.loc[under] += excess / under.sum()
     return weights
+
+
+def _apply_weight_caps(
+    candidates: pd.DataFrame, max_weight_per_stock: float, max_weight_per_sector: float
+) -> pd.DataFrame:
+    """Iteratively cap per-stock and per-sector weight, redistributing the
+    excess to whoever's still under their cap, until stable (or
+    _MAX_ITERATIONS is hit — see build_portfolio's feasibility note).
+    Expects `candidates` to already have a "weight" column summing to 1.0.
+    """
+    candidates = candidates.copy()
+    for _ in range(_MAX_ITERATIONS):
+        changed = False
+
+        over_stock = candidates["weight"] > max_weight_per_stock + 1e-9
+        if over_stock.any():
+            excess = (candidates.loc[over_stock, "weight"] - max_weight_per_stock).sum()
+            candidates.loc[over_stock, "weight"] = max_weight_per_stock
+            candidates["weight"] = _redistribute(candidates["weight"], over_stock, excess)
+            changed = True
+
+        sector_totals = candidates.groupby("sector")["weight"].transform("sum")
+        over_sector = sector_totals > max_weight_per_sector + 1e-9
+        if over_sector.any():
+            scale = max_weight_per_sector / sector_totals[over_sector]
+            excess = (candidates.loc[over_sector, "weight"] * (1 - scale)).sum()
+            candidates.loc[over_sector, "weight"] *= scale
+            candidates["weight"] = _redistribute(candidates["weight"], over_sector, excess)
+            changed = True
+
+        if not changed:
+            break
+
+    candidates["weight"] = candidates["weight"] / candidates["weight"].sum()
+    return candidates
 
 
 def build_portfolio(
@@ -74,28 +110,39 @@ def build_portfolio(
     candidates = candidates.head(max_positions).copy().reset_index(drop=True)
 
     candidates["weight"] = candidates["quality_score"] / candidates["quality_score"].sum()
-
-    for _ in range(_MAX_ITERATIONS):
-        changed = False
-
-        over_stock = candidates["weight"] > max_weight_per_stock + 1e-9
-        if over_stock.any():
-            excess = (candidates.loc[over_stock, "weight"] - max_weight_per_stock).sum()
-            candidates.loc[over_stock, "weight"] = max_weight_per_stock
-            candidates["weight"] = _redistribute(candidates["weight"], over_stock, excess)
-            changed = True
-
-        sector_totals = candidates.groupby("sector")["weight"].transform("sum")
-        over_sector = sector_totals > max_weight_per_sector + 1e-9
-        if over_sector.any():
-            scale = max_weight_per_sector / sector_totals[over_sector]
-            excess = (candidates.loc[over_sector, "weight"] * (1 - scale)).sum()
-            candidates.loc[over_sector, "weight"] *= scale
-            candidates["weight"] = _redistribute(candidates["weight"], over_sector, excess)
-            changed = True
-
-        if not changed:
-            break
-
-    candidates["weight"] = candidates["weight"] / candidates["weight"].sum()
+    candidates = _apply_weight_caps(candidates, max_weight_per_stock, max_weight_per_sector)
     return candidates[PORTFOLIO_COLUMNS].reset_index(drop=True)
+
+
+def build_steady_growth_portfolio(
+    result: pd.DataFrame,
+    max_positions: int = 15,
+    max_weight_per_stock: float = 0.15,
+    max_weight_per_sector: float = 0.30,
+    min_avg_volume: float | None = None,
+) -> pd.DataFrame:
+    """Top-market-cap, revenue-consistent portfolio — independent of the
+    buy-tier/quality-score signal system entirely. For "boring, big,
+    reliably-growing" names rather than statistically-cheap ones.
+
+    Requires `result` to have market_cap and revenue_consistency_ok columns
+    (see pipeline.run_pipeline(use_revenue_consistency=True)). Selection:
+    only revenue_consistency_ok == True names, ranked by market_cap
+    descending, top `max_positions`. Weighted by market_cap (bigger
+    companies get proportionally more weight), then the same per-stock/
+    per-sector cap-and-redistribute as build_portfolio.
+    """
+    candidates = result[result["revenue_consistency_ok"] == True].copy()  # noqa: E712
+    if min_avg_volume is not None:
+        candidates = candidates[candidates["avg_volume"] >= min_avg_volume]
+    candidates = candidates.dropna(subset=["market_cap", "sector"])
+    candidates = candidates[candidates["market_cap"] > 0]
+    if candidates.empty:
+        return pd.DataFrame(columns=STEADY_GROWTH_COLUMNS)
+
+    candidates = candidates.sort_values("market_cap", ascending=False)
+    candidates = candidates.head(max_positions).copy().reset_index(drop=True)
+
+    candidates["weight"] = candidates["market_cap"] / candidates["market_cap"].sum()
+    candidates = _apply_weight_caps(candidates, max_weight_per_stock, max_weight_per_sector)
+    return candidates[STEADY_GROWTH_COLUMNS].reset_index(drop=True)

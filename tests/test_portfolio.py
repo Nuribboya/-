@@ -103,3 +103,79 @@ def test_min_avg_volume_filter_drops_illiquid_names():
     result["avg_volume"] = [2_000_000, 5_000]
     portfolio = build_portfolio(result, min_avg_volume=100_000)
     assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=None):
+    df = pd.DataFrame(
+        {
+            "ticker": tickers,
+            "sector": sectors,
+            "market_cap": market_caps,
+            "revenue_consistency_ok": consistency_ok,
+            "revenue_consistency_reason": ["ok"] * len(tickers),
+        }
+    )
+    if avg_volume is not None:
+        df["avg_volume"] = avg_volume
+    return df
+
+
+def test_steady_growth_portfolio_excludes_inconsistent_revenue_names():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB"], ["Tech", "Health Care"], [2_000_000_000_000, 1_800_000_000_000], [True, False]
+    )
+    portfolio = build_steady_growth_portfolio(result)
+    assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def test_steady_growth_portfolio_ranks_by_market_cap_when_trimming():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB", "CCC"],
+        ["Tech", "Health Care", "Financials"],
+        [1_000_000_000_000, 3_000_000_000_000, 2_000_000_000_000],
+        [True, True, True],
+    )
+    portfolio = build_steady_growth_portfolio(result, max_positions=2)
+    assert set(portfolio["ticker"]) == {"BBB", "CCC"}  # AAA (smallest market cap) trimmed
+
+
+def test_steady_growth_portfolio_weight_sums_to_one_and_respects_caps():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB", "CCC", "DDD", "EEE"],
+        ["Tech", "Tech", "Tech", "Energy", "Financials"],
+        [5_000_000_000_000, 1_000_000_000_000, 500_000_000_000, 800_000_000_000, 800_000_000_000],
+        [True, True, True, True, True],
+    )
+    portfolio = build_steady_growth_portfolio(result, max_weight_per_stock=0.40, max_weight_per_sector=0.40)
+    assert portfolio["weight"].sum() == pytest.approx(1.0)
+    assert (portfolio["weight"] <= 0.40 + 1e-6).all()
+    assert (portfolio.groupby("sector")["weight"].sum() <= 0.40 + 1e-6).all()
+
+
+def test_steady_growth_portfolio_min_avg_volume_filter():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB"],
+        ["Tech", "Health Care"],
+        [1_000_000_000_000, 1_000_000_000_000],
+        [True, True],
+        avg_volume=[2_000_000, 5_000],
+    )
+    portfolio = build_steady_growth_portfolio(result, min_avg_volume=100_000)
+    assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def test_steady_growth_portfolio_empty_when_nothing_qualifies():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(["AAA"], ["Tech"], [1_000_000_000_000], [False])
+    portfolio = build_steady_growth_portfolio(result)
+    assert portfolio.empty
+    assert list(portfolio.columns) == ["ticker", "sector", "market_cap", "revenue_consistency_reason", "weight"]

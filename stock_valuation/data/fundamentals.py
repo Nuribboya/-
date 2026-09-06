@@ -58,3 +58,17 @@ def fetch_quarterly_fundamentals(ticker: str) -> pd.DataFrame:
     out.index.name = "period"
     out["ticker"] = ticker
     return out.sort_index()
+
+
+def fetch_annual_revenue_history(ticker: str) -> pd.DataFrame:
+    """As-filed annual revenue for the fiscal years yfinance's free annual
+    income statement actually returns (typically ~4 years) — deeper history
+    than the quarterly statements above, needed to judge multi-year revenue
+    consistency rather than just the last few quarters.
+    """
+    t = yf.Ticker(ticker)
+    row = _first_available_row(t.financials, RAW_LINE_ITEMS["revenue"])
+    if row is None:
+        return pd.DataFrame(columns=["year", "revenue"])
+    row = pd.to_numeric(row, errors="coerce").dropna()
+    return pd.DataFrame({"year": row.index, "revenue": row.to_numpy()}).sort_values("year").reset_index(drop=True)

@@ -4,11 +4,12 @@ import pandas as pd
 
 from stock_valuation.config import get_sp500_universe
 from stock_valuation.data.filings import extract_section, fetch_cik_lookup, fetch_filing_history, fetch_filing_text
-from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
+from stock_valuation.data.fundamentals import fetch_annual_revenue_history, fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
 from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
+from stock_valuation.growth_consistency import classify_revenue_consistency
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.model import (
@@ -178,6 +179,16 @@ def build_rl_recommendations(
     return recommendations
 
 
+def _fetch_all_annual_revenue(tickers: list[str]) -> dict[str, pd.DataFrame]:
+    histories = {}
+    for ticker in tickers:
+        try:
+            histories[ticker] = fetch_annual_revenue_history(ticker)
+        except Exception:
+            continue
+    return histories
+
+
 def run_pipeline(
     tickers_limit: int | None = 30,
     start: str = "2015-01-01",
@@ -185,6 +196,7 @@ def run_pipeline(
     use_filing_text: bool = False,
     text_components: int = 4,
     use_rl: bool = False,
+    use_revenue_consistency: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     universe = get_sp500_universe(limit=tickers_limit)
     tickers = universe["ticker"].tolist()
@@ -259,7 +271,7 @@ def run_pipeline(
         .reset_index()
     )
 
-    merged = latest_features[["ticker", "quality_score"]].merge(
+    merged = latest_features[["ticker", "quality_score", "shares_outstanding"]].merge(
         multiples[
             ["ticker", "sector", "close", "pe_ratio", "pb_ratio", "pe_ratio_pct", "pb_ratio_pct", "cheapness_percentile"]
         ],
@@ -267,6 +279,9 @@ def run_pipeline(
         how="inner",
     )
     merged = merged.merge(avg_volume, on="ticker", how="left")
+    # Not a new fetch — just price x the share count already collected as
+    # part of the quarterly fundamentals.
+    merged["market_cap"] = merged["close"] * merged["shares_outstanding"]
     result = build_valuation_signal(merged)
     result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
 
@@ -274,6 +289,18 @@ def run_pipeline(
         ticker: classify_undervaluation_cause(group) for ticker, group in features.groupby("ticker")
     }
     result["undervaluation_cause"] = result["ticker"].map(undervaluation_causes)
+
+    if use_revenue_consistency:
+        annual_histories = _fetch_all_annual_revenue(tickers)
+        revenue_consistency = {
+            ticker: classify_revenue_consistency(history) for ticker, history in annual_histories.items()
+        }
+        result["revenue_consistency_ok"] = result["ticker"].map(
+            lambda t: revenue_consistency.get(t, (False, "연간 재무제표 조회 실패"))[0]
+        )
+        result["revenue_consistency_reason"] = result["ticker"].map(
+            lambda t: revenue_consistency.get(t, (False, "연간 재무제표 조회 실패"))[1]
+        )
 
     if use_rl:
         rl_recommendations = build_rl_recommendations(

@@ -66,6 +66,22 @@ def main() -> None:
         default=None,
         help="drop portfolio candidates below this recent average daily volume (liquidity filter)",
     )
+    parser.add_argument(
+        "--steady-growth-portfolio",
+        action="store_true",
+        help="build a portfolio from top-market-cap, revenue-consistent names instead of "
+        "buy-tier signals (fetches each ticker's annual financials automatically — slower)",
+    )
+    parser.add_argument("--steady-growth-output", type=str, default="steady_growth_portfolio.csv")
+    parser.add_argument("--steady-growth-max-positions", type=int, default=15)
+    parser.add_argument("--steady-growth-max-weight-per-stock", type=float, default=0.15)
+    parser.add_argument("--steady-growth-max-weight-per-sector", type=float, default=0.30)
+    parser.add_argument(
+        "--steady-growth-min-volume",
+        type=float,
+        default=None,
+        help="drop steady-growth candidates below this recent average daily volume (liquidity filter)",
+    )
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
@@ -75,6 +91,7 @@ def main() -> None:
         use_filing_text=args.with_text,
         text_components=args.text_components,
         use_rl=args.with_rl,
+        use_revenue_consistency=args.steady_growth_portfolio,
     )
     result.to_csv(args.output, index=False)
 
@@ -95,6 +112,8 @@ def main() -> None:
     ]
     if args.with_rl:
         columns.append("rl_action")
+    if args.steady_growth_portfolio:
+        columns += ["market_cap", "revenue_consistency_reason"]
     print(result[columns])
     print(f"\nsaved to {args.output}")
 
@@ -124,6 +143,21 @@ def main() -> None:
         print("\n=== 포트폴리오 (진단/실험용 — 실제 매매 전 반드시 직접 검토하세요) ===")
         print(portfolio)
         print(f"saved to {args.portfolio_output}")
+
+    if args.steady_growth_portfolio:
+        from stock_valuation.portfolio import build_steady_growth_portfolio
+
+        steady_portfolio = build_steady_growth_portfolio(
+            result,
+            max_positions=args.steady_growth_max_positions,
+            max_weight_per_stock=args.steady_growth_max_weight_per_stock,
+            max_weight_per_sector=args.steady_growth_max_weight_per_sector,
+            min_avg_volume=args.steady_growth_min_volume,
+        )
+        steady_portfolio.to_csv(args.steady_growth_output, index=False)
+        print("\n=== 대형주 + 매출 안정형 포트폴리오 (실제 매매 전 반드시 직접 검토하세요) ===")
+        print(steady_portfolio)
+        print(f"saved to {args.steady_growth_output}")
 
 
 if __name__ == "__main__":

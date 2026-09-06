@@ -8,7 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from stock_valuation.explanations import CAUSE_LIKELY_OVERSOLD
 from stock_valuation.pipeline import run_pipeline
-from stock_valuation.portfolio import build_portfolio
+from stock_valuation.portfolio import build_portfolio, build_steady_growth_portfolio
 from stock_valuation.valuation import BUY_TIERS
 
 st.set_page_config(page_title="S&P500 장기 저평가 스크리너", layout="wide")
@@ -21,6 +21,9 @@ with st.sidebar:
     limit = st.number_input("종목 수", min_value=5, max_value=500, value=500, step=5)
     with_text = st.checkbox("공시 텍스트 임베딩 사용 (느림, 별도 설치 필요)", value=False)
     with_rl = st.checkbox("RL 분할매수 추천 포함", value=False)
+    with_revenue_consistency = st.checkbox(
+        "연간 매출 일관성 체크 포함 (느림 — 대형주+매출안정형 포트폴리오에 필요)", value=False
+    )
     output_path = st.text_input("결과 파일 경로", value=DEFAULT_OUTPUT)
     run_now = st.button("지금 다시 스캔 실행", type="primary")
 
@@ -30,7 +33,12 @@ with st.sidebar:
 
 if run_now:
     with st.spinner(f"{limit}개 종목 스캔 중... (몇 분 걸릴 수 있어요)"):
-        result, metrics = run_pipeline(tickers_limit=limit, use_filing_text=with_text, use_rl=with_rl)
+        result, metrics = run_pipeline(
+            tickers_limit=limit,
+            use_filing_text=with_text,
+            use_rl=with_rl,
+            use_revenue_consistency=with_revenue_consistency,
+        )
         result.to_csv(output_path, index=False)
     accuracy = metrics.get("accuracy")
     msg = f"스캔 완료! (train/test rows: {metrics.get('n_train')}/{metrics.get('n_test')}"
@@ -115,3 +123,39 @@ with st.expander("포트폴리오 구성 (진단/실험용 — 실제 매매 전
             st.bar_chart(portfolio.set_index("ticker")["weight"])
     else:
         st.info("결과 파일에 buy_tier/quality_score/sector 컬럼이 없어서 포트폴리오를 만들 수 없어요.")
+
+with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 전 반드시 직접 검토하세요)"):
+    st.caption(
+        "저평가 신호(buy_tier)와 무관하게, 최근 몇 년간 매출이 감소 구간 없이 꾸준히 늘어난 "
+        "종목만 골라서 시가총액이 큰 순서로 상위 N개를 시총 비중으로 배분합니다. "
+        "스캔할 때 '연간 매출 일관성 체크' 옵션을 켜야 이 섹션이 동작해요."
+    )
+    scol1, scol2, scol3 = st.columns(3)
+    with scol1:
+        steady_max_positions = st.number_input("최대 종목 수 ", min_value=1, max_value=50, value=15)
+    with scol2:
+        steady_max_weight_per_stock = st.slider("종목당 최대 비중 ", 0.02, 1.0, 0.15, 0.01)
+    with scol3:
+        steady_max_weight_per_sector = st.slider("섹터당 최대 비중 ", 0.05, 1.0, 0.30, 0.01)
+    steady_min_volume = st.number_input(
+        "최소 평균 거래량 (최근 20일) ", min_value=0, value=0, step=10_000
+    )
+
+    if "revenue_consistency_ok" not in df or "market_cap" not in df:
+        st.info(
+            "이 결과 파일엔 market_cap/revenue_consistency_ok 컬럼이 없어요 — 왼쪽에서 "
+            "'연간 매출 일관성 체크 포함'을 켜고 다시 스캔해보세요."
+        )
+    else:
+        steady_portfolio = build_steady_growth_portfolio(
+            df,
+            max_positions=steady_max_positions,
+            max_weight_per_stock=steady_max_weight_per_stock,
+            max_weight_per_sector=steady_max_weight_per_sector,
+            min_avg_volume=steady_min_volume if steady_min_volume > 0 else None,
+        )
+        if steady_portfolio.empty:
+            st.info("매출이 꾸준히 늘어난 종목이 없어요 (기준을 완화하거나 --limit을 늘려보세요).")
+        else:
+            st.dataframe(steady_portfolio, width="stretch")
+            st.bar_chart(steady_portfolio.set_index("ticker")["weight"])
