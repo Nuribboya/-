@@ -120,7 +120,7 @@ cp leadradar/config.example.yaml leadradar/config.yaml
 export ANTHROPIC_API_KEY="..."
 ```
 
-### 실행
+### 실행 (샘플 데이터)
 
 ```bash
 python -m leadradar.cli \
@@ -129,10 +129,29 @@ python -m leadradar.cli \
   --out candidates_scored.csv
 ```
 
-`leadradar/fixtures/sample_candidates.json` 은 테스트용 샘플이고, 실제로는
-`leadradar/sources/dart.py`(DART Open API, `DART_API_KEY` 필요)와
-`leadradar/sources/g2b.py`(나라장터 입찰공고정보서비스, `G2B_API_KEY` 필요)로
-수집한 후보 리스트를 같은 JSON 형식으로 만들어 넣으면 됩니다.
+`leadradar/fixtures/sample_candidates.json` 은 테스트용 샘플입니다.
+
+### DART 공개데이터에서 후보 자동 발굴
+
+전체 기업(10만 개 이상)을 다 LLM으로 채점하면 비용/시간이 너무 크기 때문에,
+회사명 키워드로 먼저 후보를 좁히고 그 후보들만 재무정보를 붙여서 내보내는
+단계를 거칩니다. `DART_API_KEY` 환경변수(https://opendart.fss.or.kr 에서 발급)가
+필요합니다.
+
+```bash
+export DART_API_KEY="..."
+python -m leadradar.discover_cli --keywords 반도체 자동화 제어반 검사장비 --out discovered.json
+python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.json --out candidates_scored.csv
+```
+
+첫 실행 시 전체 기업 고유번호 목록을 내려받아 `.dart_corpcodes_cache.json` 에
+캐싱해두고 재사용합니다(자주 안 바뀌는 데이터라 매번 새로 받지 않음). 상장사
+(재무제표를 공시하는 회사)만 다루며, 키워드는 원하는 대로 바꿔서 좁히거나
+넓힐 수 있습니다.
+
+나라장터 입찰공고(`leadradar/sources/g2b.py`, `G2B_API_KEY` 필요)는 별도
+후보 소스로 아직 discover_cli에는 연결되어 있지 않고, 클라이언트 함수만
+제공합니다.
 
 ### 구조
 
@@ -140,5 +159,7 @@ python -m leadradar.cli \
 - `leadradar/models.py` — 후보 회사(`Candidate`), 채점 결과(`ScoredCandidate`)
 - `leadradar/scoring.py` — Claude에게 후보를 실시간으로 채점시키는 핵심 로직
 - `leadradar/pipeline.py` — 후보 로딩 → 채점 → 정렬 → CSV 출력
+- `leadradar/discovery.py` — DART 공개데이터에서 키워드로 후보를 좁혀 `Candidate` 리스트로 만듦
 - `leadradar/sources/dart.py`, `leadradar/sources/g2b.py` — 공개 데이터 수집 클라이언트
-- `leadradar/cli.py` — 커맨드라인 진입점
+- `leadradar/cli.py` — 채점 커맨드라인 진입점
+- `leadradar/discover_cli.py` — DART 후보 발굴 커맨드라인 진입점

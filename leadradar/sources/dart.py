@@ -9,6 +9,7 @@ import io
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
+from typing import Optional
 
 import requests
 
@@ -53,6 +54,25 @@ def fetch_company_overview(api_key: str, corp_code: str) -> dict:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def parse_revenue_growth_pct(financial_highlights: dict) -> Optional[float]:
+    """fetch_financial_highlights() 응답에서 매출액의 전년 대비 성장률(%)을 계산한다.
+
+    실패(계정 없음/금액 파싱 불가/전년 매출 0)하면 None을 반환한다.
+    """
+    for entry in financial_highlights.get("list", []):
+        if entry.get("account_nm") != "매출액" or entry.get("sj_div") != "IS":
+            continue
+        try:
+            current = float(str(entry["thstrm_amount"]).replace(",", ""))
+            previous = float(str(entry["frmtrm_amount"]).replace(",", ""))
+        except (KeyError, ValueError):
+            return None
+        if previous == 0:
+            return None
+        return round((current - previous) / previous * 100, 1)
+    return None
 
 
 def fetch_financial_highlights(
