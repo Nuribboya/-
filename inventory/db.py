@@ -20,7 +20,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    unit TEXT NOT NULL DEFAULT '개'
+    unit TEXT NOT NULL DEFAULT '개',
+    lead_time_days INTEGER NOT NULL DEFAULT 7
 );
 
 CREATE TABLE IF NOT EXISTS movements (
@@ -38,6 +39,7 @@ class Item:
     id: int
     name: str
     unit: str
+    lead_time_days: int = 7
 
 
 @dataclass
@@ -62,6 +64,7 @@ class StockOutlook:
     quantity: int
     avg_daily_consumption: float
     days_until_depletion: Optional[float]
+    needs_reorder: bool
 
 
 @contextmanager
@@ -78,14 +81,27 @@ def connect(db_path: str | Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connectio
 def init_db(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     with connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+        # 이 컬럼 추가 전에 만들어진 기존 DB 파일에도 안전하게 컬럼을 붙여준다.
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+        if "lead_time_days" not in existing_columns:
+            conn.execute("ALTER TABLE items ADD COLUMN lead_time_days INTEGER NOT NULL DEFAULT 7")
 
 
-def get_or_create_item(conn: sqlite3.Connection, name: str, unit: str = "개") -> Item:
-    row = conn.execute("SELECT id, name, unit FROM items WHERE name = ?", (name,)).fetchone()
+def get_or_create_item(conn: sqlite3.Connection, name: str, unit: str = "개", lead_time_days: int = 7) -> Item:
+    row = conn.execute("SELECT id, name, unit, lead_time_days FROM items WHERE name = ?", (name,)).fetchone()
     if row is None:
-        cursor = conn.execute("INSERT INTO items (name, unit) VALUES (?, ?)", (name, unit))
-        return Item(id=cursor.lastrowid, name=name, unit=unit)
-    return Item(id=row["id"], name=row["name"], unit=row["unit"])
+        cursor = conn.execute(
+            "INSERT INTO items (name, unit, lead_time_days) VALUES (?, ?, ?)",
+            (name, unit, lead_time_days),
+        )
+        return Item(id=cursor.lastrowid, name=name, unit=unit, lead_time_days=lead_time_days)
+    return Item(id=row["id"], name=row["name"], unit=row["unit"], lead_time_days=row["lead_time_days"])
+
+
+def set_lead_time_days(db_path: str | Path, item_name: str, lead_time_days: int) -> None:
+    """이미 있는 품목의 리드타임(발주 후 실제 입고까지 걸리는 일수)을 갱신한다."""
+    with connect(db_path) as conn:
+        conn.execute("UPDATE items SET lead_time_days = ? WHERE name = ?", (lead_time_days, item_name))
 
 
 def record_movement(
@@ -94,10 +110,15 @@ def record_movement(
     change_qty: int,
     memo: str = "",
     unit: str = "개",
+    lead_time_days: int = 7,
 ) -> Movement:
-    """재고 변동을 기록한다. change_qty: 입고면 양수, 출고면 음수로 넘긴다."""
+    """재고 변동을 기록한다. change_qty: 입고면 양수, 출고면 음수로 넘긴다.
+
+    lead_time_days는 새 품목을 처음 만들 때만 쓰인다(이미 있는 품목이면 무시됨) -
+    나중에 바꾸려면 set_lead_time_days를 쓴다.
+    """
     with connect(db_path) as conn:
-        item = get_or_create_item(conn, item_name, unit)
+        item = get_or_create_item(conn, item_name, unit, lead_time_days)
         created_at = datetime.now().isoformat(timespec="seconds")
         cursor = conn.execute(
             "INSERT INTO movements (item_id, change_qty, memo, created_at) VALUES (?, ?, ?, ?)",
@@ -117,7 +138,8 @@ def current_stock(db_path: str | Path = DEFAULT_DB_PATH) -> list[StockLevel]:
     with connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT items.id, items.name, items.unit, COALESCE(SUM(movements.change_qty), 0) AS quantity
+            SELECT items.id, items.name, items.unit, items.lead_time_days,
+                   COALESCE(SUM(movements.change_qty), 0) AS quantity
             FROM items
             LEFT JOIN movements ON movements.item_id = items.id
             GROUP BY items.id
@@ -125,7 +147,10 @@ def current_stock(db_path: str | Path = DEFAULT_DB_PATH) -> list[StockLevel]:
             """
         ).fetchall()
         return [
-            StockLevel(item=Item(id=r["id"], name=r["name"], unit=r["unit"]), quantity=r["quantity"])
+            StockLevel(
+                item=Item(id=r["id"], name=r["name"], unit=r["unit"], lead_time_days=r["lead_time_days"]),
+                quantity=r["quantity"],
+            )
             for r in rows
         ]
 
@@ -136,12 +161,17 @@ def stock_outlook(db_path: str | Path = DEFAULT_DB_PATH, lookback_days: int = 30
     딥러닝/통계 모델을 학습시키는 게 아니라 단순 평균 기반 추정이다. 데이터가
     몇 달치 쌓이면 이 기록들을 학습 데이터로 삼아 계절성/추세를 반영하는
     진짜 수요예측 모델로 발전시킬 수 있다.
+
+    needs_reorder는 "예상 소진일이 리드타임(발주 후 실제 입고까지 걸리는 일수)
+    이내"일 때 True가 된다 - 지금 발주 안 하면 다 떨어지기 전에 못 채운다는 뜻.
+    부족(품절)도 과잉(재고 낭비)도 피하려면 이 시점에 딱 맞춰 발주하면 된다.
     """
     cutoff = (datetime.now() - timedelta(days=lookback_days)).isoformat(timespec="seconds")
     with connect(db_path) as conn:
         stock_rows = conn.execute(
             """
-            SELECT items.id, items.name, items.unit, COALESCE(SUM(movements.change_qty), 0) AS quantity
+            SELECT items.id, items.name, items.unit, items.lead_time_days,
+                   COALESCE(SUM(movements.change_qty), 0) AS quantity
             FROM items
             LEFT JOIN movements ON movements.item_id = items.id
             GROUP BY items.id
@@ -166,12 +196,14 @@ def stock_outlook(db_path: str | Path = DEFAULT_DB_PATH, lookback_days: int = 30
         total_out = recent_out_by_item.get(r["id"], 0)
         avg_daily = total_out / lookback_days if total_out else 0.0
         days_until = (r["quantity"] / avg_daily) if avg_daily > 0 else None
+        needs_reorder = days_until is not None and days_until <= r["lead_time_days"]
         outlook.append(
             StockOutlook(
-                item=Item(id=r["id"], name=r["name"], unit=r["unit"]),
+                item=Item(id=r["id"], name=r["name"], unit=r["unit"], lead_time_days=r["lead_time_days"]),
                 quantity=r["quantity"],
                 avg_daily_consumption=round(avg_daily, 2),
                 days_until_depletion=round(days_until, 1) if days_until is not None else None,
+                needs_reorder=needs_reorder,
             )
         )
     return outlook

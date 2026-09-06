@@ -16,7 +16,15 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..db import DEFAULT_DB_PATH, current_stock, init_db, recent_movements, record_movement, stock_outlook
+from ..db import (
+    DEFAULT_DB_PATH,
+    current_stock,
+    init_db,
+    recent_movements,
+    record_movement,
+    set_lead_time_days,
+    stock_outlook,
+)
 
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -54,7 +62,22 @@ def create_movement(
     quantity: int = Form(...),
     unit: str = Form("개"),
     memo: str = Form(""),
+    lead_time_days: int = Form(7),
 ) -> RedirectResponse:
     signed_qty = quantity if direction == "in" else -quantity
-    record_movement(_db_path(), item_name.strip(), signed_qty, memo=memo.strip(), unit=unit.strip() or "개")
+    record_movement(
+        _db_path(),
+        item_name.strip(),
+        signed_qty,
+        memo=memo.strip(),
+        unit=unit.strip() or "개",
+        lead_time_days=lead_time_days,
+    )
     return RedirectResponse(url=".", status_code=303)
+
+
+@app.post("/items/lead-time")
+def update_lead_time(item_name: str = Form(...), lead_time_days: int = Form(...)) -> RedirectResponse:
+    set_lead_time_days(_db_path(), item_name, lead_time_days)
+    # "/items/lead-time"은 경로가 두 단계 깊어서 앱의 "/"로 가려면 ".."가 필요하다.
+    return RedirectResponse(url="..", status_code=303)
