@@ -80,8 +80,14 @@ def merge_macro(df: pd.DataFrame, macro: pd.DataFrame) -> pd.DataFrame:
     `period` would silently leave every macro column NaN. `merge_asof`
     matches each row to its nearest macro date instead.
     """
-    df_sorted = df.sort_values("period")
-    macro_sorted = macro.reset_index().sort_values("period")
+    df_sorted = df.copy()
+    df_sorted["period"] = pd.to_datetime(df_sorted["period"]).astype("datetime64[ns]")
+    df_sorted = df_sorted.sort_values("period")
+
+    macro_sorted = macro.reset_index()
+    macro_sorted["period"] = pd.to_datetime(macro_sorted["period"]).astype("datetime64[ns]")
+    macro_sorted = macro_sorted.sort_values("period")
+
     return pd.merge_asof(df_sorted, macro_sorted, on="period", direction="nearest")
 
 

@@ -93,6 +93,27 @@ def test_merge_macro_matches_nearest_date_not_exact():
     assert merged.loc[merged["period"] == pd.Timestamp("2022-03-31"), "treasury_10y"].iloc[0] == 2.0
 
 
+def test_merge_macro_survives_mismatched_datetime64_units():
+    # yfinance and pandas_datareader don't always hand back the same
+    # datetime64 resolution (seconds vs. microseconds vs. ns) — merge_asof
+    # raises MergeError on that mismatch unless both sides are normalized.
+    fundamentals = pd.DataFrame(
+        {
+            "period": pd.to_datetime(["2022-03-31", "2022-06-30"]).astype("datetime64[s]"),
+            "ticker": ["AAA", "AAA"],
+            "revenue": [100, 105],
+        }
+    )
+    macro = pd.DataFrame(
+        {"treasury_10y": [2.0, 3.0]},
+        index=pd.to_datetime(["2022-03-31", "2022-06-30"]).astype("datetime64[us]"),
+    )
+    macro.index.name = "period"
+
+    merged = merge_macro(fundamentals, macro)
+    assert merged["treasury_10y"].notna().all()
+
+
 def test_build_feature_table_end_to_end_has_no_crash():
     sector_map = pd.DataFrame({"ticker": ["AAA", "BBB"], "sector": ["Tech", "Tech"]})
     macro = pd.DataFrame(
