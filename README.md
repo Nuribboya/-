@@ -144,6 +144,13 @@ python -m leadradar.discover_cli --keywords 반도체 자동화 제어반 검사
 python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.json --out candidates_scored.csv
 ```
 
+후보가 많으면(수백 개) LLM 채점 비용도 그만큼 커지니, `leadradar.cli`에
+`--limit N`을 주면 앞에서부터 N개만 채점해서 비용을 먼저 가늠해볼 수 있습니다.
+
+```bash
+python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.json --limit 10 --out test_scored.csv
+```
+
 첫 실행 시 전체 기업 고유번호 목록을 내려받아 `.dart_corpcodes_cache.json` 에
 캐싱해두고 재사용합니다(자주 안 바뀌는 데이터라 매번 새로 받지 않음). 회사명에
 키워드가 포함되면 상장/비상장 상관없이 후보로 포함하며(비상장사는 재무제표

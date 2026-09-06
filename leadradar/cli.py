@@ -19,10 +19,18 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="설정 YAML 경로")
     parser.add_argument("--candidates", required=True, help="후보 회사 JSON 경로")
     parser.add_argument("--out", default="candidates_scored.csv", help="결과 CSV 경로")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="앞에서부터 이 개수만 채점 (비용 확인용 테스트). 기본: 전체",
+    )
     args = parser.parse_args()
 
     config = LeadRadarConfig.from_yaml(args.config)
     candidates = load_candidates_from_json(args.candidates)
+    if args.limit is not None:
+        candidates = candidates[: args.limit]
     results = run(config, candidates)
     write_results_csv(results, args.out)
 
