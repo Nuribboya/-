@@ -266,3 +266,52 @@ DB 파일 경로를 바꿀 수 있습니다(예: 여러 사람이 같이 보려�
 - `inventory/db.py` — SQLite 스키마(품목, 입출고 기록) + 현재 재고/소진 예상 계산 로직
 - `inventory/webapp/` — 입출고 기록 폼 + 현재 재고/소진 예상/최근 이력을 보여주는 FastAPI 웹 앱
 - `inventory/run_webapp.bat` — 윈도우에서 웹 앱을 더블클릭으로 실행하는 편의 스크립트
+
+## 판넬 부품검사 (panel_inspection)
+
+제작한 판넬(자동제어반) 사진에서 부품을 자동으로 찾아내서, 도면 BOM(필요
+부품 목록)과 대조해 빠지거나 잘못 들어간 부품이 있는지 검사합니다. 여기는
+지금까지의 leadradar/inventory와 달리 **진짜 딥러닝 학습이 필요한 영역**
+입니다(사진에서 부품 위치/종류를 찾아내는 객체탐지 모델).
+
+### 데이터 준비 (사람이 직접 해야 하는 부분)
+
+1. 판넬 사진을 최대한 많이 모읍니다(다양한 각도/조명, 완성 단계별로). 처음엔
+   10~20장으로도 시작할 수 있지만, 각 부품이 최소 수십 장씩 등장해야 정확도가
+   올라갑니다.
+2. [Roboflow](https://roboflow.com)(무료) 같은 도구에 사진을 올리고, 부품별로
+   바운딩박스를 그려 라벨링합니다("차단기", "릴레이", "단자대" 등 클래스 이름은
+   직접 정합니다).
+3. "YOLOv8" 포맷으로 export하면 `images/`, `labels/`, `data.yaml`이 담긴 zip을
+   받습니다. 압축을 풀어둡니다.
+
+### 학습 + 검사 (코드로 하는 부분)
+
+```bash
+pip install -r panel_inspection/requirements.txt
+
+# 1. 라벨링한 데이터로 부품탐지 모델 학습 (사전학습된 YOLOv8n을 파인튜닝)
+python -m panel_inspection.train --data path/to/data.yaml
+
+# 2. 학습된 모델로 새 판넬 사진 검사 (탐지 + BOM 대조를 한번에)
+python -m panel_inspection.check \
+    --model runs/detect/train/weights/best.pt \
+    --image panel.jpg \
+    --bom panel_inspection/bom_example.yaml
+```
+
+`panel_inspection/bom_example.yaml`을 복사해서 실제 도면의 부품/수량으로
+채우면 됩니다 - 부품명은 라벨링할 때 붙인 클래스 이름과 정확히 같아야
+대조가 됩니다.
+
+### 구조
+
+- `panel_inspection/bom.py` — 탐지 결과와 BOM을 대조하는 순수 로직(학습 불필요)
+- `panel_inspection/train.py` — YOLO 포맷 데이터셋으로 부품탐지 모델 파인튜닝
+- `panel_inspection/detect.py` — 학습된 모델로 사진에서 부품 탐지
+- `panel_inspection/check.py` — 탐지 + BOM 대조를 한번에 실행하는 진입점
+- `panel_inspection/bom_example.yaml` — BOM 파일 형식 예시
+
+10~20장으로 처음 학습시킨 모델은 정확도가 낮을 수 있습니다 - 검사하면서
+틀린 사례를 계속 라벨링 데이터에 추가하고 재학습(`train.py` 다시 실행)하는
+식으로 점점 정확해집니다.
