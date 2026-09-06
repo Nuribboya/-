@@ -8,7 +8,7 @@ from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
-from stock_valuation.explanations import build_reason_column
+from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.model import (
@@ -255,6 +255,11 @@ def run_pipeline(
     )
     result = build_valuation_signal(merged)
     result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
+
+    undervaluation_causes = {
+        ticker: classify_undervaluation_cause(group) for ticker, group in features.groupby("ticker")
+    }
+    result["undervaluation_cause"] = result["ticker"].map(undervaluation_causes)
 
     if use_rl:
         rl_recommendations = build_rl_recommendations(

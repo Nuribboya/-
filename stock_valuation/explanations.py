@@ -54,6 +54,37 @@ def format_cheapness_reason(row: pd.Series) -> str:
     return ", ".join(parts) if parts else "밸류에이션 데이터 부족"
 
 
+def classify_undervaluation_cause(ticker_history: pd.DataFrame) -> str:
+    """Simple growth deceleration vs. a genuine fundamental red flag.
+
+    Compares the ticker's own two most recent available quarters — no
+    analyst opinion, just: did revenue/margin/debt actually get worse, or
+    just grow more slowly. Looks at whatever's actually available rather
+    than assuming a fixed lookback exists (yfinance's free quarterly
+    history is often only 4-5 quarters deep).
+    """
+    h = ticker_history.dropna(subset=["revenue", "net_income", "operating_margin", "debt_to_equity"])
+    h = h.sort_values("period")
+    if len(h) < 2:
+        return "판단 근거 부족 (데이터 부족)"
+
+    latest = h.iloc[-1]
+    prior = h.iloc[-2]
+
+    revenue_declining = latest["revenue"] < prior["revenue"]
+    net_income_negative = latest["net_income"] < 0
+    margin_declining = latest["operating_margin"] < prior["operating_margin"] - 0.05
+    debt_rising_sharply = latest["debt_to_equity"] > prior["debt_to_equity"] * 1.3
+
+    red_flags = sum([revenue_declining, net_income_negative, margin_declining, debt_rising_sharply])
+
+    if red_flags >= 2:
+        return "⚠ 펀더멘털 악화 신호 (매출/이익/마진/부채 중 다수 나빠짐) — 밸류트랩 주의"
+    if revenue_declining or margin_declining:
+        return "단순 성장 둔화로 보임 (매출/마진 일부 둔화, 다른 지표는 안정적)"
+    return "펀더멘털은 안정적 — 시장이 과매도했을 가능성"
+
+
 def build_reason_column(
     quality_contributions_by_ticker: dict[str, list[tuple[str, float]]], result: pd.DataFrame
 ) -> pd.Series:

@@ -57,7 +57,15 @@ def main() -> None:
 
     pd.set_option("display.max_colwidth", None)
     pd.set_option("display.width", 200)
-    columns = ["ticker", "sector", "quality_score", "cheapness_percentile", "buy_tier", "reason"]
+    columns = [
+        "ticker",
+        "sector",
+        "quality_score",
+        "cheapness_percentile",
+        "buy_tier",
+        "reason",
+        "undervaluation_cause",
+    ]
     if args.with_rl:
         columns.append("rl_action")
     print(result[columns])
