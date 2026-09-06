@@ -6,7 +6,7 @@ from stock_valuation.config import get_sp500_universe
 from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
-from stock_valuation.features import build_feature_table, feature_columns
+from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.model import drop_dead_feature_columns, predict_quality_score, train_quality_model
 from stock_valuation.valuation import add_cheapness_percentile, build_valuation_signal, compute_valuation_multiples
@@ -75,8 +75,12 @@ def run_pipeline(
 
     model, metrics = train_quality_model(dataset, feat_cols)
 
-    latest_period = dataset["period"].max()
-    latest_features = dataset[dataset["period"] == latest_period].copy()
+    # Score each ticker's most recent fundamentals — not `dataset`'s latest
+    # period, which is capped at "now minus the forward-return horizon"
+    # (a label needs that much future price data to exist). Using dataset
+    # here would silently drop every ticker whose latest quarter is too
+    # recent to have a label yet, which is every ticker's *current* quarter.
+    latest_features = latest_snapshot_per_ticker(features).copy()
     latest_features["quality_score"] = predict_quality_score(model, latest_features, feat_cols)
 
     latest_prices = prices.sort_values("date").groupby("ticker").tail(1)

@@ -31,19 +31,24 @@ def train_quality_model(
     df: pd.DataFrame, feature_cols: list[str], label_col: str = "label"
 ) -> tuple[lgb.LGBMClassifier, dict]:
     """Train a LightGBM classifier predicting long-term relative-return tier
-    from fundamentals + macro features only (no price, no analyst data)."""
+    from fundamentals + macro features only (no price, no analyst data).
+
+    Only rows missing the label itself are dropped — LightGBM natively
+    handles missing feature values (it learns a default split direction for
+    them), so there's no need to throw away a row just because one ratio
+    happened to be NaN that quarter.
+    """
     train, test = time_split(df)
-    train = train.dropna(subset=feature_cols + [label_col])
-    test = test.dropna(subset=feature_cols + [label_col])
+    train = train.dropna(subset=[label_col])
+    test = test.dropna(subset=[label_col])
 
     if train.empty:
-        null_counts = df[feature_cols + [label_col]].isna().sum().to_dict()
         raise ValueError(
-            "No training rows survived dropna() on "
-            f"{feature_cols + [label_col]}. Null counts out of {len(df)} rows: "
-            f"{null_counts}. This usually means a feature column is entirely "
-            "NaN for every row that also has a label — check which column has "
-            "a null count equal to len(df)."
+            f"No rows with a non-null '{label_col}' in the training period "
+            f"({len(df)} total rows). A label needs a full forward-return "
+            "horizon of future price data past its period, so this usually "
+            "means the ticker universe/date range doesn't leave any period "
+            "old enough to have a label yet."
         )
 
     model = lgb.LGBMClassifier(

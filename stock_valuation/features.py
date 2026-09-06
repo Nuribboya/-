@@ -101,6 +101,17 @@ def build_feature_table(
     return df
 
 
+def latest_snapshot_per_ticker(df: pd.DataFrame) -> pd.DataFrame:
+    """Each ticker's most recent row, independent of label availability.
+
+    Used for live scoring: a forward-return label needs a full horizon of
+    future price data, so the truly latest quarter never has one yet.
+    Pulling "latest" from a label-joined dataset would silently drop every
+    ticker's current quarter instead of scoring it.
+    """
+    return df.sort_values("period").groupby("ticker", as_index=False).tail(1)
+
+
 def feature_columns() -> list[str]:
     return [f"{col}_z" for col in RATIO_COLUMNS] + list(
         {"treasury_10y", "cpi", "unemployment_rate", "industrial_production"}

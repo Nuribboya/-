@@ -1,9 +1,9 @@
 import pandas as pd
 import pytest
 
-from stock_valuation.features import add_growth, add_ratios, add_sector_relative_zscores, build_feature_table, merge_macro
+from stock_valuation.features import add_growth, add_ratios, add_sector_relative_zscores, build_feature_table, latest_snapshot_per_ticker, merge_macro
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
-from stock_valuation.model import drop_dead_feature_columns
+from stock_valuation.model import drop_dead_feature_columns, train_quality_model
 from stock_valuation.valuation import add_cheapness_percentile, assign_buy_tier, build_valuation_signal, compute_valuation_multiples
 
 
@@ -246,3 +246,34 @@ def test_drop_dead_feature_columns_only_removes_fully_null_ones():
     kept, dropped = drop_dead_feature_columns(df, ["revenue_growth_yoy_z", "operating_margin_z"])
     assert kept == ["operating_margin_z"]
     assert dropped == ["revenue_growth_yoy_z"]
+
+
+def test_latest_snapshot_per_ticker_picks_most_recent_row_per_ticker():
+    df = pd.DataFrame(
+        {
+            "ticker": ["AAA", "AAA", "BBB"],
+            "period": pd.to_datetime(["2023-03-31", "2023-06-30", "2023-03-31"]),
+            "value": [1, 2, 3],
+        }
+    )
+    latest = latest_snapshot_per_ticker(df)
+    assert set(latest["ticker"]) == {"AAA", "BBB"}
+    assert latest.loc[latest["ticker"] == "AAA", "value"].iloc[0] == 2
+
+
+def test_train_quality_model_tolerates_nan_features_without_dropping_rows():
+    # LightGBM handles missing feature values natively, so a partially-NaN
+    # feature column should not shrink the training set the way dropping on
+    # every feature column used to.
+    periods = pd.to_datetime(["2020-03-31", "2020-06-30", "2020-09-30", "2020-12-31", "2021-03-31"])
+    df = pd.DataFrame(
+        {
+            "period": list(periods) * 4,
+            "ticker": sum([[f"T{i}"] * 5 for i in range(4)], []),
+            "feat_a": [0.1, 0.2, None, 0.4, 0.5] * 4,
+            "feat_b": [1.0, None, 3.0, 4.0, 5.0] * 4,
+            "label": ([0, 1, 2, 0, 1] * 4),
+        }
+    )
+    model, metrics = train_quality_model(df, ["feat_a", "feat_b"])
+    assert metrics["n_train"] == len(df[df["period"] < sorted(df["period"].unique())[-1]])
