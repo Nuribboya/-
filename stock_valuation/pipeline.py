@@ -8,7 +8,7 @@ from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.features import build_feature_table, feature_columns
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
-from stock_valuation.model import predict_quality_score, train_quality_model
+from stock_valuation.model import drop_dead_feature_columns, predict_quality_score, train_quality_model
 from stock_valuation.valuation import add_cheapness_percentile, build_valuation_signal, compute_valuation_multiples
 
 
@@ -57,6 +57,14 @@ def run_pipeline(
 
     dataset = features.merge(labeled[["period", "ticker", "label"]], on=["period", "ticker"], how="inner")
     feat_cols = [c for c in feature_columns() if c in dataset.columns]
+
+    # yfinance's free quarterly statements only go back ~4-5 quarters, so a
+    # YoY (4-quarter-lag) growth feature can be entirely NaN for every row
+    # depending on how much history came back. Drop whatever has no signal
+    # in this run rather than let one dead column wipe out all training rows.
+    feat_cols, dead_cols = drop_dead_feature_columns(dataset, feat_cols)
+    if dead_cols:
+        print(f"[pipeline] dropping fully-null feature columns (insufficient history?): {dead_cols}")
 
     print(
         f"[pipeline] fundamentals={len(fundamentals)} macro={len(macro)} "

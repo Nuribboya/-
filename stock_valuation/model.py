@@ -15,6 +15,18 @@ def time_split(df: pd.DataFrame, period_col: str = "period", test_frac: float = 
     return train, test
 
 
+def drop_dead_feature_columns(df: pd.DataFrame, feature_cols: list[str]) -> tuple[list[str], list[str]]:
+    """Drop feature columns that are entirely NaN in this dataset.
+
+    A column with no signal at all (e.g. a YoY-growth feature when the data
+    source only returned a few quarters of history) would otherwise wipe out
+    every training row via dropna. Returns (kept_cols, dropped_cols).
+    """
+    dead = [c for c in feature_cols if df[c].isna().all()]
+    kept = [c for c in feature_cols if c not in dead]
+    return kept, dead
+
+
 def train_quality_model(
     df: pd.DataFrame, feature_cols: list[str], label_col: str = "label"
 ) -> tuple[lgb.LGBMClassifier, dict]:

@@ -3,6 +3,7 @@ import pytest
 
 from stock_valuation.features import add_growth, add_ratios, add_sector_relative_zscores, build_feature_table, merge_macro
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
+from stock_valuation.model import drop_dead_feature_columns
 from stock_valuation.valuation import add_cheapness_percentile, assign_buy_tier, build_valuation_signal, compute_valuation_multiples
 
 
@@ -233,3 +234,15 @@ def test_features_and_labels_join_survives_upstream_dtype_drift():
 
     dataset = features.merge(labeled[["period", "ticker", "label"]], on=["period", "ticker"], how="inner")
     assert len(dataset) > 0
+
+
+def test_drop_dead_feature_columns_only_removes_fully_null_ones():
+    df = pd.DataFrame(
+        {
+            "revenue_growth_yoy_z": [None, None, None],  # e.g. yfinance only gave 4 quarters
+            "operating_margin_z": [0.1, None, 0.3],
+        }
+    )
+    kept, dropped = drop_dead_feature_columns(df, ["revenue_growth_yoy_z", "operating_margin_z"])
+    assert kept == ["operating_margin_z"]
+    assert dropped == ["revenue_growth_yoy_z"]
