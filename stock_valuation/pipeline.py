@@ -87,6 +87,14 @@ def attach_filing_text_features(
         [dataset[["ticker", "period"]], latest_features[["ticker", "period"]]]
     ).drop_duplicates()
     lookup = build_filing_lookup(combined_periods, histories)
+    matched = lookup["accession_number"].notna().sum()
+    print(
+        f"[pipeline] filing text: {len(cik_lookup)} tickers in CIK lookup, "
+        f"{len(histories)}/{len(tickers)} tickers had a filing history, "
+        f"{matched}/{len(lookup)} (ticker,period) rows matched a real filing "
+        f"(rest fall back to a zero vector)"
+    )
+
     fetch_and_embed = _make_fetch_and_embed_filing(cik_lookup)
     raw_embeddings = attach_text_embeddings(combined_periods, lookup, fetch_and_embed, EMBEDDING_DIM)
     raw_cols = [c for c in raw_embeddings.columns if c.startswith("filing_emb_")]
