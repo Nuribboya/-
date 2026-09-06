@@ -45,7 +45,7 @@ def test_load_or_fetch_corp_codes_uses_cache(tmp_path, monkeypatch):
     assert result == [CorpCode(corp_code="001", corp_name="테스트회사", stock_code="123456")]
 
 
-def test_discover_candidates_skips_unlisted_companies(monkeypatch):
+def test_discover_candidates_includes_unlisted_companies(monkeypatch):
     corp_codes = [
         CorpCode(corp_code="001", corp_name="반도체상장사", stock_code="123456"),
         CorpCode(corp_code="002", corp_name="반도체비상장사", stock_code=""),
@@ -58,22 +58,22 @@ def test_discover_candidates_skips_unlisted_companies(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "fetch_company_overview",
-        lambda api_key, corp_code: {"corp_name": "반도체상장사", "induty_code": "26429"},
+        lambda api_key, corp_code: {"corp_name": corp_code, "induty_code": "26429"},
     )
-    monkeypatch.setattr(
-        discovery,
-        "fetch_financial_highlights",
-        lambda api_key, corp_code, year: {
-            "list": [{"account_nm": "매출액", "sj_div": "IS", "thstrm_amount": "1,200", "frmtrm_amount": "1,000"}]
-        },
-    )
+
+    def _fake_financials(api_key, corp_code, year):
+        if corp_code == "002":
+            raise RuntimeError("비상장사는 사업보고서 미제출로 조회 실패")
+        return {"list": [{"account_nm": "매출액", "sj_div": "IS", "thstrm_amount": "1,200", "frmtrm_amount": "1,000"}]}
+
+    monkeypatch.setattr(discovery, "fetch_financial_highlights", _fake_financials)
 
     candidates = discovery.discover_candidates("dummy-key", keywords=["반도체"])
+    candidates_by_name = {c.name: c for c in candidates}
 
-    assert len(candidates) == 1
-    assert candidates[0].name == "반도체상장사"
-    assert candidates[0].revenue_growth_pct == 20.0
-    assert candidates[0].source == "dart"
+    assert len(candidates) == 2
+    assert candidates_by_name["반도체상장사"].revenue_growth_pct == 20.0
+    assert candidates_by_name["반도체비상장사"].revenue_growth_pct is None
 
 
 def test_discover_candidates_computes_distance_when_kakao_key_given(monkeypatch):

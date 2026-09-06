@@ -56,11 +56,12 @@ def discover_candidates(
     kakao_api_key: str | None = None,
     origin_address: str = "경기도 안성시",
 ) -> list[Candidate]:
-    """키워드로 회사명을 좁힌 뒤, 상장사만 재무정보를 붙여 Candidate 리스트를 만든다.
+    """키워드로 회사명을 좁혀 Candidate 리스트를 만든다.
 
-    비상장사는 DART에 재무제표가 없는 경우가 많아 이번 단계에서는 상장사(stock_code
-    있는 회사)만 다룬다. kakao_api_key를 주면 회사 주소를 위경도로 변환해
-    origin_address(기본: 안성) 기준 직선거리(km)도 함께 채운다.
+    비상장사는 DART에 재무제표가 없는 경우가 많아 revenue_growth_pct가 비어있을
+    수 있지만, 후보 자체에서 제외하지는 않는다(실제 협력사는 비상장인 경우가 더
+    많음). kakao_api_key를 주면 회사 주소를 위경도로 변환해 origin_address(기본:
+    안성) 기준 직선거리(km)도 함께 채운다.
     """
     year = year or (date.today().year - 1)
     corp_codes = load_or_fetch_corp_codes(api_key)
@@ -74,10 +75,10 @@ def discover_candidates(
 
     candidates: list[Candidate] = []
     for corp in matched.values():
-        if not corp.stock_code:
-            continue
-
-        overview = fetch_company_overview(api_key, corp.corp_code)
+        try:
+            overview = fetch_company_overview(api_key, corp.corp_code)
+        except Exception:
+            overview = {}
         induty_code = overview.get("induty_code", "정보없음")
         business_description = f"{overview.get('corp_name', corp.corp_name)} (업종코드 {induty_code})"
 
