@@ -19,7 +19,9 @@ _SYSTEM_PROMPT = """\
 주어진 후보 회사가 우리 회사의 신규 원청으로 얼마나 적합한지 평가하세요.
 
 반드시 아래 JSON 형식으로만 답하고 다른 텍스트는 출력하지 마세요:
-{"fit_score": 0부터 100 사이 정수, "conflicts_with_excluded_client": true 또는 false, "reasoning": "한두 문장 이유"}
+{"fit_score": 0부터 100 사이 정수, "conflicts_with_excluded_client": true 또는 false, "reasoning": "60자 이내 한 문장 이유"}
+
+reasoning은 반드시 60자를 넘기지 마세요(응답이 잘려서 JSON이 깨지는 걸 방지하기 위함).
 
 conflicts_with_excluded_client는 후보 회사의 사업영역이 기존 원청(관계사)과 겹쳐서
 영업하면 그 관계에 문제가 생길 수 있는 경우에만 true로 표시하세요.
@@ -86,7 +88,7 @@ def score_candidate(
 ) -> ScoredCandidate:
     message = client.messages.create(
         model=model,
-        max_tokens=300,
+        max_tokens=600,
         system=_SYSTEM_PROMPT,
         messages=[
             {
