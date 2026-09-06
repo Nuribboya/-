@@ -21,6 +21,7 @@ from .sources.dart import (
     parse_revenue_growth_pct,
     search_corps_by_keyword,
 )
+from .sources.geocode import geocode_address, haversine_distance_km
 
 DEFAULT_CORP_CODE_CACHE = ".dart_corpcodes_cache.json"
 
@@ -52,11 +53,14 @@ def discover_candidates(
     keywords: list[str],
     year: int | None = None,
     limit_per_keyword: int = 50,
+    kakao_api_key: str | None = None,
+    origin_address: str = "경기도 안성시",
 ) -> list[Candidate]:
     """키워드로 회사명을 좁힌 뒤, 상장사만 재무정보를 붙여 Candidate 리스트를 만든다.
 
     비상장사는 DART에 재무제표가 없는 경우가 많아 이번 단계에서는 상장사(stock_code
-    있는 회사)만 다룬다.
+    있는 회사)만 다룬다. kakao_api_key를 주면 회사 주소를 위경도로 변환해
+    origin_address(기본: 안성) 기준 직선거리(km)도 함께 채운다.
     """
     year = year or (date.today().year - 1)
     corp_codes = load_or_fetch_corp_codes(api_key)
@@ -65,6 +69,8 @@ def discover_candidates(
     for keyword in keywords:
         for corp in search_corps_by_keyword(corp_codes, keyword)[:limit_per_keyword]:
             matched[corp.corp_code] = corp
+
+    origin_coords = geocode_address(kakao_api_key, origin_address) if kakao_api_key else None
 
     candidates: list[Candidate] = []
     for corp in matched.values():
@@ -81,11 +87,22 @@ def discover_candidates(
         except Exception:
             revenue_growth_pct = None
 
+        distance_km = None
+        address = overview.get("adres")
+        if origin_coords and address:
+            try:
+                coords = geocode_address(kakao_api_key, address)
+            except Exception:
+                coords = None
+            if coords:
+                distance_km = haversine_distance_km(*origin_coords, *coords)
+
         candidates.append(
             Candidate(
                 name=corp.corp_name,
                 business_description=business_description,
                 revenue_growth_pct=revenue_growth_pct,
+                distance_km=distance_km,
                 source="dart",
             )
         )

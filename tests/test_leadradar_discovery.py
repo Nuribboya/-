@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from leadradar import discovery
 from leadradar.sources.dart import CorpCode, parse_revenue_growth_pct
 
@@ -72,6 +74,43 @@ def test_discover_candidates_skips_unlisted_companies(monkeypatch):
     assert candidates[0].name == "반도체상장사"
     assert candidates[0].revenue_growth_pct == 20.0
     assert candidates[0].source == "dart"
+
+
+def test_discover_candidates_computes_distance_when_kakao_key_given(monkeypatch):
+    corp_codes = [CorpCode(corp_code="001", corp_name="반도체상장사", stock_code="123456")]
+    monkeypatch.setattr(
+        discovery,
+        "load_or_fetch_corp_codes",
+        lambda api_key, cache_path=discovery.DEFAULT_CORP_CODE_CACHE: corp_codes,
+    )
+    monkeypatch.setattr(
+        discovery,
+        "fetch_company_overview",
+        lambda api_key, corp_code: {
+            "corp_name": "반도체상장사",
+            "induty_code": "26429",
+            "adres": "경기도 평택시",
+        },
+    )
+    monkeypatch.setattr(
+        discovery,
+        "fetch_financial_highlights",
+        lambda api_key, corp_code, year: {"list": []},
+    )
+
+    def _fake_geocode(kakao_api_key, address):
+        return {"경기도 안성시": (37.0, 127.0), "경기도 평택시": (37.1, 127.0)}[address]
+
+    monkeypatch.setattr(discovery, "geocode_address", _fake_geocode)
+
+    candidates = discovery.discover_candidates(
+        "dummy-key",
+        keywords=["반도체"],
+        kakao_api_key="dummy-kakao-key",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].distance_km == pytest.approx(11.1, abs=0.5)
 
 
 def test_save_candidates_json_roundtrip(tmp_path):

@@ -149,6 +149,15 @@ python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.j
 (재무제표를 공시하는 회사)만 다루며, 키워드는 원하는 대로 바꿔서 좁히거나
 넓힐 수 있습니다.
 
+`KAKAO_API_KEY`(https://developers.kakao.com 에서 발급) 환경변수를 추가로
+설정하면, 회사 주소를 위경도로 변환해 `--origin`(기본값: 안성) 기준 직선거리
+(km)도 함께 채웁니다. 키가 없으면 거리 계산은 건너뜁니다.
+
+```bash
+export KAKAO_API_KEY="..."
+python -m leadradar.discover_cli --keywords 반도체 자동화 제어반 --origin "경기도 안성시" --out discovered.json
+```
+
 나라장터 입찰공고(`leadradar/sources/g2b.py`, `G2B_API_KEY` 필요)는 별도
 후보 소스로 아직 discover_cli에는 연결되어 있지 않고, 클라이언트 함수만
 제공합니다.
@@ -161,5 +170,6 @@ python -m leadradar.cli --config leadradar/config.yaml --candidates discovered.j
 - `leadradar/pipeline.py` — 후보 로딩 → 채점 → 정렬 → CSV 출력
 - `leadradar/discovery.py` — DART 공개데이터에서 키워드로 후보를 좁혀 `Candidate` 리스트로 만듦
 - `leadradar/sources/dart.py`, `leadradar/sources/g2b.py` — 공개 데이터 수집 클라이언트
+- `leadradar/sources/geocode.py` — 카카오 로컬 API로 주소 → 위경도 변환, 두 좌표 간 거리(km) 계산
 - `leadradar/cli.py` — 채점 커맨드라인 진입점
 - `leadradar/discover_cli.py` — DART 후보 발굴 커맨드라인 진입점
