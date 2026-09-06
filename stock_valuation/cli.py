@@ -11,10 +11,20 @@ def main() -> None:
     parser.add_argument("--start", type=str, default="2015-01-01", help="history start date")
     parser.add_argument("--horizon-days", type=int, default=252, help="forward return horizon")
     parser.add_argument("--output", type=str, default="valuation_signal.csv")
+    parser.add_argument(
+        "--with-text",
+        action="store_true",
+        help="add 10-K/10-Q filing-text embeddings (needs `pip install -r stock_valuation/requirements-text.txt`)",
+    )
+    parser.add_argument("--text-components", type=int, default=16, help="PCA dimensions for filing-text embeddings")
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
-        tickers_limit=args.limit, start=args.start, horizon_days=args.horizon_days
+        tickers_limit=args.limit,
+        start=args.start,
+        horizon_days=args.horizon_days,
+        use_filing_text=args.with_text,
+        text_components=args.text_components,
     )
     result.to_csv(args.output, index=False)
 

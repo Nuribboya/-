@@ -3,12 +3,15 @@ from __future__ import annotations
 import pandas as pd
 
 from stock_valuation.config import get_sp500_universe
+from stock_valuation.data.filings import extract_section, fetch_cik_lookup, fetch_filing_history, fetch_filing_text
 from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
+from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
-from stock_valuation.model import drop_dead_feature_columns, predict_quality_score, train_quality_model
+from stock_valuation.model import drop_dead_feature_columns, predict_quality_score, time_split, train_quality_model
+from stock_valuation.text_features import attach_text_embeddings, build_filing_lookup
 from stock_valuation.valuation import add_cheapness_percentile, build_valuation_signal, compute_valuation_multiples
 
 
@@ -32,10 +35,79 @@ def _fetch_all_prices(tickers: list[str], start: str) -> pd.DataFrame:
     return pd.concat(frames).reset_index(drop=True) if frames else pd.DataFrame()
 
 
+def _fetch_all_filing_histories(tickers: list[str], cik_lookup: dict[str, int]) -> dict[str, pd.DataFrame]:
+    histories = {}
+    for ticker in tickers:
+        cik = cik_lookup.get(ticker.upper())
+        if cik is None:
+            continue
+        try:
+            histories[ticker] = fetch_filing_history(cik)
+        except Exception:
+            continue
+    return histories
+
+
+def _make_fetch_and_embed_filing(cik_lookup: dict[str, int]):
+    def fetch_and_embed_filing(ticker: str, accession_number: str, primary_document: str):
+        cik = cik_lookup[ticker.upper()]
+        raw_text = fetch_filing_text(cik, accession_number, primary_document)
+        text = " ".join(
+            extract_section(raw_text, section) for section in ("risk_factors", "mdna")
+        ).strip()
+        return embed_texts([text])[0]
+
+    return fetch_and_embed_filing
+
+
+def attach_filing_text_features(
+    dataset: pd.DataFrame,
+    latest_features: pd.DataFrame,
+    tickers: list[str],
+    n_components: int = 16,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Attach point-in-time filing-text embeddings to both the training
+    dataset and the current scoring snapshot.
+
+    PCA is fit only on the training split's embeddings (mirroring
+    model.time_split's period cutoff) so no test-period or live-scoring text
+    structure leaks into the projection used at training time.
+    """
+    cik_lookup = fetch_cik_lookup()
+    histories = _fetch_all_filing_histories(tickers, cik_lookup)
+
+    combined_periods = pd.concat(
+        [dataset[["ticker", "period"]], latest_features[["ticker", "period"]]]
+    ).drop_duplicates()
+    lookup = build_filing_lookup(combined_periods, histories)
+    fetch_and_embed = _make_fetch_and_embed_filing(cik_lookup)
+    raw_embeddings = attach_text_embeddings(combined_periods, lookup, fetch_and_embed, EMBEDDING_DIM)
+    raw_cols = [c for c in raw_embeddings.columns if c.startswith("filing_emb_")]
+
+    train_df, _ = time_split(dataset)
+    train_keys = set(zip(train_df["ticker"], train_df["period"]))
+    train_mask = [
+        (t, p) in train_keys for t, p in zip(raw_embeddings["ticker"], raw_embeddings["period"])
+    ]
+    pca = fit_reducer(raw_embeddings.loc[train_mask, raw_cols].to_numpy(), n_components=n_components)
+
+    reduced = reduce_vectors(pca, raw_embeddings[raw_cols].to_numpy())
+    text_cols = [f"text_emb_{i}" for i in range(reduced.shape[1])]
+    reduced_df = pd.concat(
+        [raw_embeddings[["ticker", "period"]], pd.DataFrame(reduced, columns=text_cols)], axis=1
+    )
+
+    dataset_out = dataset.merge(reduced_df, on=["ticker", "period"], how="left")
+    latest_out = latest_features.merge(reduced_df, on=["ticker", "period"], how="left")
+    return dataset_out, latest_out, text_cols
+
+
 def run_pipeline(
     tickers_limit: int | None = 30,
     start: str = "2015-01-01",
     horizon_days: int = 252,
+    use_filing_text: bool = False,
+    text_components: int = 16,
 ) -> tuple[pd.DataFrame, dict]:
     universe = get_sp500_universe(limit=tickers_limit)
     tickers = universe["ticker"].tolist()
@@ -58,6 +130,19 @@ def run_pipeline(
     dataset = features.merge(labeled[["period", "ticker", "label"]], on=["period", "ticker"], how="inner")
     feat_cols = [c for c in feature_columns() if c in dataset.columns]
 
+    # Score each ticker's most recent fundamentals — not `dataset`'s latest
+    # period, which is capped at "now minus the forward-return horizon"
+    # (a label needs that much future price data to exist). Using dataset
+    # here would silently drop every ticker whose latest quarter is too
+    # recent to have a label yet, which is every ticker's *current* quarter.
+    latest_features = latest_snapshot_per_ticker(features).copy()
+
+    if use_filing_text:
+        dataset, latest_features, text_cols = attach_filing_text_features(
+            dataset, latest_features, tickers, n_components=text_components
+        )
+        feat_cols += text_cols
+
     # yfinance's free quarterly statements only go back ~4-5 quarters, so a
     # YoY (4-quarter-lag) growth feature can be entirely NaN for every row
     # depending on how much history came back. Drop whatever has no signal
@@ -74,13 +159,6 @@ def run_pipeline(
     )
 
     model, metrics = train_quality_model(dataset, feat_cols)
-
-    # Score each ticker's most recent fundamentals — not `dataset`'s latest
-    # period, which is capped at "now minus the forward-return horizon"
-    # (a label needs that much future price data to exist). Using dataset
-    # here would silently drop every ticker whose latest quarter is too
-    # recent to have a label yet, which is every ticker's *current* quarter.
-    latest_features = latest_snapshot_per_ticker(features).copy()
     latest_features["quality_score"] = predict_quality_score(model, latest_features, feat_cols)
 
     latest_prices = prices.sort_values("date").groupby("ticker").tail(1)
