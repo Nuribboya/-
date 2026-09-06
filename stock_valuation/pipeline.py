@@ -8,9 +8,16 @@ from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
+from stock_valuation.explanations import build_reason_column
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
-from stock_valuation.model import drop_dead_feature_columns, predict_quality_score, time_split, train_quality_model
+from stock_valuation.model import (
+    drop_dead_feature_columns,
+    explain_quality_scores,
+    predict_quality_score,
+    time_split,
+    train_quality_model,
+)
 from stock_valuation.text_features import attach_text_embeddings, build_filing_lookup
 from stock_valuation.valuation import add_cheapness_percentile, build_valuation_signal, compute_valuation_multiples
 
@@ -160,6 +167,9 @@ def run_pipeline(
 
     model, metrics = train_quality_model(dataset, feat_cols)
     latest_features["quality_score"] = predict_quality_score(model, latest_features, feat_cols)
+    quality_contributions_by_ticker = dict(
+        zip(latest_features["ticker"], explain_quality_scores(model, latest_features, feat_cols))
+    )
 
     latest_prices = prices.sort_values("date").groupby("ticker").tail(1)
     eps_book = pd.DataFrame(fetch_trailing_eps_and_book(t) for t in tickers)
@@ -167,9 +177,12 @@ def run_pipeline(
     multiples = add_cheapness_percentile(multiples)
 
     merged = latest_features[["ticker", "quality_score"]].merge(
-        multiples[["ticker", "sector", "close", "pe_ratio", "pb_ratio", "cheapness_percentile"]],
+        multiples[
+            ["ticker", "sector", "close", "pe_ratio", "pb_ratio", "pe_ratio_pct", "pb_ratio_pct", "cheapness_percentile"]
+        ],
         on="ticker",
         how="inner",
     )
     result = build_valuation_signal(merged)
+    result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
     return result, metrics

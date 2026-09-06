@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+import pandas as pd
+
 from stock_valuation.pipeline import run_pipeline
 
 
@@ -31,7 +33,10 @@ def main() -> None:
     print(f"train/test rows: {metrics.get('n_train')}/{metrics.get('n_test')}")
     if "accuracy" in metrics:
         print(f"holdout accuracy: {metrics['accuracy']:.3f}")
-    print(result[["ticker", "sector", "quality_score", "cheapness_percentile", "buy_tier"]])
+
+    pd.set_option("display.max_colwidth", None)
+    pd.set_option("display.width", 200)
+    print(result[["ticker", "sector", "quality_score", "cheapness_percentile", "buy_tier", "reason"]])
     print(f"\nsaved to {args.output}")
 
 
