@@ -103,3 +103,42 @@ pytest
 - `mathgrader/parsing.py` — 수식/답안 문자열 파싱, 답안 비교
 - `mathgrader/grader.py` — 분류 → 풀이 → 채점을 총괄하는 진입점
 - `web/` — FastAPI 기반 웹 UI 및 API
+
+## 원청 레이더 (leadradar)
+
+신규 원청(고객사) 후보를 실시간으로 평가하는 도구입니다. 후보 회사 데이터를
+LLM(Claude)에게 매번 넣어서 그 자리에서 적합도를 추론하는 방식이라, 별도로
+모델을 학습시킬 필요 없이 후보가 추가될 때마다 바로 점수를 매길 수 있습니다.
+또한 설정에 등록한 기존 원청과 사업영역이 겹치는 후보는 `conflicts_with_excluded_client`
+플래그로 표시해 관계상 문제가 될 만한 후보를 걸러냅니다.
+
+### 설정
+
+```bash
+cp leadradar/config.example.yaml leadradar/config.yaml
+# leadradar/config.yaml 을 열어 own_company / excluded_client 를 실제 값으로 채우기
+export ANTHROPIC_API_KEY="..."
+```
+
+### 실행
+
+```bash
+python -m leadradar.cli \
+  --config leadradar/config.yaml \
+  --candidates leadradar/fixtures/sample_candidates.json \
+  --out candidates_scored.csv
+```
+
+`leadradar/fixtures/sample_candidates.json` 은 테스트용 샘플이고, 실제로는
+`leadradar/sources/dart.py`(DART Open API, `DART_API_KEY` 필요)와
+`leadradar/sources/g2b.py`(나라장터 입찰공고정보서비스, `G2B_API_KEY` 필요)로
+수집한 후보 리스트를 같은 JSON 형식으로 만들어 넣으면 됩니다.
+
+### 구조
+
+- `leadradar/config.py` — 우리 회사 프로필 + 사업영역이 겹치면 안 되는 기존 원청 설정
+- `leadradar/models.py` — 후보 회사(`Candidate`), 채점 결과(`ScoredCandidate`)
+- `leadradar/scoring.py` — Claude에게 후보를 실시간으로 채점시키는 핵심 로직
+- `leadradar/pipeline.py` — 후보 로딩 → 채점 → 정렬 → CSV 출력
+- `leadradar/sources/dart.py`, `leadradar/sources/g2b.py` — 공개 데이터 수집 클라이언트
+- `leadradar/cli.py` — 커맨드라인 진입점

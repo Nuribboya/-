@@ -1,0 +1,12 @@
+# leadradar 설정 예시 - 복사해서 config.yaml로 만들고 실제 값을 채우세요.
+own_company:
+  name: "(우리 회사명)"
+  business_description: "반도체 장비용 자동제어시스템/제어반(판넬) 설계 및 제작"
+
+# 사업영역이 겹치면 관계상 문제가 되는 기존 원청. 겹침 판단의 기준이 되니
+# 실제 사업분야를 최대한 구체적으로 적어주세요.
+excluded_client:
+  name: "케이씨그룹"
+  business_description: "(케이씨그룹이 실제로 하는 사업을 여기에 구체적으로 적어주세요)"
+
+anthropic_model: "claude-sonnet-5"

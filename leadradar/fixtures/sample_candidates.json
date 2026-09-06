@@ -1,0 +1,30 @@
+[
+  {
+    "name": "지투파워",
+    "business_description": "ESS/PCS/배전반 제조",
+    "distance_km": 17.5,
+    "revenue_growth_pct": 39.6,
+    "source": "dart"
+  },
+  {
+    "name": "영우디에스피",
+    "business_description": "반도체/디스플레이 검사장비 제조",
+    "distance_km": 20,
+    "revenue_growth_pct": 36.3,
+    "source": "dart"
+  },
+  {
+    "name": "에이팩트",
+    "business_description": "반도체 테스트소켓/부품 제조",
+    "distance_km": 0,
+    "revenue_growth_pct": 28.0,
+    "source": "dart"
+  },
+  {
+    "name": "유니테스트",
+    "business_description": "반도체 테스트장비 제조",
+    "distance_km": 17.5,
+    "revenue_growth_pct": 19.2,
+    "source": "dart"
+  }
+]
