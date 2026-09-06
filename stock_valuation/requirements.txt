@@ -1,5 +1,6 @@
 pandas
 numpy
+requests
 scikit-learn
 lightgbm
 yfinance

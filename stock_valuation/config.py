@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import io
+
 import pandas as pd
+import requests
 
 WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+# Wikipedia blocks the default urllib/pandas user agent as a bot; a normal
+# browser UA gets through. Without this, read_html would fail every time
+# and silently drop to the 10-name FALLBACK_UNIVERSE below.
+REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; stock-valuation-screener/1.0)"}
 
 # Small offline fallback so the pipeline still runs without network access.
 # Real runs should use get_sp500_universe(), which pulls the live constituent
@@ -31,12 +38,15 @@ def get_sp500_universe(limit: int | None = None) -> pd.DataFrame:
     the rest of the pipeline stays runnable offline for testing.
     """
     try:
-        tables = pd.read_html(WIKI_SP500_URL)
+        response = requests.get(WIKI_SP500_URL, headers=REQUEST_HEADERS, timeout=10)
+        response.raise_for_status()
+        tables = pd.read_html(io.StringIO(response.text))
         table = tables[0][["Symbol", "GICS Sector"]].rename(
             columns={"Symbol": "ticker", "GICS Sector": "sector"}
         )
         table["ticker"] = table["ticker"].str.replace(".", "-", regex=False)
-    except Exception:
+    except Exception as exc:
+        print(f"[config] couldn't fetch live S&P500 list from Wikipedia ({exc!r}); using the 10-name fallback")
         table = FALLBACK_UNIVERSE.copy()
 
     if limit is not None:
