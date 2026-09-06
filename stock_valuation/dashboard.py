@@ -7,6 +7,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from stock_valuation.pipeline import run_pipeline
+from stock_valuation.portfolio import build_portfolio
 
 st.set_page_config(page_title="S&P500 장기 저평가 스크리너", layout="wide")
 st.title("S&P500 장기 저평가 스크리너")
@@ -64,3 +65,33 @@ st.caption(f"{len(filtered)} / {len(df)} 종목 표시 중")
 
 if auto_refresh_min > 0:
     st_autorefresh(interval=auto_refresh_min * 60 * 1000, key="dashboard_auto_refresh")
+
+st.divider()
+with st.expander("포트폴리오 구성 (진단/실험용 — 실제 매매 전 반드시 직접 검토하세요)"):
+    st.caption(
+        "매수 신호(관망 제외) 받은 종목들을 품질점수 비중으로 배분하고, "
+        "종목당/섹터당 상한을 넘지 않게 초과분을 나머지 종목에 재분배합니다. "
+        "평균-분산 최적화가 아니라 단순 분산 투자 규칙입니다."
+    )
+    pcol1, pcol2, pcol3 = st.columns(3)
+    with pcol1:
+        max_positions = st.number_input("최대 종목 수", min_value=1, max_value=50, value=15)
+    with pcol2:
+        max_weight_per_stock = st.slider("종목당 최대 비중", 0.02, 1.0, 0.15, 0.01)
+    with pcol3:
+        max_weight_per_sector = st.slider("섹터당 최대 비중", 0.05, 1.0, 0.30, 0.01)
+
+    if "buy_tier" in df and "quality_score" in df and "sector" in df:
+        portfolio = build_portfolio(
+            df,
+            max_positions=max_positions,
+            max_weight_per_stock=max_weight_per_stock,
+            max_weight_per_sector=max_weight_per_sector,
+        )
+        if portfolio.empty:
+            st.info("현재 스캔 결과에 매수 신호(관망 아닌) 종목이 없어요.")
+        else:
+            st.dataframe(portfolio, width="stretch")
+            st.bar_chart(portfolio.set_index("ticker")["weight"])
+    else:
+        st.info("결과 파일에 buy_tier/quality_score/sector 컬럼이 없어서 포트폴리오를 만들 수 없어요.")

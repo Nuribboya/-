@@ -39,6 +39,16 @@ def main() -> None:
         help="ntfy.sh topic to push a phone notification to when a 3차 매수(강한 저평가) "
         "signal shows up in this run (see README for setup — free, no account needed)",
     )
+    parser.add_argument(
+        "--portfolio",
+        action="store_true",
+        help="build a weighted candidate portfolio from this run's buy signals "
+        "(diversification rules, not a real optimizer — see README)",
+    )
+    parser.add_argument("--portfolio-output", type=str, default="portfolio.csv")
+    parser.add_argument("--portfolio-max-positions", type=int, default=15)
+    parser.add_argument("--portfolio-max-weight-per-stock", type=float, default=0.15)
+    parser.add_argument("--portfolio-max-weight-per-sector", type=float, default=0.30)
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
@@ -78,6 +88,20 @@ def main() -> None:
         if tickers:
             send_ntfy_notification(args.notify_topic, format_notification_message(tickers))
             print(f"notified topic '{args.notify_topic}': {tickers}")
+
+    if args.portfolio:
+        from stock_valuation.portfolio import build_portfolio
+
+        portfolio = build_portfolio(
+            result,
+            max_positions=args.portfolio_max_positions,
+            max_weight_per_stock=args.portfolio_max_weight_per_stock,
+            max_weight_per_sector=args.portfolio_max_weight_per_sector,
+        )
+        portfolio.to_csv(args.portfolio_output, index=False)
+        print("\n=== 포트폴리오 (진단/실험용 — 실제 매매 전 반드시 직접 검토하세요) ===")
+        print(portfolio)
+        print(f"saved to {args.portfolio_output}")
 
 
 if __name__ == "__main__":
