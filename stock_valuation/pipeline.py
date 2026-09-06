@@ -246,6 +246,19 @@ def run_pipeline(
     multiples = compute_valuation_multiples(latest_prices, eps_book, universe[["ticker", "sector"]])
     multiples = add_cheapness_percentile(multiples)
 
+    # A simple liquidity gauge for the --portfolio-min-volume filter — mean
+    # of the most recent trading days actually available, not a fixed
+    # window that might not exist for a thinly-covered ticker.
+    avg_volume = (
+        prices.sort_values("date")
+        .groupby("ticker")
+        .tail(20)
+        .groupby("ticker")["volume"]
+        .mean()
+        .rename("avg_volume")
+        .reset_index()
+    )
+
     merged = latest_features[["ticker", "quality_score"]].merge(
         multiples[
             ["ticker", "sector", "close", "pe_ratio", "pb_ratio", "pe_ratio_pct", "pb_ratio_pct", "cheapness_percentile"]
@@ -253,6 +266,7 @@ def run_pipeline(
         on="ticker",
         how="inner",
     )
+    merged = merged.merge(avg_volume, on="ticker", how="left")
     result = build_valuation_signal(merged)
     result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
 

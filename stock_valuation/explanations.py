@@ -54,6 +54,12 @@ def format_cheapness_reason(row: pd.Series) -> str:
     return ", ".join(parts) if parts else "밸류에이션 데이터 부족"
 
 
+CAUSE_RED_FLAG = "⚠ 펀더멘털 악화 신호 (매출/이익/마진/부채 중 다수 나빠짐) — 밸류트랩 주의"
+CAUSE_GROWTH_DECELERATION = "단순 성장 둔화로 보임 (매출/마진 일부 둔화, 다른 지표는 안정적)"
+CAUSE_LIKELY_OVERSOLD = "펀더멘털은 안정적 — 시장이 과매도했을 가능성"
+CAUSE_INSUFFICIENT_DATA = "판단 근거 부족 (데이터 부족)"
+
+
 def classify_undervaluation_cause(ticker_history: pd.DataFrame) -> str:
     """Simple growth deceleration vs. a genuine fundamental red flag.
 
@@ -66,7 +72,7 @@ def classify_undervaluation_cause(ticker_history: pd.DataFrame) -> str:
     h = ticker_history.dropna(subset=["revenue", "net_income", "operating_margin", "debt_to_equity"])
     h = h.sort_values("period")
     if len(h) < 2:
-        return "판단 근거 부족 (데이터 부족)"
+        return CAUSE_INSUFFICIENT_DATA
 
     latest = h.iloc[-1]
     prior = h.iloc[-2]
@@ -79,10 +85,10 @@ def classify_undervaluation_cause(ticker_history: pd.DataFrame) -> str:
     red_flags = sum([revenue_declining, net_income_negative, margin_declining, debt_rising_sharply])
 
     if red_flags >= 2:
-        return "⚠ 펀더멘털 악화 신호 (매출/이익/마진/부채 중 다수 나빠짐) — 밸류트랩 주의"
+        return CAUSE_RED_FLAG
     if revenue_declining or margin_declining:
-        return "단순 성장 둔화로 보임 (매출/마진 일부 둔화, 다른 지표는 안정적)"
-    return "펀더멘털은 안정적 — 시장이 과매도했을 가능성"
+        return CAUSE_GROWTH_DECELERATION
+    return CAUSE_LIKELY_OVERSOLD
 
 
 def build_reason_column(

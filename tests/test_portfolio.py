@@ -68,3 +68,38 @@ def test_prioritizes_stronger_buy_tiers_when_trimming_to_max_positions():
     )
     portfolio = build_portfolio(result, max_positions=2)
     assert set(portfolio["ticker"]) == {"BBB", "CCC"}  # AAA (weakest tier) trimmed first
+
+
+def test_tiers_filter_restricts_to_only_the_given_buy_tiers():
+    result = _result(
+        ["AAA", "BBB", "CCC"],
+        ["Tech", "Health Care", "Financials"],
+        ["3차 매수 (강한 저평가)", "1차 매수", "2차 매수"],
+        [0.5, 0.5, 0.5],
+    )
+    portfolio = build_portfolio(result, tiers=["3차 매수 (강한 저평가)"])
+    assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def test_causes_filter_keeps_only_matching_undervaluation_cause():
+    result = _result(
+        ["AAA", "BBB"],
+        ["Tech", "Health Care"],
+        ["3차 매수 (강한 저평가)", "3차 매수 (강한 저평가)"],
+        [0.5, 0.5],
+    )
+    result["undervaluation_cause"] = ["펀더멘털은 안정적 — 시장이 과매도했을 가능성", "단순 성장 둔화로 보임 (매출/마진 일부 둔화, 다른 지표는 안정적)"]
+    portfolio = build_portfolio(result, causes=["펀더멘털은 안정적 — 시장이 과매도했을 가능성"])
+    assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def test_min_avg_volume_filter_drops_illiquid_names():
+    result = _result(
+        ["AAA", "BBB"],
+        ["Tech", "Health Care"],
+        ["3차 매수 (강한 저평가)", "3차 매수 (강한 저평가)"],
+        [0.5, 0.5],
+    )
+    result["avg_volume"] = [2_000_000, 5_000]
+    portfolio = build_portfolio(result, min_avg_volume=100_000)
+    assert set(portfolio["ticker"]) == {"AAA"}

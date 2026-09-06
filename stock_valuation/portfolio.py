@@ -28,15 +28,27 @@ def build_portfolio(
     max_positions: int = 15,
     max_weight_per_stock: float = 0.15,
     max_weight_per_sector: float = 0.30,
+    tiers: list[str] | None = None,
+    causes: list[str] | None = None,
+    min_avg_volume: float | None = None,
 ) -> pd.DataFrame:
     """Turn the scored/ranked screener output into a weighted candidate
     portfolio — diversification rules, not mean-variance optimization
     (this project has no return-covariance model to optimize against).
 
     Only names that already cleared a buy signal (not 관망/NO_SIGNAL) are
-    eligible. Weighted by quality_score, ranked by buy tier strength first,
-    then capped per-stock and per-sector by iteratively capping and
-    redistributing the excess to everyone still under their cap.
+    eligible by default. Weighted by quality_score, ranked by buy tier
+    strength first, then capped per-stock and per-sector by iteratively
+    capping and redistributing the excess to everyone still under their cap.
+
+    Optional narrowing filters:
+    - `tiers`: keep only these buy_tier values (e.g. just the strongest
+      tier) instead of any non-관망 tier.
+    - `causes`: keep only these undervaluation_cause values (e.g. only
+      explanations.CAUSE_LIKELY_OVERSOLD, excluding value traps and simple
+      growth deceleration). Requires `result` to have that column.
+    - `min_avg_volume`: drop names below this average daily volume, as a
+      basic liquidity floor. Requires `result` to have an avg_volume column.
 
     The per-stock cap alone requires max_positions * max_weight_per_stock
     >= 1.0 to be satisfiable at all (e.g. 15 positions need >= ~6.7% cap
@@ -45,6 +57,12 @@ def build_portfolio(
     there's no feasible allocation that respects them.
     """
     candidates = result[result["buy_tier"] != NO_SIGNAL].copy()
+    if tiers is not None:
+        candidates = candidates[candidates["buy_tier"].isin(tiers)]
+    if causes is not None:
+        candidates = candidates[candidates["undervaluation_cause"].isin(causes)]
+    if min_avg_volume is not None:
+        candidates = candidates[candidates["avg_volume"] >= min_avg_volume]
     candidates = candidates.dropna(subset=["quality_score", "sector"])
     candidates = candidates[candidates["quality_score"] > 0]
     if candidates.empty:

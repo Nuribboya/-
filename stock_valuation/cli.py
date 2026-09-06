@@ -49,6 +49,23 @@ def main() -> None:
     parser.add_argument("--portfolio-max-positions", type=int, default=15)
     parser.add_argument("--portfolio-max-weight-per-stock", type=float, default=0.15)
     parser.add_argument("--portfolio-max-weight-per-sector", type=float, default=0.30)
+    parser.add_argument(
+        "--portfolio-strong-only",
+        action="store_true",
+        help="restrict portfolio candidates to the strongest tier only (3차 매수, 강한 저평가)",
+    )
+    parser.add_argument(
+        "--portfolio-oversold-only",
+        action="store_true",
+        help="restrict portfolio candidates to the '펀더멘털은 안정적 — 시장이 과매도했을 가능성' "
+        "cause only, excluding value traps and simple growth deceleration",
+    )
+    parser.add_argument(
+        "--portfolio-min-volume",
+        type=float,
+        default=None,
+        help="drop portfolio candidates below this recent average daily volume (liquidity filter)",
+    )
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
@@ -90,13 +107,18 @@ def main() -> None:
             print(f"notified topic '{args.notify_topic}': {tickers}")
 
     if args.portfolio:
+        from stock_valuation.explanations import CAUSE_LIKELY_OVERSOLD
         from stock_valuation.portfolio import build_portfolio
+        from stock_valuation.valuation import BUY_TIERS
 
         portfolio = build_portfolio(
             result,
             max_positions=args.portfolio_max_positions,
             max_weight_per_stock=args.portfolio_max_weight_per_stock,
             max_weight_per_sector=args.portfolio_max_weight_per_sector,
+            tiers=[BUY_TIERS[0][1]] if args.portfolio_strong_only else None,
+            causes=[CAUSE_LIKELY_OVERSOLD] if args.portfolio_oversold_only else None,
+            min_avg_volume=args.portfolio_min_volume,
         )
         portfolio.to_csv(args.portfolio_output, index=False)
         print("\n=== 포트폴리오 (진단/실험용 — 실제 매매 전 반드시 직접 검토하세요) ===")

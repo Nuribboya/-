@@ -6,8 +6,10 @@ import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from stock_valuation.explanations import CAUSE_LIKELY_OVERSOLD
 from stock_valuation.pipeline import run_pipeline
 from stock_valuation.portfolio import build_portfolio
+from stock_valuation.valuation import BUY_TIERS
 
 st.set_page_config(page_title="S&P500 장기 저평가 스크리너", layout="wide")
 st.title("S&P500 장기 저평가 스크리너")
@@ -81,15 +83,33 @@ with st.expander("포트폴리오 구성 (진단/실험용 — 실제 매매 전
     with pcol3:
         max_weight_per_sector = st.slider("섹터당 최대 비중", 0.05, 1.0, 0.30, 0.01)
 
+    fcol1, fcol2, fcol3 = st.columns(3)
+    with fcol1:
+        strong_only = st.checkbox("3차 매수(강한 저평가)만", value=False)
+    with fcol2:
+        oversold_only = st.checkbox("단순 과매도만 (밸류트랩/성장둔화 제외)", value=False)
+    with fcol3:
+        min_volume = st.number_input("최소 평균 거래량 (최근 20일)", min_value=0, value=0, step=10_000)
+
+    if oversold_only and "undervaluation_cause" not in df:
+        st.warning("이 결과 파일엔 undervaluation_cause 컬럼이 없어서 '단순 과매도만' 필터를 못 써요 — 다시 스캔해보세요.")
+        oversold_only = False
+    if min_volume > 0 and "avg_volume" not in df:
+        st.warning("이 결과 파일엔 avg_volume 컬럼이 없어서 거래량 필터를 못 써요 — 다시 스캔해보세요.")
+        min_volume = 0
+
     if "buy_tier" in df and "quality_score" in df and "sector" in df:
         portfolio = build_portfolio(
             df,
             max_positions=max_positions,
             max_weight_per_stock=max_weight_per_stock,
             max_weight_per_sector=max_weight_per_sector,
+            tiers=[BUY_TIERS[0][1]] if strong_only else None,
+            causes=[CAUSE_LIKELY_OVERSOLD] if oversold_only else None,
+            min_avg_volume=min_volume if min_volume > 0 else None,
         )
         if portfolio.empty:
-            st.info("현재 스캔 결과에 매수 신호(관망 아닌) 종목이 없어요.")
+            st.info("이 조건에 맞는 종목이 없어요. 필터를 완화해보세요.")
         else:
             st.dataframe(portfolio, width="stretch")
             st.bar_chart(portfolio.set_index("ticker")["weight"])

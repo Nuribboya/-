@@ -231,6 +231,22 @@ python -m stock_valuation.cli --limit 500 --portfolio
 - 대시보드에서는 결과표 아래 "포트폴리오 구성" 펼치기 메뉴에서 슬라이더로
   값 조정하면서 바로 확인할 수 있어요.
 
+**후보를 더 좁히고 싶으면** (예: "3차 매수인데 밸류트랩 아니고 거래량도
+받쳐주는 것만"):
+
+```bash
+python -m stock_valuation.cli --limit 500 --portfolio \
+  --portfolio-strong-only --portfolio-oversold-only --portfolio-min-volume 500000
+```
+
+- `--portfolio-strong-only`: 3차 매수(강한 저평가)만 후보로
+- `--portfolio-oversold-only`: `undervaluation_cause`가 "펀더멘털은 안정적
+  — 시장이 과매도했을 가능성"인 것만 (밸류트랩/단순 성장 둔화 제외)
+- `--portfolio-min-volume`: 최근 20거래일 평균 거래량이 이 값 이상인
+  것만 (너무 얇게 거래되는 종목 거르는 유동성 필터)
+
+대시보드에도 같은 필터가 체크박스/숫자입력으로 들어가 있어요.
+
 > ⚠️ **이건 평균-분산 최적화(Markowitz) 같은 게 아니라 단순 분산 규칙입니다.**
 > 종목 간 가격 상관관계나 변동성은 전혀 안 봅니다 — 그냥 "한 종목/섹터에
 > 너무 몰리지 않게" 상한만 지키는 수준이에요. 그리고 종목 수가 너무 적은데
