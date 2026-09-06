@@ -58,6 +58,13 @@ def run_pipeline(
     dataset = features.merge(labeled[["period", "ticker", "label"]], on=["period", "ticker"], how="inner")
     feat_cols = [c for c in feature_columns() if c in dataset.columns]
 
+    print(
+        f"[pipeline] fundamentals={len(fundamentals)} macro={len(macro)} "
+        f"features={len(features)} prices={len(prices)} "
+        f"forward_returns={len(forward_returns)} labeled={len(labeled)} "
+        f"dataset={len(dataset)} feat_cols={feat_cols}"
+    )
+
     model, metrics = train_quality_model(dataset, feat_cols)
 
     latest_period = dataset["period"].max()

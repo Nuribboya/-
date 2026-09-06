@@ -24,6 +24,16 @@ def train_quality_model(
     train = train.dropna(subset=feature_cols + [label_col])
     test = test.dropna(subset=feature_cols + [label_col])
 
+    if train.empty:
+        null_counts = df[feature_cols + [label_col]].isna().sum().to_dict()
+        raise ValueError(
+            "No training rows survived dropna() on "
+            f"{feature_cols + [label_col]}. Null counts out of {len(df)} rows: "
+            f"{null_counts}. This usually means a feature column is entirely "
+            "NaN for every row that also has a label — check which column has "
+            "a null count equal to len(df)."
+        )
+
     model = lgb.LGBMClassifier(
         n_estimators=300,
         max_depth=4,
