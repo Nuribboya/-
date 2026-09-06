@@ -85,12 +85,14 @@ def run(
         results = run_scoring(config, candidates)
         upsert_scored_candidates(_results_db_path(), results)
     except Exception as exc:  # 화면에 에러 메시지를 그대로 보여주기 위함
-        return RedirectResponse(url=f"/?error={quote(str(exc))}", status_code=303)
+        return RedirectResponse(url=f".?error={quote(str(exc))}", status_code=303)
 
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=".", status_code=303)
 
 
 @app.post("/candidates/status")
 def set_status(name: str = Form(...), status: str = Form(...)) -> RedirectResponse:
     update_contact_status(_results_db_path(), name, status)
-    return RedirectResponse(url="/", status_code=303)
+    # "/candidates/status"는 경로가 두 단계 깊어서 루트로 가려면 ".."가 필요하다
+    # (단독 실행이든 다른 앱에 mount되어 있든 상관없이 항상 앱의 "/"로 돌아간다).
+    return RedirectResponse(url="..", status_code=303)

@@ -56,4 +56,4 @@ def create_movement(
 ) -> RedirectResponse:
     signed_qty = quantity if direction == "in" else -quantity
     record_movement(_db_path(), item_name.strip(), signed_qty, memo=memo.strip(), unit=unit.strip() or "개")
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=".", status_code=303)

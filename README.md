@@ -104,6 +104,25 @@ pytest
 - `mathgrader/grader.py` — 분류 → 풀이 → 채점을 총괄하는 진입점
 - `web/` — FastAPI 기반 웹 UI 및 API
 
+## 통합 대시보드 (dashboard)
+
+아래 원청 레이더(leadradar)와 재고 관리(inventory)를 하나의 사이트에서 쓸 수
+있게 묶은 진입점입니다. 두 앱을 각각 따로 실행할 필요 없이 이것만 실행하면
+됩니다.
+
+```bash
+export ANTHROPIC_API_KEY="..."
+export DART_API_KEY="..."
+export KAKAO_API_KEY="..."   # 선택
+uvicorn dashboard.main:app --reload
+```
+
+브라우저에서 http://localhost:8000 접속하면 원청 레이더(`/leads/`)와 재고
+관리(`/inventory/`)로 가는 카드가 있는 홈 화면이 뜹니다. 윈도우에서는
+`dashboard/run_webapp.bat`을 더블클릭하면 됩니다. 각 앱을 단독으로 실행하고
+싶으면(포트 8000/8001로 따로) 아래 각 섹션의 안내를 그대로 따르면 되고, 둘 다
+같은 코드를 그대로 재사용합니다.
+
 ## 원청 레이더 (leadradar)
 
 신규 원청(고객사) 후보를 실시간으로 평가하는 도구입니다. 후보 회사 데이터를

@@ -20,11 +20,12 @@
   </style>
 </head>
 <body>
+  <p><a href="../">← 대시보드로</a></p>
   <h1>원청 레이더</h1>
   <p>키워드에 맞는 DART 후보를 찾아 케이씨그룹과의 사업영역 충돌 여부까지 자동으로 채점합니다.
      아래 표는 지금까지 실행한 결과가 누적되며, 컨택 상태를 직접 기록해둘 수 있습니다.</p>
 
-  <form method="post" action="/run" onsubmit="document.getElementById('loading').style.display='block'">
+  <form method="post" action="run" onsubmit="document.getElementById('loading').style.display='block'">
     <label for="keywords">검색 키워드 (띄어쓰기로 구분)</label>
     <input type="text" id="keywords" name="keywords" value="{{ keywords }}" />
 
@@ -61,7 +62,7 @@
       <td>{{ c.revenue_growth_pct if c.revenue_growth_pct is not none else '-' }}</td>
       <td>{{ c.reasoning }}</td>
       <td>
-        <form class="status-form" method="post" action="/candidates/status">
+        <form class="status-form" method="post" action="candidates/status">
           <input type="hidden" name="name" value="{{ c.name }}" />
           <select name="status">
             {% for s in statuses %}
