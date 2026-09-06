@@ -16,7 +16,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..db import DEFAULT_DB_PATH, current_stock, init_db, recent_movements, record_movement
+from ..db import DEFAULT_DB_PATH, current_stock, init_db, recent_movements, record_movement, stock_outlook
 
 app = FastAPI()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -41,6 +41,7 @@ def index(request: Request) -> HTMLResponse:
         "index.html",
         {
             "stock": current_stock(_db_path()),
+            "outlook": stock_outlook(_db_path()),
             "movements": recent_movements(_db_path()),
         },
     )

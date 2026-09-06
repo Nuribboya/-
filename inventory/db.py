@@ -10,9 +10,9 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 DEFAULT_DB_PATH = "inventory.db"
 
@@ -54,6 +54,14 @@ class Movement:
 class StockLevel:
     item: Item
     quantity: int
+
+
+@dataclass
+class StockOutlook:
+    item: Item
+    quantity: int
+    avg_daily_consumption: float
+    days_until_depletion: Optional[float]
 
 
 @contextmanager
@@ -120,6 +128,53 @@ def current_stock(db_path: str | Path = DEFAULT_DB_PATH) -> list[StockLevel]:
             StockLevel(item=Item(id=r["id"], name=r["name"], unit=r["unit"]), quantity=r["quantity"])
             for r in rows
         ]
+
+
+def stock_outlook(db_path: str | Path = DEFAULT_DB_PATH, lookback_days: int = 30) -> list[StockOutlook]:
+    """최근 lookback_days 동안의 평균 일일 출고량으로 소진 예상일을 추정한다.
+
+    딥러닝/통계 모델을 학습시키는 게 아니라 단순 평균 기반 추정이다. 데이터가
+    몇 달치 쌓이면 이 기록들을 학습 데이터로 삼아 계절성/추세를 반영하는
+    진짜 수요예측 모델로 발전시킬 수 있다.
+    """
+    cutoff = (datetime.now() - timedelta(days=lookback_days)).isoformat(timespec="seconds")
+    with connect(db_path) as conn:
+        stock_rows = conn.execute(
+            """
+            SELECT items.id, items.name, items.unit, COALESCE(SUM(movements.change_qty), 0) AS quantity
+            FROM items
+            LEFT JOIN movements ON movements.item_id = items.id
+            GROUP BY items.id
+            ORDER BY items.name
+            """
+        ).fetchall()
+
+        recent_out_rows = conn.execute(
+            """
+            SELECT item_id, -SUM(change_qty) AS total_out
+            FROM movements
+            WHERE change_qty < 0 AND created_at >= ?
+            GROUP BY item_id
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    recent_out_by_item = {r["item_id"]: r["total_out"] for r in recent_out_rows}
+
+    outlook = []
+    for r in stock_rows:
+        total_out = recent_out_by_item.get(r["id"], 0)
+        avg_daily = total_out / lookback_days if total_out else 0.0
+        days_until = (r["quantity"] / avg_daily) if avg_daily > 0 else None
+        outlook.append(
+            StockOutlook(
+                item=Item(id=r["id"], name=r["name"], unit=r["unit"]),
+                quantity=r["quantity"],
+                avg_daily_consumption=round(avg_daily, 2),
+                days_until_depletion=round(days_until, 1) if days_until is not None else None,
+            )
+        )
+    return outlook
 
 
 def recent_movements(db_path: str | Path = DEFAULT_DB_PATH, limit: int = 20) -> list[Movement]:

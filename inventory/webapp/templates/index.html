@@ -60,6 +60,19 @@
     {% endfor %}
   </table>
 
+  <h2>재고 소진 예상 (최근 30일 평균 출고속도 기준)</h2>
+  <table>
+    <tr><th>품목명</th><th>현재 수량</th><th>일평균 소비량</th><th>예상 소진까지(일)</th></tr>
+    {% for o in outlook %}
+    <tr>
+      <td>{{ o.item.name }}</td>
+      <td>{{ o.quantity }} {{ o.item.unit }}</td>
+      <td>{{ o.avg_daily_consumption }}</td>
+      <td>{{ o.days_until_depletion if o.days_until_depletion is not none else '출고 이력 부족' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
   <h2>최근 입출고 이력</h2>
   <table>
     <tr><th>일시</th><th>품목명</th><th>변동</th><th>메모</th></tr>
