@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import anthropic
 
@@ -54,6 +55,25 @@ def build_client(api_key: str | None = None) -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key or os.environ["ANTHROPIC_API_KEY"])
 
 
+def _extract_json(raw_text: str) -> dict:
+    """모델 응답에서 JSON 객체를 뽑아낸다.
+
+    시스템 프롬프트로 "JSON만 출력"을 지시해도 코드블럭(```json ... ```)이나
+    앞뒤에 짧은 설명을 붙이는 경우가 있어, 첫 '{'부터 마지막 '}'까지만 잘라서
+    파싱한다.
+    """
+    text = raw_text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"응답에서 JSON을 찾지 못했습니다: {raw_text!r}")
+    return json.loads(match.group(0))
+
+
 def score_candidate(
     client: anthropic.Anthropic,
     own_company: CompanyProfile,
@@ -73,7 +93,7 @@ def score_candidate(
         ],
     )
     raw_text = "".join(block.text for block in message.content if block.type == "text")
-    parsed = json.loads(raw_text)
+    parsed = _extract_json(raw_text)
     return ScoredCandidate(
         candidate=candidate,
         fit_score=int(parsed["fit_score"]),

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from leadradar.config import CompanyProfile
 from leadradar.models import Candidate
-from leadradar.scoring import score_candidate
+from leadradar.scoring import _extract_json, score_candidate
 
 
 class _FakeTextBlock:
@@ -42,6 +42,23 @@ def test_score_candidate_parses_response():
     assert result.conflicts_with_excluded_client is False
     assert "겹치지" in result.reasoning
     assert result.candidate is candidate
+
+
+def test_extract_json_handles_markdown_code_fence():
+    raw = '```json\n{"fit_score": 55, "conflicts_with_excluded_client": false, "reasoning": "무난함"}\n```'
+
+    parsed = _extract_json(raw)
+
+    assert parsed == {"fit_score": 55, "conflicts_with_excluded_client": False, "reasoning": "무난함"}
+
+
+def test_extract_json_handles_leading_explanation_text():
+    raw = '알겠습니다. 아래가 평가 결과입니다:\n{"fit_score": 70, "conflicts_with_excluded_client": true, "reasoning": "겹침"}'
+
+    parsed = _extract_json(raw)
+
+    assert parsed["fit_score"] == 70
+    assert parsed["conflicts_with_excluded_client"] is True
 
 
 def test_score_candidate_flags_conflict():
