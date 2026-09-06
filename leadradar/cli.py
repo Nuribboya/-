@@ -31,7 +31,8 @@ def main() -> None:
     candidates = load_candidates_from_json(args.candidates)
     if args.limit is not None:
         candidates = candidates[: args.limit]
-    results = run(config, candidates)
+    print(f"{len(candidates)}개 후보 채점 시작...")
+    results = run(config, candidates, show_progress=True)
     write_results_csv(results, args.out)
 
     for r in results:

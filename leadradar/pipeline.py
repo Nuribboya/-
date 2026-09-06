@@ -15,18 +15,22 @@ def load_candidates_from_json(path: str | Path) -> list[Candidate]:
     return [Candidate(**item) for item in data]
 
 
-def run(config: LeadRadarConfig, candidates: list[Candidate]) -> list[ScoredCandidate]:
+def run(config: LeadRadarConfig, candidates: list[Candidate], show_progress: bool = False) -> list[ScoredCandidate]:
     client = build_client()
-    results = [
-        score_candidate(
-            client,
-            config.own_company,
-            config.excluded_client,
-            candidate,
-            model=config.anthropic_model,
+    total = len(candidates)
+    results = []
+    for i, candidate in enumerate(candidates, start=1):
+        if show_progress:
+            print(f"[{i}/{total}] 채점 중: {candidate.name}", flush=True)
+        results.append(
+            score_candidate(
+                client,
+                config.own_company,
+                config.excluded_client,
+                candidate,
+                model=config.anthropic_model,
+            )
         )
-        for candidate in candidates
-    ]
     results.sort(key=lambda r: r.fit_score, reverse=True)
     return results
 
