@@ -15,7 +15,7 @@ DEFAULT_OUTPUT = "valuation_signal.csv"
 
 with st.sidebar:
     st.header("스캔 설정")
-    limit = st.number_input("종목 수", min_value=5, max_value=500, value=30, step=5)
+    limit = st.number_input("종목 수", min_value=5, max_value=500, value=500, step=5)
     with_text = st.checkbox("공시 텍스트 임베딩 사용 (느림, 별도 설치 필요)", value=False)
     with_rl = st.checkbox("RL 분할매수 추천 포함", value=False)
     output_path = st.text_input("결과 파일 경로", value=DEFAULT_OUTPUT)
