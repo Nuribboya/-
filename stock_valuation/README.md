@@ -1,4 +1,4 @@
-# S&P500 장기 저평가 스크리너 (1단계 베이스라인)
+# S&P500 장기 저평가 스크리너
 
 애널리스트 의견(목표주가, 투자의견, 컨센서스 추정치)을 배제하고, 기업이 직접
 공시한 재무제표 원본 수치 + 거시경제 지표만으로 "장기적으로 동종업종 대비
@@ -24,7 +24,10 @@ config.py              S&P500 유니버스 (티커, GICS 섹터)
 data/fundamentals.py   분기 재무제표 원본 항목 (매출/영업이익/부채 등)
 data/macro.py          FRED 거시지표 (금리, 물가, 실업률, 산업생산)
 data/prices.py         가격/거래량 + P/E, P/B 계산용 EPS·BPS
+data/filings.py        SEC EDGAR 10-K/10-Q 원문 (Risk Factors, MD&A) 조회
 features.py            비율/성장률 계산 → 섹터 내 z-score → 거시지표 병합
+text_features.py       (ticker, period)별 시점 기준(point-in-time) 공시 매칭
+embeddings.py           공시 텍스트 → 문장 임베딩 → PCA 차원축소
 labels.py               미래 N일 상대수익률 → 분위(tier) 라벨
 model.py                LightGBM 분류기 (기간 기준 train/test 분리)
 valuation.py            품질점수 + 섹터 내 저평가 percentile → 분할매수 티어
@@ -39,15 +42,57 @@ pip install -r stock_valuation/requirements.txt
 python -m stock_valuation.cli --limit 30 --start 2015-01-01 --output out.csv
 ```
 
-- `--limit`: 대상 종목 수 (테스트할 땐 작게, 실전은 500까지)
+- `--limit`: 대상 종목 수 (테스트할 땐 작게, 실전은 500까지, 생략하면 전체)
 - 결과 CSV에는 `ticker`, `quality_score`(품질점수), `cheapness_percentile`
-  (섹터 내 저평가 순위, 낮을수록 쌈), `buy_tier`(분할매수 단계) 컬럼이 담깁니다.
+  (섹터 내 저평가 순위, 낮을수록 쌈), `buy_tier`(분할매수 단계), `reason`
+  (아래 설명) 컬럼이 담깁니다.
+- 실행 로그에 각 단계별 행 개수(`fundamentals=`, `dataset=` 등)와 holdout
+  accuracy가 찍히니, 결과가 이상하면 그걸로 어느 단계가 문제인지 먼저 확인하세요.
 
-> 참고: 이 저장소를 실행 중인 샌드박스 환경은 외부 네트워크(Wikipedia, Yahoo
-> Finance, FRED)가 정책상 차단되어 있어 실제 데이터로 전체 파이프라인을
-> 여기서 실행해보진 못했습니다. 로직 자체는 `tests/test_stock_valuation.py`의
-> 합성 데이터 테스트 9개로 검증했으니, 실제 인터넷이 되는 본인 컴퓨터에서
-> 위 명령을 그대로 실행하면 됩니다.
+### 판단 근거 (`reason` 컬럼)
+
+각 종목이 왜 그 점수/단계를 받았는지 사람이 읽을 수 있는 문장으로 같이 나옵니다.
+
+- **품질 부분**: LightGBM의 `pred_contrib`(SHAP 방식과 동일한 원리, 별도
+  라이브러리 없이 LightGBM 자체 기능)로 이번 예측에 가장 크게 기여한 피처
+  top 3를 뽑아서 `ROE(섹터 대비) ↑, 부채비율(섹터 대비) ↓` 처럼 보여줍니다.
+  화살표는 그 피처가 품질점수를 올렸는지(↑) 내렸는지(↓)를 의미합니다.
+- **저평가 부분**: P/E, P/B가 섹터 내에서 각각 하위 몇 %인지 그대로 풀어씀
+  (`model.py`가 아니라 `valuation.py`가 이미 계산해둔 percentile을 문장으로
+  바꾸는 것뿐이라 별도 모델이 필요 없습니다).
+
+실제로 200~500개 종목 규모에서 정상 동작 확인했습니다 (holdout accuracy가
+3분류 랜덤 기준 0.33보다 유의미하게 높게 나옴).
+
+### 공시 텍스트 임베딩 (선택 기능)
+
+애널리스트 의견 대신, 기업이 직접 낸 10-K/10-Q의 "Risk Factors"·"MD&A" 섹션
+원문을 문장 임베딩으로 변환해 재무비율 피처에 추가하는 기능입니다. 무거운
+의존성(`sentence-transformers`, `torch`)이 필요해서 기본 설치에는 안
+들어있고, 켜고 싶을 때만 별도로 설치합니다.
+
+```bash
+pip install -r stock_valuation/requirements-text.txt
+python -m stock_valuation.cli --limit 30 --with-text
+```
+
+- GPU(CUDA)가 잡혀 있으면 `sentence-transformers`가 자동으로 사용합니다.
+- 각 (종목, 분기)는 그 시점에 실제로 공시돼 있던 가장 최근 10-K/10-Q에만
+  매칭됩니다(`text_features.select_point_in_time_filing`) — 나중에 나온
+  공시가 과거 라벨 학습에 새어 들어가는(look-ahead) 걸 막기 위함입니다.
+- 임베딩(384차원)은 PCA로 `--text-components`(기본 4)차원까지 축소하는데,
+  이 PCA는 학습 구간 데이터에만 fit하고 검증/최신 시점 데이터는 transform만
+  합니다.
+- 종목 수만큼 SEC EDGAR에 개별 요청을 보내는 구조라 `--limit`이 크면 상당히
+  오래 걸립니다 (테스트는 작은 `--limit`으로 먼저 해보세요).
+- **`--text-components`는 학습 행 수 대비 작게 유지하세요.** `--limit 30`
+  (학습 행 ~90개) 기준으로 16차원까지 올렸더니 `reason` 컬럼의 설명이 거의
+  전부 "공시문 텍스트 패턴"으로만 나오고 재무비율은 하나도 안 보이는 현상이
+  실제로 발생했습니다 — 매칭률은 100%였는데도(진짜 데이터였는데도) 피처 수
+  (텍스트 16 + 재무/거시 11 = 27개)가 학습 행 수(89개)에 비해 너무 많아서
+  생긴 과적합으로 보입니다. 기본값 4로는 재무비율/텍스트가 고르게 섞여서
+  나오는 걸 확인했습니다. `--limit`을 크게 올려 학습 행이 충분히 많아지면
+  `--text-components`도 같이 올려보세요.
 
 ## 알려진 한계 (다음 단계에서 다룰 것)
 
@@ -61,5 +106,7 @@ python -m stock_valuation.cli --limit 30 --start 2015-01-01 --output out.csv
   학습에서 제외됩니다 (`pipeline.py`가 실행 로그에 어떤 컬럼을 뺐는지 출력함).
   더 긴 히스토리가 필요하면 `yfinance`의 연간 재무제표(`.financials`)를 추가로
   붙이거나 유료 데이터 소스로 교체해야 합니다.
-- 다음 단계: 공시 원문(10-K/10-Q Risk Factors, MD&A) 텍스트 임베딩을 추가해
-  Transformer 기반 멀티모달 모델로 확장 예정.
+- 공시 텍스트 피처는 여전히 LightGBM에 숫자 피처로 얹는 방식입니다 (표+텍스트를
+  한 네트워크로 같이 학습하는 진짜 Transformer 멀티모달 구조는 아직 아님).
+- 다음 단계(예정): 여유가 되면 분할매수 타이밍/비중 자체를 강화학습으로
+  최적화하는 실험.

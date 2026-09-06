@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, classification_report
 
@@ -80,3 +81,29 @@ def predict_quality_score(
     proba = model.predict_proba(df[feature_cols])
     top_idx = list(model.classes_).index(top_tier)
     return pd.Series(proba[:, top_idx], index=df.index, name="quality_score")
+
+
+def explain_quality_scores(
+    model: lgb.LGBMClassifier, df: pd.DataFrame, feature_cols: list[str], top_n: int = 3
+) -> list[list[tuple[str, float]]]:
+    """Per-row (feature, contribution) pairs behind the top-tier probability.
+
+    LightGBM's `pred_contrib` gives an exact per-class, per-feature SHAP-style
+    breakdown of its raw score — no separate SHAP dependency needed. For
+    multiclass, contributions come back concatenated per class as
+    (n_features + 1) columns each (the extra column is the class's bias
+    term, dropped here); this slices out the top tier's segment and returns
+    each row's `top_n` largest-magnitude contributors, signed so a caller
+    can tell "pushed the score up" from "pushed it down".
+    """
+    n_features = len(feature_cols)
+    top_class_idx = list(model.classes_).index(model.classes_.max())
+    contrib = model.booster_.predict(df[feature_cols], pred_contrib=True)
+    start = top_class_idx * (n_features + 1)
+    class_contrib = contrib[:, start : start + n_features]
+
+    explanations = []
+    for row in class_contrib:
+        order = np.argsort(-np.abs(row))[:top_n]
+        explanations.append([(feature_cols[i], float(row[i])) for i in order])
+    return explanations
