@@ -32,6 +32,13 @@ def main() -> None:
         help="add a tabular Q-learning staged-buy recommendation (experimental, trained "
         "on in-sample historical data — see README caveats before trusting its output)",
     )
+    parser.add_argument(
+        "--notify-topic",
+        type=str,
+        default=None,
+        help="ntfy.sh topic to push a phone notification to when a 3차 매수(강한 저평가) "
+        "signal shows up in this run (see README for setup — free, no account needed)",
+    )
     args = parser.parse_args()
 
     result, metrics = run_pipeline(
@@ -55,6 +62,14 @@ def main() -> None:
         columns.append("rl_action")
     print(result[columns])
     print(f"\nsaved to {args.output}")
+
+    if args.notify_topic:
+        from stock_valuation.notify import format_notification_message, send_ntfy_notification, strong_buy_tickers
+
+        tickers = strong_buy_tickers(result)
+        if tickers:
+            send_ntfy_notification(args.notify_topic, format_notification_message(tickers))
+            print(f"notified topic '{args.notify_topic}': {tickers}")
 
 
 if __name__ == "__main__":

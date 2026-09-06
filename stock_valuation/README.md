@@ -38,6 +38,7 @@ rl_agent.py             테이블 기반 Q-learning 학습/추천
 pipeline.py              위 전체를 엮는 오케스트레이션
 cli.py                  커맨드라인 실행 진입점
 dashboard.py            Streamlit 웹 대시보드 (결과 조회 + 그 자리에서 재스캔)
+notify.py               ntfy.sh로 3차 매수 신호 폰 알림 (CLI --notify-topic)
 ```
 
 ## 사용법
@@ -89,6 +90,36 @@ schtasks /create /tn "StockScreenerDaily" /tr "C:\Users\윤여명\dl-stock-proje
 이렇게 해두면 매일 아침 7시에 자동으로 재스캔되고, 대시보드의 "자동
 새로고침" 주기를 켜두면 브라우저를 열어놓기만 해도 갱신된 결과가 자동
 반영됩니다.
+
+### 3차 매수 신호 뜨면 폰으로 알림 받기
+
+[ntfy](https://ntfy.sh) 무료 푸시 알림 서비스를 씁니다 — 가입/API 키 없이
+앱 설치 + 토픽(비밀 채널 이름) 하나 정하면 끝입니다.
+
+1. 폰에 **ntfy** 앱 설치 (iOS/Android 둘 다 있음)
+2. 앱에서 아무도 안 쓸 법한 임의의 토픽 이름 하나 정해서 구독 (예:
+   `yeomyeong-stock-alert-8421` 처럼 남들이 못 맞출 만한 문자열 추천 — 같은
+   토픽 이름을 아는 사람은 누구나 그 알림을 볼 수 있는 구조라서)
+3. CLI에 `--notify-topic` 옵션으로 그 토픽을 넘기면, 이번 스캔 결과에
+   "3차 매수(강한 저평가)" 종목이 하나라도 있을 때만 폰으로 알림이 갑니다.
+
+```bash
+python -m stock_valuation.cli --limit 500 --notify-topic yeomyeong-stock-alert-8421
+```
+
+매일 자동 스캔에도 그대로 넣으면 됩니다:
+
+```bat
+:: run_daily_scan.bat
+@echo off
+cd /d "C:\Users\윤여명\dl-stock-project"
+python -m stock_valuation.cli --limit 500 --output valuation_signal.csv --notify-topic yeomyeong-stock-alert-8421
+```
+
+이렇게 해두면 평소엔 신경 안 쓰고 있다가, 강한 저평가 종목이 새로 뜰 때만
+폰에 알림이 옵니다. (지금은 대시보드가 아니라 CLI 실행에만 연결돼 있어서,
+대시보드의 "지금 다시 스캔 실행" 버튼에서는 알림이 안 갑니다 — 자동
+스케줄 스캔용으로 만든 기능입니다.)
 
 ### 판단 근거 (`reason` 컬럼)
 
