@@ -165,6 +165,25 @@ python -m leadradar.discover_cli --keywords 반도체 자동화 제어반 --orig
 후보 소스로 아직 discover_cli에는 연결되어 있지 않고, 클라이언트 함수만
 제공합니다.
 
+### 터미널 대신 브라우저로 쓰기 (웹 앱)
+
+매번 명령어를 치는 대신, 브라우저에서 키워드 입력하고 버튼 누르면 발굴+채점이
+한번에 돌아가는 로컬 웹 앱도 있습니다.
+
+```bash
+export ANTHROPIC_API_KEY="..."
+export DART_API_KEY="..."
+export KAKAO_API_KEY="..."   # 선택 (없으면 거리 계산만 생략)
+uvicorn leadradar.webapp.main:app --reload
+```
+
+브라우저에서 http://localhost:8000 접속. 윈도우에서는 `leadradar/run_webapp.bat`
+을 더블클릭하면 서버 실행과 브라우저 열기를 한번에 해줍니다(환경변수는 미리
+설정되어 있어야 합니다). `leadradar/config.yaml`이 없으면 먼저 만들어야 하고,
+`LEADRADAR_CONFIG` 환경변수로 다른 경로를 쓸 수도 있습니다.
+
+후보가 많으면 실행에 몇 분 걸릴 수 있고, 그동안 페이지는 로딩 상태로 대기합니다.
+
 ### 구조
 
 - `leadradar/config.py` — 우리 회사 프로필 + 사업영역이 겹치면 안 되는 기존 원청 설정
@@ -176,3 +195,5 @@ python -m leadradar.discover_cli --keywords 반도체 자동화 제어반 --orig
 - `leadradar/sources/geocode.py` — 카카오 로컬 API로 주소 → 위경도 변환, 두 좌표 간 거리(km) 계산
 - `leadradar/cli.py` — 채점 커맨드라인 진입점
 - `leadradar/discover_cli.py` — DART 후보 발굴 커맨드라인 진입점
+- `leadradar/webapp/` — 브라우저로 발굴+채점을 실행하는 로컬 FastAPI 웹 앱
+- `leadradar/run_webapp.bat` — 윈도우에서 웹 앱을 더블클릭으로 실행하는 편의 스크립트
