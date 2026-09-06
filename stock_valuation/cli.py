@@ -18,7 +18,14 @@ def main() -> None:
         action="store_true",
         help="add 10-K/10-Q filing-text embeddings (needs `pip install -r stock_valuation/requirements-text.txt`)",
     )
-    parser.add_argument("--text-components", type=int, default=16, help="PCA dimensions for filing-text embeddings")
+    parser.add_argument(
+        "--text-components",
+        type=int,
+        default=4,
+        help="PCA dimensions for filing-text embeddings (keep small relative to training rows — "
+        "too many relative to sample size lets the model overfit to text noise; raise this only "
+        "once you're running with a large --limit)",
+    )
     args = parser.parse_args()
 
     result, metrics = run_pipeline(

@@ -122,7 +122,7 @@ def run_pipeline(
     start: str = "2015-01-01",
     horizon_days: int = 252,
     use_filing_text: bool = False,
-    text_components: int = 16,
+    text_components: int = 4,
 ) -> tuple[pd.DataFrame, dict]:
     universe = get_sp500_universe(limit=tickers_limit)
     tickers = universe["ticker"].tolist()
