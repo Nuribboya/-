@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>원청 레이더</title>
   <style>
-    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
+    body { font-family: sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 16px; }
     label { display: block; margin-top: 12px; font-weight: bold; }
     input[type=text] { width: 100%; padding: 8px; box-sizing: border-box; }
     button { margin-top: 16px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
@@ -14,11 +14,15 @@
     .conflict { color: #b00020; font-weight: bold; }
     .error { color: #b00020; margin-top: 16px; }
     #loading { display: none; margin-top: 16px; }
+    .status-form { display: flex; gap: 4px; }
+    .status-form select { flex: 1; }
+    .status-form button { margin-top: 0; padding: 4px 8px; font-size: 13px; }
   </style>
 </head>
 <body>
   <h1>원청 레이더</h1>
-  <p>키워드에 맞는 DART 후보를 찾아 케이씨그룹과의 사업영역 충돌 여부까지 자동으로 채점합니다.</p>
+  <p>키워드에 맞는 DART 후보를 찾아 케이씨그룹과의 사업영역 충돌 여부까지 자동으로 채점합니다.
+     아래 표는 지금까지 실행한 결과가 누적되며, 컨택 상태를 직접 기록해둘 수 있습니다.</p>
 
   <form method="post" action="/run" onsubmit="document.getElementById('loading').style.display='block'">
     <label for="keywords">검색 키워드 (띄어쓰기로 구분)</label>
@@ -35,30 +39,40 @@
   <p class="error">에러: {{ error }}</p>
   {% endif %}
 
-  {% if results is not none %}
-  <p>{{ results|length }}개 후보 채점 완료</p>
+  <p>{{ candidates|length }}개 후보 (지금까지 실행한 결과 누적, 적합도 순)</p>
   <table>
     <tr>
       <th>회사명</th>
       <th>적합도</th>
       <th>관계사 충돌</th>
-      <th>이유</th>
       <th>거리(km)</th>
       <th>매출성장률(%)</th>
+      <th>이유</th>
+      <th>컨택 상태</th>
     </tr>
-    {% for r in results %}
+    {% for c in candidates %}
     <tr>
-      <td>{{ r.candidate.name }}</td>
-      <td>{{ r.fit_score }}</td>
-      <td class="{{ 'conflict' if r.conflicts_with_excluded_client else '' }}">
-        {{ '충돌 주의' if r.conflicts_with_excluded_client else '없음' }}
+      <td>{{ c.name }}</td>
+      <td>{{ c.fit_score }}</td>
+      <td class="{{ 'conflict' if c.conflicts_with_excluded_client else '' }}">
+        {{ '충돌 주의' if c.conflicts_with_excluded_client else '없음' }}
       </td>
-      <td>{{ r.reasoning }}</td>
-      <td>{{ r.candidate.distance_km if r.candidate.distance_km is not none else '-' }}</td>
-      <td>{{ r.candidate.revenue_growth_pct if r.candidate.revenue_growth_pct is not none else '-' }}</td>
+      <td>{{ c.distance_km if c.distance_km is not none else '-' }}</td>
+      <td>{{ c.revenue_growth_pct if c.revenue_growth_pct is not none else '-' }}</td>
+      <td>{{ c.reasoning }}</td>
+      <td>
+        <form class="status-form" method="post" action="/candidates/status">
+          <input type="hidden" name="name" value="{{ c.name }}" />
+          <select name="status">
+            {% for s in statuses %}
+            <option value="{{ s }}" {{ 'selected' if s == c.contact_status else '' }}>{{ s }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">저장</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
   </table>
-  {% endif %}
 </body>
 </html>

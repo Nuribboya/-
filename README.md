@@ -191,6 +191,13 @@ uvicorn leadradar.webapp.main:app --reload
 
 후보가 많으면 실행에 몇 분 걸릴 수 있고, 그동안 페이지는 로딩 상태로 대기합니다.
 
+채점 결과는 실행할 때마다 사라지지 않고 SQLite(`leadradar_results.db`,
+`LEADRADAR_RESULTS_DB` 환경변수로 경로 변경 가능)에 계속 쌓입니다. 같은
+회사가 다시 발굴되면 최신 채점 결과로 갱신하되, 기존에 기록해둔 컨택 상태는
+유지합니다. 각 행마다 컨택 상태(미접촉/컨택함/협의중/성사/거절/보류)를
+드롭다운으로 바로 저장할 수 있고, 이 기록이 나중에 "실제로 성사된 회사들의
+공통 패턴"을 학습하는 모델을 만들 때 학습 데이터가 됩니다.
+
 ### 구조
 
 - `leadradar/config.py` — 우리 회사 프로필 + 사업영역이 겹치면 안 되는 기존 원청 설정
@@ -202,7 +209,8 @@ uvicorn leadradar.webapp.main:app --reload
 - `leadradar/sources/geocode.py` — 카카오 로컬 API로 주소 → 위경도 변환, 두 좌표 간 거리(km) 계산
 - `leadradar/cli.py` — 채점 커맨드라인 진입점
 - `leadradar/discover_cli.py` — DART 후보 발굴 커맨드라인 진입점
-- `leadradar/webapp/` — 브라우저로 발굴+채점을 실행하는 로컬 FastAPI 웹 앱
+- `leadradar/results_db.py` — 채점 결과 + 컨택 상태를 저장하는 SQLite 저장소
+- `leadradar/webapp/` — 브라우저로 발굴+채점을 실행하고 결과/컨택 상태를 관리하는 로컬 FastAPI 웹 앱
 - `leadradar/run_webapp.bat` — 윈도우에서 웹 앱을 더블클릭으로 실행하는 편의 스크립트
 
 ## 재고 관리 (inventory)
