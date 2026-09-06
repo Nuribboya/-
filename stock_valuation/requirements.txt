@@ -1,0 +1,8 @@
+pandas
+numpy
+requests
+scikit-learn
+lightgbm
+yfinance
+pandas_datareader
+lxml
