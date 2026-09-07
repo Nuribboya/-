@@ -11,6 +11,8 @@ STEADY_GROWTH_COLUMNS = [
     "market_cap",
     "revenue_consistency_reason",
     "debt_health_reason",
+    "entry_zone",
+    "entry_zone_detail",
     "weight",
 ]
 _MAX_ITERATIONS = 50
@@ -148,6 +150,10 @@ def build_steady_growth_portfolio(
         candidates = candidates[candidates["debt_health_ok"] == True]  # noqa: E712
     if "debt_health_reason" not in candidates:
         candidates["debt_health_reason"] = pd.NA
+    if "entry_zone" not in candidates:
+        candidates["entry_zone"] = pd.NA
+    if "entry_zone_detail" not in candidates:
+        candidates["entry_zone_detail"] = pd.NA
     if min_avg_volume is not None:
         candidates = candidates[candidates["avg_volume"] >= min_avg_volume]
     candidates = candidates.dropna(subset=["market_cap", "sector"])

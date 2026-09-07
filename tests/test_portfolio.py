@@ -115,6 +115,8 @@ def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=Non
             "revenue_consistency_reason": ["ok"] * len(tickers),
             "debt_health_ok": debt_ok if debt_ok is not None else [True] * len(tickers),
             "debt_health_reason": ["ok"] * len(tickers),
+            "entry_zone": ["매수 유리 구간"] * len(tickers),
+            "entry_zone_detail": ["52주 저점 대비 +5%"] * len(tickers),
         }
     )
     if avg_volume is not None:
@@ -186,6 +188,8 @@ def test_steady_growth_portfolio_empty_when_nothing_qualifies():
         "market_cap",
         "revenue_consistency_reason",
         "debt_health_reason",
+        "entry_zone",
+        "entry_zone_detail",
         "weight",
     ]
 
@@ -233,3 +237,23 @@ def test_steady_growth_portfolio_tolerates_missing_debt_health_column_when_disab
     portfolio = build_steady_growth_portfolio(result, require_debt_health=False)
     assert set(portfolio["ticker"]) == {"AAA"}
     assert "debt_health_reason" in portfolio.columns
+
+
+def test_steady_growth_portfolio_tolerates_missing_entry_zone_columns():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = pd.DataFrame(
+        {
+            "ticker": ["AAA"],
+            "sector": ["Tech"],
+            "market_cap": [1_000_000_000_000],
+            "revenue_consistency_ok": [True],
+            "revenue_consistency_reason": ["ok"],
+            "debt_health_ok": [True],
+            "debt_health_reason": ["ok"],
+        }
+    )
+    portfolio = build_steady_growth_portfolio(result)
+    assert set(portfolio["ticker"]) == {"AAA"}
+    assert "entry_zone" in portfolio.columns
+    assert "entry_zone_detail" in portfolio.columns

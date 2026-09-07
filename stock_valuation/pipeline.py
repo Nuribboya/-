@@ -8,6 +8,7 @@ from stock_valuation.data.fundamentals import fetch_annual_revenue_history, fetc
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
+from stock_valuation.entry_timing import classify_entry_zone, compute_entry_zone_metrics
 from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
 from stock_valuation.growth_consistency import classify_debt_health, classify_revenue_consistency
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
@@ -296,6 +297,16 @@ def run_pipeline(
     debt_health = {ticker: classify_debt_health(group) for ticker, group in features.groupby("ticker")}
     result["debt_health_ok"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[0])
     result["debt_health_reason"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[1])
+
+    # Also reuses data already collected — the full price history fetched
+    # above for the labels/RL path — so this runs unconditionally too.
+    entry_zones = {}
+    for ticker, group in prices.groupby("ticker"):
+        entry_zones[ticker] = classify_entry_zone(compute_entry_zone_metrics(group))
+    result["entry_zone"] = result["ticker"].map(lambda t: entry_zones.get(t, ("판단 불가", "가격 데이터 부족"))[0])
+    result["entry_zone_detail"] = result["ticker"].map(
+        lambda t: entry_zones.get(t, ("판단 불가", "가격 데이터 부족"))[1]
+    )
 
     if use_revenue_consistency:
         annual_histories = _fetch_all_annual_revenue(tickers)

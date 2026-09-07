@@ -52,12 +52,10 @@ df = pd.read_csv(path)
 last_modified = pd.Timestamp.fromtimestamp(path.stat().st_mtime)
 st.caption(f"마지막 갱신: {last_modified:%Y-%m-%d %H:%M:%S}")
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 with col1:
     sectors = st.multiselect("섹터 필터", sorted(df["sector"].dropna().unique()) if "sector" in df else [])
 with col2:
-    tiers = st.multiselect("매수 단계 필터", sorted(df["buy_tier"].dropna().unique()) if "buy_tier" in df else [])
-with col3:
     min_quality = st.slider("최소 품질점수", 0.0, 1.0, 0.0, 0.01)
 
 filtered = df
@@ -65,8 +63,6 @@ if "quality_score" in filtered:
     filtered = filtered[filtered["quality_score"] >= min_quality]
 if sectors:
     filtered = filtered[filtered["sector"].isin(sectors)]
-if tiers:
-    filtered = filtered[filtered["buy_tier"].isin(tiers)]
 
 st.dataframe(filtered, width="stretch", height=650)
 st.caption(f"{len(filtered)} / {len(df)} 종목 표시 중")
@@ -79,7 +75,9 @@ with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 �
     st.caption(
         "저평가 신호(buy_tier)와 무관하게, 최근 몇 년간 매출이 감소 구간 없이 꾸준히 늘고 "
         "부채비율도 안정적인 종목만 골라서 시가총액이 큰 순서로 상위 N개를 시총 비중으로 "
-        "배분합니다. 스캔할 때 '연간 매출 일관성 체크' 옵션을 켜야 이 섹션이 동작해요."
+        "배분합니다. 스캔할 때 '연간 매출 일관성 체크' 옵션을 켜야 이 섹션이 동작해요. "
+        "`entry_zone`은 현재가가 그 종목 자신의 52주 저점/이동평균선 대비 어디쯤 있는지 "
+        "보여주는 참고용 지표입니다 (미래를 예측하는 게 아니라 지금 위치를 설명하는 것)."
     )
     scol1, scol2, scol3 = st.columns(3)
     with scol1:

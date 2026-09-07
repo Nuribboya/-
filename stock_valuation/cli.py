@@ -109,6 +109,8 @@ def main() -> None:
         "buy_tier",
         "reason",
         "undervaluation_cause",
+        "entry_zone",
+        "entry_zone_detail",
     ]
     if args.with_rl:
         columns.append("rl_action")
