@@ -74,3 +74,42 @@ def test_missing_debt_data_fails_with_clear_reason():
     ok, reason = classify_debt_health(_quarters([None, None]))
     assert ok is False
     assert "부족" in reason
+
+
+def _margin_quarters(operating_margins):
+    periods = pd.date_range("2023-03-31", periods=len(operating_margins), freq="QE")
+    return pd.DataFrame({"period": periods, "operating_margin": operating_margins})
+
+
+def test_healthy_operating_margin_passes():
+    from stock_valuation.growth_consistency import classify_expense_efficiency
+
+    ok, reason = classify_expense_efficiency(_margin_quarters([0.20, 0.21, 0.19, 0.20]))
+    assert ok is True
+    assert "안정적" in reason
+
+
+def test_low_absolute_operating_margin_fails():
+    from stock_valuation.growth_consistency import classify_expense_efficiency
+
+    ok, reason = classify_expense_efficiency(_margin_quarters([0.03, 0.02, 0.03, 0.02]), min_operating_margin=0.05)
+    assert ok is False
+    assert "비용 과다" in reason
+
+
+def test_sharp_margin_erosion_fails_even_if_still_above_minimum():
+    from stock_valuation.growth_consistency import classify_expense_efficiency
+
+    ok, reason = classify_expense_efficiency(
+        _margin_quarters([0.30, 0.25, 0.20, 0.15]), min_operating_margin=0.05, max_decline=0.3
+    )
+    assert ok is False
+    assert "악화" in reason
+
+
+def test_missing_operating_margin_data_fails_with_clear_reason():
+    from stock_valuation.growth_consistency import classify_expense_efficiency
+
+    ok, reason = classify_expense_efficiency(_margin_quarters([None, None]))
+    assert ok is False
+    assert "부족" in reason

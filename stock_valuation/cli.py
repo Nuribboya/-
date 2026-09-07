@@ -115,7 +115,12 @@ def main() -> None:
     if args.with_rl:
         columns.append("rl_action")
     if args.steady_growth_portfolio:
-        columns += ["market_cap", "revenue_consistency_reason", "debt_health_reason"]
+        columns += [
+            "market_cap",
+            "revenue_consistency_reason",
+            "debt_health_reason",
+            "expense_efficiency_reason",
+        ]
     print(result[columns])
     print(f"\nsaved to {args.output}")
 

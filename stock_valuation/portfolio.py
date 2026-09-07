@@ -11,6 +11,7 @@ STEADY_GROWTH_COLUMNS = [
     "market_cap",
     "revenue_consistency_reason",
     "debt_health_reason",
+    "expense_efficiency_reason",
     "entry_zone",
     "entry_zone_detail",
     "weight",
@@ -130,6 +131,7 @@ def build_steady_growth_portfolio(
     max_weight_per_sector: float = 0.30,
     min_avg_volume: float | None = None,
     require_debt_health: bool = True,
+    require_expense_efficiency: bool = True,
 ) -> pd.DataFrame:
     """Top-market-cap, revenue-consistent portfolio — independent of the
     buy-tier/quality-score signal system entirely. For "boring, big,
@@ -137,19 +139,24 @@ def build_steady_growth_portfolio(
 
     Requires `result` to have market_cap and revenue_consistency_ok columns
     (see pipeline.run_pipeline(use_revenue_consistency=True)). Selection:
-    only revenue_consistency_ok == True names — and, unless
-    `require_debt_health` is turned off, only debt_health_ok == True too
-    (revenue can grow while a company quietly loads up on debt, e.g. bond
-    issuance funding growth rather than operations) — ranked by market_cap
-    descending, top `max_positions`. Weighted by market_cap (bigger
-    companies get proportionally more weight), then the same per-stock/
-    per-sector cap-and-redistribute as build_portfolio.
+    only revenue_consistency_ok == True names — and, unless turned off,
+    only debt_health_ok == True (revenue can grow while a company quietly
+    loads up on debt, e.g. bond issuance funding growth rather than
+    operations) and expense_efficiency_ok == True (revenue can also grow
+    while its own cost base eats an ever-larger share of it) — ranked by
+    market_cap descending, top `max_positions`. Weighted by market_cap
+    (bigger companies get proportionally more weight), then the same
+    per-stock/per-sector cap-and-redistribute as build_portfolio.
     """
     candidates = result[result["revenue_consistency_ok"] == True].copy()  # noqa: E712
     if require_debt_health:
         candidates = candidates[candidates["debt_health_ok"] == True]  # noqa: E712
+    if require_expense_efficiency:
+        candidates = candidates[candidates["expense_efficiency_ok"] == True]  # noqa: E712
     if "debt_health_reason" not in candidates:
         candidates["debt_health_reason"] = pd.NA
+    if "expense_efficiency_reason" not in candidates:
+        candidates["expense_efficiency_reason"] = pd.NA
     if "entry_zone" not in candidates:
         candidates["entry_zone"] = pd.NA
     if "entry_zone_detail" not in candidates:
