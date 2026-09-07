@@ -6,10 +6,8 @@ import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from stock_valuation.explanations import CAUSE_LIKELY_OVERSOLD
 from stock_valuation.pipeline import run_pipeline
-from stock_valuation.portfolio import build_portfolio, build_steady_growth_portfolio
-from stock_valuation.valuation import BUY_TIERS
+from stock_valuation.portfolio import build_steady_growth_portfolio
 
 st.set_page_config(page_title="S&P500 장기 저평가 스크리너", layout="wide")
 st.title("S&P500 장기 저평가 스크리너")
@@ -77,53 +75,6 @@ if auto_refresh_min > 0:
     st_autorefresh(interval=auto_refresh_min * 60 * 1000, key="dashboard_auto_refresh")
 
 st.divider()
-with st.expander("포트폴리오 구성 (진단/실험용 — 실제 매매 전 반드시 직접 검토하세요)"):
-    st.caption(
-        "매수 신호(관망 제외) 받은 종목들을 품질점수 비중으로 배분하고, "
-        "종목당/섹터당 상한을 넘지 않게 초과분을 나머지 종목에 재분배합니다. "
-        "평균-분산 최적화가 아니라 단순 분산 투자 규칙입니다."
-    )
-    pcol1, pcol2, pcol3 = st.columns(3)
-    with pcol1:
-        max_positions = st.number_input("최대 종목 수", min_value=1, max_value=50, value=15)
-    with pcol2:
-        max_weight_per_stock = st.slider("종목당 최대 비중", 0.02, 1.0, 0.15, 0.01)
-    with pcol3:
-        max_weight_per_sector = st.slider("섹터당 최대 비중", 0.05, 1.0, 0.30, 0.01)
-
-    fcol1, fcol2, fcol3 = st.columns(3)
-    with fcol1:
-        strong_only = st.checkbox("3차 매수(강한 저평가)만", value=False)
-    with fcol2:
-        oversold_only = st.checkbox("단순 과매도만 (밸류트랩/성장둔화 제외)", value=False)
-    with fcol3:
-        min_volume = st.number_input("최소 평균 거래량 (최근 20일)", min_value=0, value=0, step=10_000)
-
-    if oversold_only and "undervaluation_cause" not in df:
-        st.warning("이 결과 파일엔 undervaluation_cause 컬럼이 없어서 '단순 과매도만' 필터를 못 써요 — 다시 스캔해보세요.")
-        oversold_only = False
-    if min_volume > 0 and "avg_volume" not in df:
-        st.warning("이 결과 파일엔 avg_volume 컬럼이 없어서 거래량 필터를 못 써요 — 다시 스캔해보세요.")
-        min_volume = 0
-
-    if "buy_tier" in df and "quality_score" in df and "sector" in df:
-        portfolio = build_portfolio(
-            df,
-            max_positions=max_positions,
-            max_weight_per_stock=max_weight_per_stock,
-            max_weight_per_sector=max_weight_per_sector,
-            tiers=[BUY_TIERS[0][1]] if strong_only else None,
-            causes=[CAUSE_LIKELY_OVERSOLD] if oversold_only else None,
-            min_avg_volume=min_volume if min_volume > 0 else None,
-        )
-        if portfolio.empty:
-            st.info("이 조건에 맞는 종목이 없어요. 필터를 완화해보세요.")
-        else:
-            st.dataframe(portfolio, width="stretch")
-            st.bar_chart(portfolio.set_index("ticker")["weight"])
-    else:
-        st.info("결과 파일에 buy_tier/quality_score/sector 컬럼이 없어서 포트폴리오를 만들 수 없어요.")
-
 with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 전 반드시 직접 검토하세요)"):
     st.caption(
         "저평가 신호(buy_tier)와 무관하게, 최근 몇 년간 매출이 감소 구간 없이 꾸준히 늘고 "
