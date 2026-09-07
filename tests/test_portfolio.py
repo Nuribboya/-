@@ -105,7 +105,7 @@ def test_min_avg_volume_filter_drops_illiquid_names():
     assert set(portfolio["ticker"]) == {"AAA"}
 
 
-def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=None):
+def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=None, debt_ok=None):
     df = pd.DataFrame(
         {
             "ticker": tickers,
@@ -113,6 +113,8 @@ def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=Non
             "market_cap": market_caps,
             "revenue_consistency_ok": consistency_ok,
             "revenue_consistency_reason": ["ok"] * len(tickers),
+            "debt_health_ok": debt_ok if debt_ok is not None else [True] * len(tickers),
+            "debt_health_reason": ["ok"] * len(tickers),
         }
     )
     if avg_volume is not None:
@@ -178,4 +180,56 @@ def test_steady_growth_portfolio_empty_when_nothing_qualifies():
     result = _steady_result(["AAA"], ["Tech"], [1_000_000_000_000], [False])
     portfolio = build_steady_growth_portfolio(result)
     assert portfolio.empty
-    assert list(portfolio.columns) == ["ticker", "sector", "market_cap", "revenue_consistency_reason", "weight"]
+    assert list(portfolio.columns) == [
+        "ticker",
+        "sector",
+        "market_cap",
+        "revenue_consistency_reason",
+        "debt_health_reason",
+        "weight",
+    ]
+
+
+def test_steady_growth_portfolio_excludes_poor_debt_health_by_default():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB"],
+        ["Tech", "Health Care"],
+        [2_000_000_000_000, 1_800_000_000_000],
+        [True, True],
+        debt_ok=[True, False],
+    )
+    portfolio = build_steady_growth_portfolio(result)
+    assert set(portfolio["ticker"]) == {"AAA"}
+
+
+def test_steady_growth_portfolio_can_skip_debt_health_filter():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = _steady_result(
+        ["AAA", "BBB"],
+        ["Tech", "Health Care"],
+        [2_000_000_000_000, 1_800_000_000_000],
+        [True, True],
+        debt_ok=[True, False],
+    )
+    portfolio = build_steady_growth_portfolio(result, require_debt_health=False)
+    assert set(portfolio["ticker"]) == {"AAA", "BBB"}
+
+
+def test_steady_growth_portfolio_tolerates_missing_debt_health_column_when_disabled():
+    from stock_valuation.portfolio import build_steady_growth_portfolio
+
+    result = pd.DataFrame(
+        {
+            "ticker": ["AAA"],
+            "sector": ["Tech"],
+            "market_cap": [1_000_000_000_000],
+            "revenue_consistency_ok": [True],
+            "revenue_consistency_reason": ["ok"],
+        }
+    )
+    portfolio = build_steady_growth_portfolio(result, require_debt_health=False)
+    assert set(portfolio["ticker"]) == {"AAA"}
+    assert "debt_health_reason" in portfolio.columns

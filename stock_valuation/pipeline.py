@@ -9,7 +9,7 @@ from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
 from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
-from stock_valuation.growth_consistency import classify_revenue_consistency
+from stock_valuation.growth_consistency import classify_debt_health, classify_revenue_consistency
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.model import (
@@ -289,6 +289,13 @@ def run_pipeline(
         ticker: classify_undervaluation_cause(group) for ticker, group in features.groupby("ticker")
     }
     result["undervaluation_cause"] = result["ticker"].map(undervaluation_causes)
+
+    # Reuses the quarterly fundamentals already collected — no new fetch —
+    # so this runs unconditionally rather than gating it behind a flag like
+    # the annual-revenue check below (which does cost an extra request).
+    debt_health = {ticker: classify_debt_health(group) for ticker, group in features.groupby("ticker")}
+    result["debt_health_ok"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[0])
+    result["debt_health_reason"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[1])
 
     if use_revenue_consistency:
         annual_histories = _fetch_all_annual_revenue(tickers)

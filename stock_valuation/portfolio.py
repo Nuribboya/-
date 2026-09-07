@@ -5,7 +5,14 @@ import pandas as pd
 from stock_valuation.valuation import BUY_TIERS, NO_SIGNAL
 
 PORTFOLIO_COLUMNS = ["ticker", "sector", "buy_tier", "quality_score", "weight"]
-STEADY_GROWTH_COLUMNS = ["ticker", "sector", "market_cap", "revenue_consistency_reason", "weight"]
+STEADY_GROWTH_COLUMNS = [
+    "ticker",
+    "sector",
+    "market_cap",
+    "revenue_consistency_reason",
+    "debt_health_reason",
+    "weight",
+]
 _MAX_ITERATIONS = 50
 
 
@@ -120,6 +127,7 @@ def build_steady_growth_portfolio(
     max_weight_per_stock: float = 0.15,
     max_weight_per_sector: float = 0.30,
     min_avg_volume: float | None = None,
+    require_debt_health: bool = True,
 ) -> pd.DataFrame:
     """Top-market-cap, revenue-consistent portfolio — independent of the
     buy-tier/quality-score signal system entirely. For "boring, big,
@@ -127,12 +135,19 @@ def build_steady_growth_portfolio(
 
     Requires `result` to have market_cap and revenue_consistency_ok columns
     (see pipeline.run_pipeline(use_revenue_consistency=True)). Selection:
-    only revenue_consistency_ok == True names, ranked by market_cap
+    only revenue_consistency_ok == True names — and, unless
+    `require_debt_health` is turned off, only debt_health_ok == True too
+    (revenue can grow while a company quietly loads up on debt, e.g. bond
+    issuance funding growth rather than operations) — ranked by market_cap
     descending, top `max_positions`. Weighted by market_cap (bigger
     companies get proportionally more weight), then the same per-stock/
     per-sector cap-and-redistribute as build_portfolio.
     """
     candidates = result[result["revenue_consistency_ok"] == True].copy()  # noqa: E712
+    if require_debt_health:
+        candidates = candidates[candidates["debt_health_ok"] == True]  # noqa: E712
+    if "debt_health_reason" not in candidates:
+        candidates["debt_health_reason"] = pd.NA
     if min_avg_volume is not None:
         candidates = candidates[candidates["avg_volume"] >= min_avg_volume]
     candidates = candidates.dropna(subset=["market_cap", "sector"])

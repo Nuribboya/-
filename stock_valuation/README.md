@@ -41,7 +41,7 @@ dashboard.py            Streamlit 웹 대시보드 (결과 조회 + 그 자리�
 notify.py               ntfy.sh로 3차 매수 신호 폰 알림 (CLI --notify-topic)
 portfolio.py            매수 신호 종목을 비중 배분한 후보 포트폴리오로 구성
                         (+ 대형주/매출안정형 대안 포트폴리오)
-growth_consistency.py  연간 매출이 감소 구간 없이 꾸준히 늘었는지 판정
+growth_consistency.py  연간 매출 일관성 + 분기 부채비율 안정성 판정
 ```
 
 ## 사용법
@@ -276,11 +276,19 @@ python -m stock_valuation.cli --limit 500 --steady-growth-portfolio
   (`growth_consistency.classify_revenue_consistency`). `--steady-growth-portfolio`
   를 켜면 자동으로 이 조회까지 같이 돕니다 — 종목 수만큼 추가 요청이
   붙어서 느려집니다.
-- 안정적 성장으로 판정된 종목만 후보로 남기고, 시가총액이 큰 순서로 상위
-  N개(`--steady-growth-max-positions`, 기본 15)를 뽑아 시가총액 비중으로
-  배분합니다. 종목당/섹터당 상한(`--steady-growth-max-weight-per-stock`,
-  `--steady-growth-max-weight-per-sector`)과 최소 거래량
-  (`--steady-growth-min-volume`)도 위 포트폴리오와 동일하게 지원합니다.
+- **부채 건전성**: 매출이 늘어도 회사채 발행 등으로 빚을 늘려서 키운 걸
+  수도 있으니, 이미 갖고 있는 분기별 부채비율(새로 조회하지 않음)로 별도
+  체크합니다 — 부채비율 절대 수준이 너무 높거나(기본 2.0배 초과), 최근
+  분기들 사이 50% 넘게 급증했으면 탈락시킵니다
+  (`growth_consistency.classify_debt_health`). 기본으로 켜져 있고
+  (`--steady-growth-portfolio`만 켜면 자동 적용), 끄고 싶으면 코드에서
+  `require_debt_health=False`로 호출하거나 대시보드 체크박스를 끄면 됩니다.
+- 매출 안정성 + 부채 건전성을 모두 통과한 종목만 후보로 남기고, 시가총액이
+  큰 순서로 상위 N개(`--steady-growth-max-positions`, 기본 15)를 뽑아
+  시가총액 비중으로 배분합니다. 종목당/섹터당 상한
+  (`--steady-growth-max-weight-per-stock`, `--steady-growth-max-weight-per-sector`)
+  과 최소 거래량(`--steady-growth-min-volume`)도 위 포트폴리오와 동일하게
+  지원합니다.
 - 대시보드에도 별도 "대형주 + 매출 안정형 포트폴리오" 펼치기 메뉴가 있어요
   (사이드바에서 "연간 매출 일관성 체크 포함" 켜고 스캔해야 동작함).
 

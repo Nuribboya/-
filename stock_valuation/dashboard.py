@@ -126,9 +126,9 @@ with st.expander("포트폴리오 구성 (진단/실험용 — 실제 매매 전
 
 with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 전 반드시 직접 검토하세요)"):
     st.caption(
-        "저평가 신호(buy_tier)와 무관하게, 최근 몇 년간 매출이 감소 구간 없이 꾸준히 늘어난 "
-        "종목만 골라서 시가총액이 큰 순서로 상위 N개를 시총 비중으로 배분합니다. "
-        "스캔할 때 '연간 매출 일관성 체크' 옵션을 켜야 이 섹션이 동작해요."
+        "저평가 신호(buy_tier)와 무관하게, 최근 몇 년간 매출이 감소 구간 없이 꾸준히 늘고 "
+        "부채비율도 안정적인 종목만 골라서 시가총액이 큰 순서로 상위 N개를 시총 비중으로 "
+        "배분합니다. 스캔할 때 '연간 매출 일관성 체크' 옵션을 켜야 이 섹션이 동작해요."
     )
     scol1, scol2, scol3 = st.columns(3)
     with scol1:
@@ -137,9 +137,17 @@ with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 �
         steady_max_weight_per_stock = st.slider("종목당 최대 비중 ", 0.02, 1.0, 0.15, 0.01)
     with scol3:
         steady_max_weight_per_sector = st.slider("섹터당 최대 비중 ", 0.05, 1.0, 0.30, 0.01)
-    steady_min_volume = st.number_input(
-        "최소 평균 거래량 (최근 20일) ", min_value=0, value=0, step=10_000
-    )
+    scol4, scol5 = st.columns(2)
+    with scol4:
+        steady_min_volume = st.number_input(
+            "최소 평균 거래량 (최근 20일) ", min_value=0, value=0, step=10_000
+        )
+    with scol5:
+        require_debt_health = st.checkbox("부채비율 안정적인 종목만", value=True)
+
+    if require_debt_health and "debt_health_ok" not in df:
+        st.warning("이 결과 파일엔 debt_health_ok 컬럼이 없어서 부채비율 필터를 못 써요 — 다시 스캔해보세요.")
+        require_debt_health = False
 
     if "revenue_consistency_ok" not in df or "market_cap" not in df:
         st.info(
@@ -153,6 +161,7 @@ with st.expander("대형주 + 매출 안정형 포트폴리오 (실제 매매 �
             max_weight_per_stock=steady_max_weight_per_stock,
             max_weight_per_sector=steady_max_weight_per_sector,
             min_avg_volume=steady_min_volume if steady_min_volume > 0 else None,
+            require_debt_health=require_debt_health,
         )
         if steady_portfolio.empty:
             st.info("매출이 꾸준히 늘어난 종목이 없어요 (기준을 완화하거나 --limit을 늘려보세요).")
