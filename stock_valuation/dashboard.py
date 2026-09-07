@@ -20,7 +20,7 @@ with st.sidebar:
     with_text = st.checkbox("공시 텍스트 임베딩 사용 (느림, 별도 설치 필요)", value=False)
     with_rl = st.checkbox("RL 분할매수 추천 포함", value=False)
     with_revenue_consistency = st.checkbox(
-        "연간 매출 일관성 체크 포함 (느림 — 대형주+매출안정형 포트폴리오에 필요)", value=False
+        "연간 매출 일관성 체크 포함 (느림 — 대형주+매출안정형 포트폴리오에 필요)", value=True
     )
     output_path = st.text_input("결과 파일 경로", value=DEFAULT_OUTPUT)
     run_now = st.button("지금 다시 스캔 실행", type="primary")
