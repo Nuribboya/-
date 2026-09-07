@@ -119,6 +119,8 @@ def _steady_result(tickers, sectors, market_caps, consistency_ok, avg_volume=Non
             "expense_efficiency_reason": ["ok"] * len(tickers),
             "entry_zone": ["매수 유리 구간"] * len(tickers),
             "entry_zone_detail": ["52주 저점 대비 +5%"] * len(tickers),
+            "rally_support": ["펀더멘털 뒷받침된 상승"] * len(tickers),
+            "rally_support_reason": ["ok"] * len(tickers),
         }
     )
     if avg_volume is not None:
@@ -193,6 +195,8 @@ def test_steady_growth_portfolio_empty_when_nothing_qualifies():
         "expense_efficiency_reason",
         "entry_zone",
         "entry_zone_detail",
+        "rally_support",
+        "rally_support_reason",
         "weight",
     ]
 
@@ -311,3 +315,5 @@ def test_steady_growth_portfolio_tolerates_missing_entry_zone_columns():
     assert set(portfolio["ticker"]) == {"AAA"}
     assert "entry_zone" in portfolio.columns
     assert "entry_zone_detail" in portfolio.columns
+    assert "rally_support" in portfolio.columns
+    assert "rally_support_reason" in portfolio.columns

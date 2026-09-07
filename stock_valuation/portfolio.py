@@ -14,6 +14,8 @@ STEADY_GROWTH_COLUMNS = [
     "expense_efficiency_reason",
     "entry_zone",
     "entry_zone_detail",
+    "rally_support",
+    "rally_support_reason",
     "weight",
 ]
 _MAX_ITERATIONS = 50
@@ -147,6 +149,11 @@ def build_steady_growth_portfolio(
     market_cap descending, top `max_positions`. Weighted by market_cap
     (bigger companies get proportionally more weight), then the same
     per-stock/per-sector cap-and-redistribute as build_portfolio.
+
+    `rally_support`/`rally_support_reason` (from pipeline's rally_support
+    column, when present) are informational only — not a selection filter
+    — flagging whether a name's own past price rally looks backed by its
+    own revenue growth or looks like it outran it (버블성 상승 우려).
     """
     candidates = result[result["revenue_consistency_ok"] == True].copy()  # noqa: E712
     if require_debt_health:
@@ -161,6 +168,10 @@ def build_steady_growth_portfolio(
         candidates["entry_zone"] = pd.NA
     if "entry_zone_detail" not in candidates:
         candidates["entry_zone_detail"] = pd.NA
+    if "rally_support" not in candidates:
+        candidates["rally_support"] = pd.NA
+    if "rally_support_reason" not in candidates:
+        candidates["rally_support_reason"] = pd.NA
     if min_avg_volume is not None:
         candidates = candidates[candidates["avg_volume"] >= min_avg_volume]
     candidates = candidates.dropna(subset=["market_cap", "sector"])

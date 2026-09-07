@@ -120,6 +120,8 @@ def main() -> None:
             "revenue_consistency_reason",
             "debt_health_reason",
             "expense_efficiency_reason",
+            "rally_support",
+            "rally_support_reason",
         ]
     print(result[columns])
     print(f"\nsaved to {args.output}")

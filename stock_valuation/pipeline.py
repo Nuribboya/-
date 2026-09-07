@@ -8,7 +8,7 @@ from stock_valuation.data.fundamentals import fetch_annual_revenue_history, fetc
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
-from stock_valuation.entry_timing import classify_entry_zone, compute_entry_zone_metrics
+from stock_valuation.entry_timing import classify_entry_zone, classify_rally_support, compute_entry_zone_metrics
 from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
 from stock_valuation.growth_consistency import (
     classify_debt_health,
@@ -332,6 +332,24 @@ def run_pipeline(
         )
         result["revenue_consistency_reason"] = result["ticker"].map(
             lambda t: revenue_consistency.get(t, (False, "연간 재무제표 조회 실패"))[1]
+        )
+
+        # Reuses the annual revenue just fetched above plus the daily price
+        # history fetched earlier for labels/RL — no new fetch. Whether a
+        # rally looks bubble-like or fundamentals-backed only makes sense
+        # alongside entry_zone, so this is gated the same way (needs the
+        # annual revenue history that classify_revenue_consistency also
+        # needs, unlike entry_zone itself which only needs price history).
+        prices_by_ticker = dict(tuple(prices.groupby("ticker")))
+        rally_support = {
+            ticker: classify_rally_support(prices_by_ticker.get(ticker, pd.DataFrame(columns=["date", "close"])), history)
+            for ticker, history in annual_histories.items()
+        }
+        result["rally_support"] = result["ticker"].map(
+            lambda t: rally_support.get(t, ("판단 불가", "연간 재무제표 조회 실패"))[0]
+        )
+        result["rally_support_reason"] = result["ticker"].map(
+            lambda t: rally_support.get(t, ("판단 불가", "연간 재무제표 조회 실패"))[1]
         )
 
     if use_rl:
