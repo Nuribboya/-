@@ -4,11 +4,17 @@ import pandas as pd
 
 from stock_valuation.config import get_sp500_universe
 from stock_valuation.data.filings import extract_section, fetch_cik_lookup, fetch_filing_history, fetch_filing_text
-from stock_valuation.data.fundamentals import fetch_quarterly_fundamentals
+from stock_valuation.data.fundamentals import fetch_annual_revenue_history, fetch_quarterly_fundamentals
 from stock_valuation.data.macro import fetch_macro_indicators
 from stock_valuation.data.prices import fetch_price_history, fetch_trailing_eps_and_book
 from stock_valuation.embeddings import EMBEDDING_DIM, embed_texts, fit_reducer, reduce_vectors
-from stock_valuation.explanations import build_reason_column
+from stock_valuation.entry_timing import classify_entry_zone, classify_rally_support, compute_entry_zone_metrics
+from stock_valuation.explanations import build_reason_column, classify_undervaluation_cause
+from stock_valuation.growth_consistency import (
+    classify_debt_health,
+    classify_expense_efficiency,
+    classify_revenue_consistency,
+)
 from stock_valuation.features import build_feature_table, feature_columns, latest_snapshot_per_ticker
 from stock_valuation.labels import add_relative_return_tiers, compute_forward_returns
 from stock_valuation.model import (
@@ -178,6 +184,16 @@ def build_rl_recommendations(
     return recommendations
 
 
+def _fetch_all_annual_revenue(tickers: list[str]) -> dict[str, pd.DataFrame]:
+    histories = {}
+    for ticker in tickers:
+        try:
+            histories[ticker] = fetch_annual_revenue_history(ticker)
+        except Exception:
+            continue
+    return histories
+
+
 def run_pipeline(
     tickers_limit: int | None = 30,
     start: str = "2015-01-01",
@@ -185,6 +201,7 @@ def run_pipeline(
     use_filing_text: bool = False,
     text_components: int = 4,
     use_rl: bool = False,
+    use_revenue_consistency: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     universe = get_sp500_universe(limit=tickers_limit)
     tickers = universe["ticker"].tolist()
@@ -246,15 +263,94 @@ def run_pipeline(
     multiples = compute_valuation_multiples(latest_prices, eps_book, universe[["ticker", "sector"]])
     multiples = add_cheapness_percentile(multiples)
 
-    merged = latest_features[["ticker", "quality_score"]].merge(
+    # A simple liquidity gauge for the --portfolio-min-volume filter — mean
+    # of the most recent trading days actually available, not a fixed
+    # window that might not exist for a thinly-covered ticker.
+    avg_volume = (
+        prices.sort_values("date")
+        .groupby("ticker")
+        .tail(20)
+        .groupby("ticker")["volume"]
+        .mean()
+        .rename("avg_volume")
+        .reset_index()
+    )
+
+    merged = latest_features[["ticker", "quality_score", "shares_outstanding"]].merge(
         multiples[
             ["ticker", "sector", "close", "pe_ratio", "pb_ratio", "pe_ratio_pct", "pb_ratio_pct", "cheapness_percentile"]
         ],
         on="ticker",
         how="inner",
     )
+    merged = merged.merge(avg_volume, on="ticker", how="left")
+    # Not a new fetch — just price x the share count already collected as
+    # part of the quarterly fundamentals.
+    merged["market_cap"] = merged["close"] * merged["shares_outstanding"]
     result = build_valuation_signal(merged)
     result["reason"] = build_reason_column(quality_contributions_by_ticker, result)
+
+    undervaluation_causes = {
+        ticker: classify_undervaluation_cause(group) for ticker, group in features.groupby("ticker")
+    }
+    result["undervaluation_cause"] = result["ticker"].map(undervaluation_causes)
+
+    # Reuses the quarterly fundamentals already collected — no new fetch —
+    # so this runs unconditionally rather than gating it behind a flag like
+    # the annual-revenue check below (which does cost an extra request).
+    debt_health = {ticker: classify_debt_health(group) for ticker, group in features.groupby("ticker")}
+    result["debt_health_ok"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[0])
+    result["debt_health_reason"] = result["ticker"].map(lambda t: debt_health.get(t, (False, "데이터 없음"))[1])
+
+    expense_efficiency = {
+        ticker: classify_expense_efficiency(group) for ticker, group in features.groupby("ticker")
+    }
+    result["expense_efficiency_ok"] = result["ticker"].map(
+        lambda t: expense_efficiency.get(t, (False, "데이터 없음"))[0]
+    )
+    result["expense_efficiency_reason"] = result["ticker"].map(
+        lambda t: expense_efficiency.get(t, (False, "데이터 없음"))[1]
+    )
+
+    # Also reuses data already collected — the full price history fetched
+    # above for the labels/RL path — so this runs unconditionally too.
+    entry_zones = {}
+    for ticker, group in prices.groupby("ticker"):
+        entry_zones[ticker] = classify_entry_zone(compute_entry_zone_metrics(group))
+    result["entry_zone"] = result["ticker"].map(lambda t: entry_zones.get(t, ("판단 불가", "가격 데이터 부족"))[0])
+    result["entry_zone_detail"] = result["ticker"].map(
+        lambda t: entry_zones.get(t, ("판단 불가", "가격 데이터 부족"))[1]
+    )
+
+    if use_revenue_consistency:
+        annual_histories = _fetch_all_annual_revenue(tickers)
+        revenue_consistency = {
+            ticker: classify_revenue_consistency(history) for ticker, history in annual_histories.items()
+        }
+        result["revenue_consistency_ok"] = result["ticker"].map(
+            lambda t: revenue_consistency.get(t, (False, "연간 재무제표 조회 실패"))[0]
+        )
+        result["revenue_consistency_reason"] = result["ticker"].map(
+            lambda t: revenue_consistency.get(t, (False, "연간 재무제표 조회 실패"))[1]
+        )
+
+        # Reuses the annual revenue just fetched above plus the daily price
+        # history fetched earlier for labels/RL — no new fetch. Whether a
+        # rally looks bubble-like or fundamentals-backed only makes sense
+        # alongside entry_zone, so this is gated the same way (needs the
+        # annual revenue history that classify_revenue_consistency also
+        # needs, unlike entry_zone itself which only needs price history).
+        prices_by_ticker = dict(tuple(prices.groupby("ticker")))
+        rally_support = {
+            ticker: classify_rally_support(prices_by_ticker.get(ticker, pd.DataFrame(columns=["date", "close"])), history)
+            for ticker, history in annual_histories.items()
+        }
+        result["rally_support"] = result["ticker"].map(
+            lambda t: rally_support.get(t, ("판단 불가", "연간 재무제표 조회 실패"))[0]
+        )
+        result["rally_support_reason"] = result["ticker"].map(
+            lambda t: rally_support.get(t, ("판단 불가", "연간 재무제표 조회 실패"))[1]
+        )
 
     if use_rl:
         rl_recommendations = build_rl_recommendations(

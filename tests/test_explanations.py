@@ -2,7 +2,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stock_valuation.explanations import build_reason_column, format_cheapness_reason, format_quality_reason
+from stock_valuation.explanations import (
+    build_reason_column,
+    classify_undervaluation_cause,
+    format_cheapness_reason,
+    format_quality_reason,
+)
 from stock_valuation.model import explain_quality_scores, train_quality_model
 
 
@@ -73,3 +78,55 @@ def test_build_reason_column_looks_up_by_ticker_not_row_position():
     reasons = build_reason_column(contributions_by_ticker, result)
     assert "ROE(섹터 대비) ↑" in reasons.iloc[1]  # AAA is row 1 here
     assert "부채비율(섹터 대비) ↓" in reasons.iloc[0]  # BBB is row 0 here
+
+
+def _two_quarters(revenue, net_income, operating_margin, debt_to_equity):
+    return pd.DataFrame(
+        {
+            "period": pd.to_datetime(["2023-06-30", "2023-09-30"]),
+            "revenue": revenue,
+            "net_income": net_income,
+            "operating_margin": operating_margin,
+            "debt_to_equity": debt_to_equity,
+        }
+    )
+
+
+def test_classify_undervaluation_cause_flags_multi_metric_deterioration():
+    history = _two_quarters(
+        revenue=[100, 80],  # declining
+        net_income=[10, -5],  # turned negative
+        operating_margin=[0.20, 0.20],
+        debt_to_equity=[0.5, 0.5],
+    )
+    result = classify_undervaluation_cause(history)
+    assert "악화" in result
+
+
+def test_classify_undervaluation_cause_calls_out_simple_deceleration():
+    history = _two_quarters(
+        revenue=[100, 95],  # slightly down, not a multi-metric red flag
+        net_income=[10, 9],
+        operating_margin=[0.20, 0.20],
+        debt_to_equity=[0.5, 0.5],
+    )
+    result = classify_undervaluation_cause(history)
+    assert "성장 둔화" in result
+
+
+def test_classify_undervaluation_cause_calls_stable_fundamentals_likely_oversold():
+    history = _two_quarters(
+        revenue=[100, 105],
+        net_income=[10, 11],
+        operating_margin=[0.20, 0.21],
+        debt_to_equity=[0.5, 0.48],
+    )
+    result = classify_undervaluation_cause(history)
+    assert "과매도" in result
+
+
+def test_classify_undervaluation_cause_reports_insufficient_data():
+    history = _two_quarters(
+        revenue=[100, None], net_income=[10, None], operating_margin=[0.2, None], debt_to_equity=[0.5, None]
+    )
+    assert classify_undervaluation_cause(history) == "판단 근거 부족 (데이터 부족)"
