@@ -1,0 +1,37 @@
+{
+  "name": "maechul-pace",
+  "productName": "매출 목표 페이스",
+  "version": "1.0.0",
+  "description": "엑셀 매출 자료로 월별 실적을 목표와 대조하는 리포트",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "prebuild": "node build-html.js",
+    "start": "node build-html.js && electron .",
+    "build": "node build-html.js && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "kr.maechul.pace",
+    "productName": "매출 목표 페이스",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "app/**/*"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "매출 목표 페이스",
+      "installerLanguages": ["ko-KR"],
+      "language": "1042"
+    }
+  }
+}

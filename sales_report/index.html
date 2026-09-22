@@ -23,7 +23,7 @@
     --focus: #2a78d6;
     --shadow: 0 1px 2px rgba(20,28,36,.06), 0 1px 10px rgba(20,28,36,.04);
     --sans: 'IBM Plex Sans KR', system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -199,7 +199,7 @@
   <div class="masthead">
     <div>
       <h1>매출 목표 페이스</h1>
-      <p>엑셀 매출 자료를 올리면 월별 실적을 목표와 대조해 달성률·증감률·연간 페이스를 계산합니다. 파일은 브라우저 안에서만 처리됩니다.</p>
+      <p>엑셀 매출 자료를 올리면 월별 실적을 목표와 대조해 달성률·증감률·연간 페이스를 계산합니다. 자료는 이 기기 밖으로 나가지 않습니다.</p>
     </div>
     <div class="src">
       <span class="tag" id="srcTag">예시 데이터</span>
@@ -515,6 +515,9 @@
     var first = wb.SheetNames.filter(function (sn) { return sheets[sn].length; })[0] || wb.SheetNames[0];
     if (!sheets[first] || !sheets[first].length) { showErr('빈 파일이거나 표 형태가 아닙니다.'); return; }
 
+    // Targets survive a re-import of the same shop's data, but the sample's
+    // targets have nothing to do with the numbers the user just brought in.
+    if (state.meta.isSample) state.targets = {};
     state.raw = { sheets: sheets, sheet: first, map: {} };
     state.meta.name = name;
     autoMap();
@@ -718,6 +721,17 @@
     var step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
     return step * mag;
   }
+  // Hangul renders about twice as wide as a digit, so a plain character count
+  // truncates mixed names like "원두 200g" far too early.
+  function fitLabel(s, maxPx) {
+    var w = 0, out = '';
+    for (var i = 0; i < s.length; i++) {
+      var cw = s.charCodeAt(i) > 0x2e80 ? 12 : 6.8;
+      if (w + cw > maxPx) return out + '…';
+      w += cw; out += s[i];
+    }
+    return out;
+  }
   function barPath(x, y, w, h, r) {
     r = Math.max(0, Math.min(r, w / 2, h));
     return 'M' + x + ',' + (y + h) + 'L' + x + ',' + (y + r) +
@@ -911,7 +925,7 @@
 
       var nm = svgEl('text', { x: 0, y: cy + 15, 'font-size': 12, fill: 'var(--ink-2)' });
       nm.style.fontFamily = 'var(--sans)';
-      nm.textContent = c.name.length > 6 ? c.name.slice(0, 5) + '…' : c.name;
+      nm.textContent = fitLabel(c.name, labelW - 8);
       svg.appendChild(nm);
 
       var run = Math.max(bw - 4, 0);
@@ -1061,7 +1075,9 @@
   // ---------- wiring ----------
   $('pick').addEventListener('click', function () { $('file').click(); });
   $('file').addEventListener('change', function (e) {
-    var f = e.target.files[0]; if (f) readFile(f);
+    var f = e.target.files[0];
+    if (f) readFile(f);
+    e.target.value = ''; // so picking the same file again still fires change
   });
   function readFile(f) {
     var fr = new FileReader();
