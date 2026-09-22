@@ -3,13 +3,14 @@ name: build-exe
 # 윈도우 실행 파일은 윈도우에서만 만들 수 있다. 빌드 환경을 따로 갖추는 대신
 # GitHub 의 윈도우 러너에서 만든다.
 #   - 브랜치에 push   → 아티팩트로 올린다 (30일 보관, 확인용)
-#   - v* 태그를 push  → Release 를 만들어 exe 를 첨부한다 (고정 링크, 만료 없음)
+#   - finder-v* 태그  → Release 를 만들어 exe 를 첨부한다 (만료 없음)
+#     이 저장소에는 앱이 여럿이라 태그에 앱 이름을 붙여 서로 섞이지 않게 한다.
 #   - 수동 실행 + 버전 → 태그까지 여기서 만든다. 태그를 직접 밀 수 없는
 #                        환경에서도 배포할 수 있고, Actions 탭에서 버튼으로 낸다.
 on:
   push:
     branches: ['**']
-    tags: ['v*']
+    tags: ['finder-v*']
     paths:
       - 'prime_contractor/**'
       - 'prime_finder.spec'
@@ -50,8 +51,8 @@ jobs:
         run: |
           code=$(python -c "import prime_contractor; print(prime_contractor.__version__)")
           want=""
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            want="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/finder-v* ]]; then
+            want="${GITHUB_REF_NAME#finder-v}"
           elif [ -n "${{ inputs.version }}" ]; then
             want="${{ inputs.version }}"
             want="${want#v}"
@@ -83,7 +84,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ steps.ver.outputs.release }}
+          TAG: finder-v${{ steps.ver.outputs.release }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "$TAG 릴리스가 이미 있어 파일만 덮어씁니다."
@@ -94,4 +95,4 @@ jobs:
               --title "원청 찾기 $TAG" \
               --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
           fi
-          echo "받는 곳: https://github.com/${GITHUB_REPOSITORY}/releases/latest"
+          echo "받는 곳: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"

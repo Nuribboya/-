@@ -17,8 +17,13 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 REPO = "Nuribboya/-"
-LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
-RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
+
+#: 이 저장소에는 앱이 여럿 있고 /releases/latest 는 저장소에 하나뿐이다.
+#: 다른 앱이 배포하면 그게 '최신'이 되어 엉뚱한 파일을 가리키므로, 이 앱의
+#: 릴리스만 태그 접두사로 가려낸다.
+TAG_PREFIX = "finder-v"
+LIST_API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 
 _NUM = re.compile(r"\d+")
 
@@ -52,21 +57,36 @@ def is_newer(latest: str, current: str) -> bool:
     return a + (0,) * (width - len(a)) > b + (0,) * (width - len(b))
 
 
+def pick_latest(releases: list[dict], prefix: str = TAG_PREFIX) -> dict | None:
+    """이 앱의 릴리스 중 버전이 가장 높은 것. 날짜가 아니라 버전으로 고른다."""
+    mine = [r for r in releases
+            if str(r.get("tag_name", "")).startswith(prefix)
+            and not r.get("draft") and not r.get("prerelease")]
+    if not mine:
+        return None
+    return max(mine, key=lambda r: parse_version(str(r["tag_name"])[len(prefix):]))
+
+
 def check_for_update(current: str, timeout: float = 5.0) -> UpdateInfo | None:
-    """최신 릴리스를 확인한다. 새 버전이 없거나 확인에 실패하면 None."""
+    """새 버전이 있으면 알려준다. 없거나 확인에 실패하면 None."""
     try:
         request = urllib.request.Request(
-            LATEST_API, headers={"Accept": "application/vnd.github+json",
-                                 "User-Agent": f"PrimeFinder/{current}"})
+            LIST_API, headers={"Accept": "application/vnd.github+json",
+                               "User-Agent": f"PrimeFinder/{current}"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            releases = json.loads(response.read().decode("utf-8"))
     except Exception as exc:              # 네트워크·차단·형식 무엇이든 조용히 넘어간다
         log.debug("업데이트 확인 실패: %s", exc)
         return None
-
-    tag = str(payload.get("tag_name") or "")
-    if not is_newer(tag, current):
+    if not isinstance(releases, list):
         return None
-    return UpdateInfo(latest=tag.lstrip("vV"), current=current,
-                      url=payload.get("html_url") or RELEASES_PAGE,
-                      notes=(payload.get("body") or "").strip())
+
+    newest = pick_latest(releases)
+    if newest is None:
+        return None
+    version = str(newest["tag_name"])[len(TAG_PREFIX):]
+    if not is_newer(version, current):
+        return None
+    return UpdateInfo(latest=version, current=current,
+                      url=newest.get("html_url") or RELEASES_PAGE,
+                      notes=(newest.get("body") or "").strip())

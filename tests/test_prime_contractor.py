@@ -839,34 +839,68 @@ def test_update_check_returns_none_when_offline(monkeypatch):
     assert updater.check_for_update("1.0.0") is None
 
 
-def test_update_check_reads_release_payload(monkeypatch):
+def _fake_releases(monkeypatch, releases):
     from prime_contractor import updater
 
     class FakeResponse:
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def read(self):
-            return json.dumps({"tag_name": "v1.4.0",
-                               "html_url": "https://example.test/releases/v1.4.0",
-                               "body": "매출 탭 추가"}).encode()
+        def read(self): return json.dumps(releases).encode()
 
     monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **kw: FakeResponse())
+    return updater
+
+
+def test_update_check_reads_release_payload(monkeypatch):
+    updater = _fake_releases(monkeypatch, [
+        {"tag_name": "finder-v1.4.0", "html_url": "https://example.test/r/finder-v1.4.0",
+         "body": "매출 탭 추가"},
+    ])
     info = updater.check_for_update("1.0.0")
     assert info is not None
     assert info.latest == "1.4.0"
-    assert "v1.4.0" in info.url
+    assert "finder-v1.4.0" in info.url
     assert "1.4.0" in info.message and "1.0.0" in info.message
 
 
 def test_no_update_when_already_current(monkeypatch):
-    from prime_contractor import updater
+    updater = _fake_releases(monkeypatch, [{"tag_name": "finder-v1.0.0"}])
+    assert updater.check_for_update("1.0.0") is None
 
-    class FakeResponse:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def read(self): return json.dumps({"tag_name": "v1.0.0"}).encode()
 
-    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **kw: FakeResponse())
+def test_other_apps_releases_are_ignored(monkeypatch):
+    """한 저장소에 앱이 여럿이다. 남의 배포를 내 업데이트로 착각하면 안 된다."""
+    updater = _fake_releases(monkeypatch, [
+        {"tag_name": "desktop-latest", "html_url": "https://example.test/r/desktop"},
+        {"tag_name": "v9.9.9", "html_url": "https://example.test/r/other-app"},
+        {"tag_name": "finder-v1.0.0", "html_url": "https://example.test/r/finder"},
+    ])
+    assert updater.check_for_update("1.0.0") is None       # 내 최신은 1.0.0 그대로
+
+
+def test_picks_highest_version_not_most_recent_entry():
+    """목록 순서가 아니라 버전으로 고른다."""
+    from prime_contractor.updater import pick_latest
+    newest = pick_latest([
+        {"tag_name": "finder-v1.2.0"},
+        {"tag_name": "finder-v1.10.0"},
+        {"tag_name": "finder-v1.9.0"},
+    ])
+    assert newest["tag_name"] == "finder-v1.10.0"
+
+
+def test_drafts_and_prereleases_are_skipped():
+    from prime_contractor.updater import pick_latest
+    picked = pick_latest([
+        {"tag_name": "finder-v2.0.0", "draft": True},
+        {"tag_name": "finder-v1.9.0", "prerelease": True},
+        {"tag_name": "finder-v1.5.0"},
+    ])
+    assert picked["tag_name"] == "finder-v1.5.0"
+
+
+def test_no_release_for_this_app_yet(monkeypatch):
+    updater = _fake_releases(monkeypatch, [{"tag_name": "desktop-latest"}])
     assert updater.check_for_update("1.0.0") is None
 
 
