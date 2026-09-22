@@ -1,0 +1,25 @@
+{
+  "_설명": "python -m prime_contractor.cli screen --config prime_contractor/config.sample.json 처럼 씁니다. incumbent 블록은 통째로 교체되니 필요한 항목을 모두 적어주세요.",
+
+  "incumbent": {
+    "name": "KC그룹",
+    "affiliate_prefixes": ["케이씨", "KC"],
+    "affiliate_names": ["케이씨텍", "케이씨이앤씨"],
+    "ksic_prefixes": ["261", "262", "2029", "2923"],
+    "core_keywords": ["반도체", "디스플레이", "웨이퍼", "OLED", "CMP", "슬러리", "클린룸", "FAB"],
+    "adjacent_keywords": ["전자재료", "특수가스", "2차전지", "태양광"]
+  },
+
+  "max_overlap_rank": 1,
+  "max_distance_km": 150,
+  "lookback_days": 180,
+  "min_awards": 1,
+  "include_demand_orgs": true,
+
+  "weights": {
+    "sector": 40,
+    "proximity": 25,
+    "activity": 25,
+    "profile": 10
+  }
+}
