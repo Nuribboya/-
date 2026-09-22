@@ -16,7 +16,7 @@ import os
 import sys
 
 from prime_contractor.config import load_config
-from prime_contractor.pipeline import run_industry_screen, run_screen
+from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import render_table, write_csv
 
 
@@ -87,17 +87,6 @@ def _within(args) -> float | None:
     return args.within
 
 
-def _filter_sector(result, needle: str) -> None:
-    """업종 이름에 needle 이 든 후보만 남긴다 (부분 일치)."""
-    dropped = [c for c in result.passed if needle not in c.sector]
-    result.passed = [c for c in result.passed if needle in c.sector]
-    for c in dropped:
-        if c.overlap:
-            c.overlap.reasons.append(f"업종 '{c.sector or '미분류'}' 이(가) '{needle}' 와(과) 다름")
-    result.excluded = dropped + result.excluded
-    result.notes.append(f"업종 필터 '{needle}' 적용 → {len(result.passed)}곳")
-
-
 def _cmd_industry_screen(args) -> int:
     from prime_contractor.sources.dart import DartClient, DartError
     cfg = load_config(args.config, dart_api_key=os.environ.get("DART_API_KEY") or None)
@@ -116,7 +105,7 @@ def _cmd_industry_screen(args) -> int:
 
     result = run_industry_screen(cfg, client, limit=args.limit_companies)
     if args.sector:
-        _filter_sector(result, args.sector)
+        filter_sector(result, args.sector)
     print(render_table(result, limit=args.limit))
     if args.out:
         print(f"\nCSV 저장: {write_csv(result, args.out, include_excluded=False)}")
@@ -157,7 +146,7 @@ def _cmd_screen(args) -> int:
 
     result = run_screen(cfg, offline=args.offline, g2b_client=g2b_client, dart_client=dart_client)
     if args.sector:
-        _filter_sector(result, args.sector)
+        filter_sector(result, args.sector)
     print(render_table(result, limit=args.limit))
 
     if args.out:

@@ -84,6 +84,17 @@ def enrich(cands: list[Candidate], dart_client=None, offline_info: dict | None =
     return notes
 
 
+def filter_sector(result: "ScreenResult", needle: str) -> None:
+    """업종 이름에 needle 이 든 후보만 남긴다 (부분 일치). 뺀 것은 사유와 함께 제외 목록으로."""
+    dropped = [c for c in result.passed if needle not in c.sector]
+    result.passed = [c for c in result.passed if needle in c.sector]
+    for c in dropped:
+        if c.overlap:
+            c.overlap.reasons.append(f"업종 '{c.sector or '미분류'}' 이(가) '{needle}' 와(과) 다름")
+    result.excluded = dropped + result.excluded
+    result.notes.append(f"업종 필터 '{needle}' 적용 → {len(result.passed)}곳")
+
+
 #: 업종 스크리닝 모드의 배점. 낙찰 이력이 없는 모드라 '수주 활동'을 빼고
 #: 업종 적합도와 거리로 나눈다.
 INDUSTRY_WEIGHTS = {"sector": 45.0, "proximity": 35.0, "activity": 0.0, "profile": 20.0}

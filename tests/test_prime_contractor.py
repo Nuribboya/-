@@ -508,3 +508,70 @@ def test_switchgear_keywords_are_searched():
     cfg = ScreenConfig()
     for kw in ("수배전반", "특고압", "큐비클", "변전실"):
         assert kw in cfg.keywords
+
+
+# --- 데스크톱 앱 설정 -----------------------------------------------------------
+
+def test_gui_options_map_to_config():
+    from prime_contractor.app_settings import build_config
+    cfg = build_config({"days": "120", "distance": "50km 이내",
+                        "overlap": "반도체 등 같은 업종까지 제외",
+                        "g2b_key": "  abc  ", "include_demand_orgs": False})
+    assert cfg.lookback_days == 120
+    assert cfg.within_km == 50.0
+    assert cfg.max_overlap_rank == 1
+    assert cfg.g2b_service_key == "abc"        # 앞뒤 공백은 떼어낸다
+    assert cfg.include_demand_orgs is False
+
+
+def test_gui_blank_or_bad_input_falls_back_to_defaults():
+    """화면에서 잘못 고른 것 때문에 탐색이 멈추면 안 된다."""
+    from prime_contractor.app_settings import build_config
+    base = ScreenConfig()
+    cfg = build_config({"days": "", "distance": "말도 안 되는 값", "overlap": None})
+    assert cfg.lookback_days == base.lookback_days
+    assert cfg.within_km == base.within_km
+    assert cfg.max_overlap_rank == base.max_overlap_rank
+
+
+def test_nationwide_choice_clears_the_distance_limit():
+    from prime_contractor.app_settings import build_config
+    assert build_config({"distance": "전국 (제한 없음)"}).within_km is None
+
+
+def test_settings_round_trip(tmp_path, monkeypatch):
+    from prime_contractor import app_settings
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    saved = {"mode": app_settings.MODE_PUBLIC, "days": 90, "g2b_key": "zzz"}
+    path = app_settings.save_settings(saved)
+    assert path.exists()
+    assert app_settings.load_settings() == saved
+
+
+def test_corrupt_settings_file_does_not_crash(tmp_path, monkeypatch):
+    from prime_contractor import app_settings
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    path = app_settings.settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{깨진 파일", encoding="utf-8")
+    assert app_settings.load_settings() == {}
+
+
+def test_sector_dropdown_starts_with_all_option():
+    from prime_contractor.app_settings import SECTOR_ALL, sector_names
+    names = sector_names(ScreenConfig())
+    assert names[0] == SECTOR_ALL
+    assert "반도체·디스플레이" in names
+
+
+def test_filter_sector_moves_others_to_excluded_with_a_reason():
+    from prime_contractor.pipeline import ScreenResult, filter_sector
+    keep = _cand("반도체설비", awards=[Award(title="반도체 클린룸 제어반")])
+    drop = _cand("물설비", awards=[Award(title="정수장 자동제어")])
+    cfg = ScreenConfig()
+    for c in (keep, drop):
+        score_candidate(c, cfg)
+    result = ScreenResult(passed=[keep, drop])
+    filter_sector(result, "반도체")
+    assert [c.name for c in result.passed] == ["반도체설비"]
+    assert "다름" in result.excluded[0].overlap.reasons[-1]
