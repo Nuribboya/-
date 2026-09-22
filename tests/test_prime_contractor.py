@@ -241,3 +241,122 @@ def test_enrich_fills_region_from_org_name_without_address():
     cands = [Candidate(name="평택시 상하수도사업소", kind="demand_org")]
     enrich(cands)
     assert cands[0].region == "평택" and cands[0].distance_km is not None
+
+
+# --- API 경로 탐색 / 키워드 미지원 대응 ------------------------------------------
+
+class FakeResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+class FakeSession:
+    """요청 파라미터를 보고 정해진 응답을 돌려주는 가짜 세션."""
+
+    def __init__(self, handler) -> None:
+        self.handler = handler
+        self.calls: list[tuple[str, dict]] = []
+
+    def get(self, url, params=None, timeout=None):
+        params = params or {}
+        self.calls.append((url, params))
+        return FakeResponse(self.handler(url, params))
+
+
+def _envelope(items: list[dict], total: int | None = None) -> str:
+    return json.dumps({"response": {
+        "header": {"resultCode": "00", "resultMsg": "OK"},
+        "body": {"totalCount": len(items) if total is None else total, "items": items},
+    }})
+
+
+def _client(handler) -> g2b.G2BClient:
+    client = g2b.G2BClient("dummy-key", sleep_sec=0, session=FakeSession(handler))
+    return client
+
+
+def test_resolve_prefers_variant_that_actually_returns_rows():
+    """응답코드만 정상이고 0건인 경로를 덥석 잡으면 수집이 통째로 빈다."""
+    def handler(url, params):
+        if "inqryBgnDate" in params:                       # 두 번째 날짜 방식만 건수가 있다
+            return _envelope([{"bidwinnrNm": "갑사"}])
+        return _envelope([], total=0)
+
+    client = _client(handler)
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    url, style = client._resolve("scsbid:cnstwk", g2b.SCSBID_BASES,
+                                 "getOpengResultListInfoCnstwkPPSSrch", end - timedelta(days=7), end)
+    assert style[0] == "inqryBgnDate"
+
+
+def test_resolve_falls_back_to_zero_row_variant_rather_than_failing():
+    """전 구간이 진짜 0건일 수도 있다. 그때는 에러 대신 경로를 채택하고 진행한다."""
+    client = _client(lambda url, params: _envelope([], total=0))
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    url, style = client._resolve("scsbid:servc", g2b.SCSBID_BASES,
+                                 "getOpengResultListInfoServcPPSSrch", end - timedelta(days=7), end)
+    assert url.startswith("http://apis.data.go.kr/1230000/")
+
+
+def test_supports_keyword_detects_silent_zero_result():
+    """명세에 없는 파라미터는 에러가 아니라 0건으로 조용히 돌아온다."""
+    def handler(url, params):
+        if "bidNtceNm" in params:
+            return _envelope([], total=0)
+        return _envelope([{"bidwinnrNm": "갑사"}], total=500)
+
+    client = _client(handler)
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    assert client.supports_keyword(
+        "http://x/op", g2b.DATE_STYLES[0], end - timedelta(days=7), end, "자동제어") is False
+
+
+def test_fetch_awards_filters_titles_locally_when_keyword_unsupported():
+    rows = [
+        {"bidNtceNo": "1", "bidNtceNm": "정수장 자동제어설비 공사", "bidwinnrNm": "갑전기", "sucsfbidAmt": "100"},
+        {"bidNtceNo": "2", "bidNtceNm": "청사 화단 조경공사", "bidwinnrNm": "을조경", "sucsfbidAmt": "200"},
+        {"bidNtceNo": "3", "bidNtceNm": "배전반 교체", "bidwinnrNm": "병전기", "sucsfbidAmt": "300"},
+    ]
+
+    def handler(url, params):
+        if "bidNtceNm" in params:
+            return _envelope([], total=0)        # 키워드 검색 미지원
+        if params.get("numOfRows") == "1":
+            return _envelope(rows[:1], total=len(rows))
+        return _envelope(rows, total=len(rows))
+
+    client = _client(handler)
+    from datetime import datetime
+    awards = client.fetch_awards(keywords=("자동제어", "배전반"), categories=("cnstwk",),
+                                 lookback_days=10, end=datetime(2026, 9, 1))
+    names = {a.winner_name for a in awards}
+    assert names == {"갑전기", "병전기"}          # 조경공사는 걸러진다
+    assert "cnstwk" in client.keyword_fallback
+
+
+def test_fetch_awards_uses_server_side_search_when_supported():
+    def handler(url, params):
+        if params.get("bidNtceNm") == "자동제어":
+            return _envelope([{"bidNtceNo": "1", "bidNtceNm": "자동제어 공사",
+                               "bidwinnrNm": "갑전기", "sucsfbidAmt": "100"}], total=1)
+        return _envelope([{"bidNtceNo": "9", "bidNtceNm": "아무거나",
+                           "bidwinnrNm": "무관사", "sucsfbidAmt": "1"}], total=1)
+
+    client = _client(handler)
+    from datetime import datetime
+    awards = client.fetch_awards(keywords=("자동제어",), categories=("cnstwk",),
+                                 lookback_days=10, end=datetime(2026, 9, 1))
+    assert not client.keyword_fallback
+    assert {a.winner_name for a in awards} == {"갑전기"}
+
+
+def test_empty_result_table_explains_what_to_check():
+    from prime_contractor.pipeline import ScreenResult
+    table = render_table(ScreenResult())
+    assert "probe" in table and "승인" in table

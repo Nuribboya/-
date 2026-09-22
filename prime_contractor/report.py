@@ -38,6 +38,13 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
 
     cols = [("#", 3), ("업체/기관", 26), ("구분", 6), ("업종", 18),
             ("지역", 8), ("거리", 7), ("수주", 10), ("점수", 6)]
+    if not result.passed and not result.excluded:
+        lines.append("후보가 한 곳도 잡히지 않았습니다. 확인할 것:")
+        lines.append("  1) python -m prime_contractor.cli probe   ← 어디서 막혔는지 바로 나옵니다")
+        lines.append("  2) 공공데이터포털에서 「낙찰정보서비스」 활용신청이 '승인' 상태인지")
+        lines.append("  3) --days 365 로 기간을 넓혀보기")
+        return "\n".join(lines)
+
     header = " ".join(_pad(name, w) for name, w in cols)
     lines.append(header)
     lines.append("-" * _width(header))

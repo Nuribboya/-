@@ -102,6 +102,11 @@ def run_screen(cfg: ScreenConfig, offline: bool = False,
             f"나라장터 최근 {cfg.lookback_days}일 / 키워드 {len(cfg.keywords)}개 / "
             f"{'·'.join(cfg.categories)} → 낙찰 {len(result.awards)}건"
         )
+        if getattr(g2b_client, "keyword_fallback", None):
+            result.notes.append(
+                "공고명 검색이 지원되지 않아 전체를 받아 직접 걸렀습니다: "
+                + ", ".join(sorted(g2b_client.keyword_fallback))
+            )
 
     cands = build_candidates(result.awards, include_demand_orgs=cfg.include_demand_orgs)
     result.notes += enrich(cands, dart_client=dart_client,

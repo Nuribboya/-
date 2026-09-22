@@ -139,6 +139,8 @@ class G2BClient:
         self.session = session or requests.Session()
         self._resolved: dict[str, tuple[str, tuple[str, str, str]]] = {}
         self.last_probe: list[str] = []
+        #: 공고명 검색이 안 먹혀 전체 수집으로 돌린 업무구분
+        self.keyword_fallback: set[str] = set()
 
     # --- 저수준 호출 ---------------------------------------------------------
 
@@ -152,30 +154,96 @@ class G2BClient:
     def _variants(self, bases: tuple[str, ...], op: str) -> list[tuple[str, tuple[str, str, str]]]:
         return [(f"{base}/{op}", style) for base in bases for style in DATE_STYLES]
 
+    def _try_variant(self, url: str, style: tuple[str, str, str],
+                     begin: datetime, end: datetime, keyword: str = "") -> ApiPage | str:
+        """조합 하나를 1건만 찔러본다. 실패하면 사유 문자열을 돌려준다."""
+        bgn_p, end_p, fmt = style
+        params = {"pageNo": "1", "numOfRows": "1", "inqryDiv": "1",
+                  bgn_p: begin.strftime(fmt), end_p: end.strftime(fmt)}
+        if keyword:
+            params["bidNtceNm"] = keyword
+        try:
+            return self._call(url, params)
+        except (requests.RequestException, ValueError, ET.ParseError) as exc:
+            return f"{type(exc).__name__}: {exc}"
+
     def _resolve(self, key: str, bases: tuple[str, ...], op: str,
                  begin: datetime, end: datetime) -> tuple[str, tuple[str, str, str]]:
-        """살아있는 (URL, 날짜방식) 조합을 찾아 캐시한다."""
+        """살아있는 (URL, 날짜방식) 조합을 찾아 캐시한다.
+
+        응답코드가 정상이어도 건수가 0이면 '경로는 살아있지만 조회 조건이 안 맞는'
+        상태다. 그런 조합을 덜컥 채택하면 전체 수집이 조용히 0건으로 끝나므로,
+        **실제로 건수가 잡히는 조합을 우선** 고른다.
+        """
         if key in self._resolved:
             return self._resolved[key]
 
-        failures = []
+        fallback: tuple[str, tuple[str, str, str]] | None = None
+        notes: list[str] = []
         for url, style in self._variants(bases, op):
-            bgn_p, end_p, fmt = style
-            params = {"pageNo": "1", "numOfRows": "1", "inqryDiv": "1",
-                      bgn_p: begin.strftime(fmt), end_p: end.strftime(fmt)}
-            try:
-                page = self._call(url, params)
-            except (requests.RequestException, ValueError, ET.ParseError) as exc:
-                failures.append(f"  {url} [{bgn_p}] → {type(exc).__name__}: {exc}")
+            outcome = self._try_variant(url, style, begin, end)
+            label = f"  {url} [{style[0]}]"
+            if isinstance(outcome, str):
+                notes.append(f"{label} → {outcome}")
                 continue
-            if page.ok:
+            if not outcome.ok:
+                notes.append(f"{label} → {outcome.result_code} {outcome.result_msg}")
+                continue
+            notes.append(f"{label} → OK, 총 {outcome.total_count}건")
+            if outcome.total_count > 0:
                 self._resolved[key] = (url, style)
-                self.last_probe.append(f"  {url} [{bgn_p}] → OK (총 {page.total_count}건)")
+                self.last_probe += notes
                 return url, style
-            failures.append(f"  {url} [{bgn_p}] → {page.result_code} {page.result_msg}")
+            if fallback is None:
+                fallback = (url, style)
 
-        self.last_probe.extend(failures)
-        raise G2BError(f"[{key}] 사용 가능한 오퍼레이션을 찾지 못했습니다:\n" + "\n".join(failures))
+        self.last_probe += notes
+        if fallback is not None:
+            log.warning("[%s] 응답은 정상인데 건수가 0입니다. 조회 조건을 확인하세요.", key)
+            self._resolved[key] = fallback
+            return fallback
+        raise G2BError(f"[{key}] 사용 가능한 오퍼레이션을 찾지 못했습니다:\n" + "\n".join(notes))
+
+    def supports_keyword(self, url: str, style: tuple[str, str, str],
+                         begin: datetime, end: datetime, keyword: str) -> bool:
+        """이 오퍼레이션이 공고명 부분검색(bidNtceNm)을 실제로 지원하는지 확인.
+
+        명세에 없는 파라미터를 넘기면 에러가 아니라 '0건'으로 조용히 돌아오는
+        경우가 있다. 키워드를 넣은 결과와 안 넣은 결과를 비교해서 판단한다.
+        """
+        plain = self._try_variant(url, style, begin, end)
+        if isinstance(plain, str) or not plain.ok or plain.total_count == 0:
+            return True          # 비교 기준 자체가 없으면 판단 보류 (원래대로 진행)
+        keyed = self._try_variant(url, style, begin, end, keyword=keyword)
+        if isinstance(keyed, str) or not keyed.ok:
+            return False
+        return keyed.total_count > 0
+
+    def diagnose(self, categories: tuple[str, ...], sample_keyword: str = "자동제어",
+                 days: int = 7, end: datetime | None = None) -> list[str]:
+        """어떤 경로가 살아있고 건수가 잡히는지 그대로 찍어 준다 (문제 파악용)."""
+        end = end or datetime.now()
+        begin = end - timedelta(days=days)
+        lines = [f"조회창: {begin:%Y-%m-%d} ~ {end:%Y-%m-%d} / 샘플 키워드: {sample_keyword}"]
+        for cat in categories:
+            op = f"getOpengResultListInfo{CATEGORY_SUFFIX[cat]}PPSSrch"
+            lines.append(f"\n[{CATEGORY_LABEL[cat]}] {op}")
+            for url, style in self._variants(SCSBID_BASES, op):
+                outcome = self._try_variant(url, style, begin, end)
+                tag = f"  {url.rsplit('/1230000/', 1)[-1]} [{style[0]}]"
+                if isinstance(outcome, str):
+                    lines.append(f"{tag} → 호출실패 {outcome}")
+                    continue
+                if not outcome.ok:
+                    lines.append(f"{tag} → {outcome.result_code} {outcome.result_msg}")
+                    continue
+                keyed = self._try_variant(url, style, begin, end, keyword=sample_keyword)
+                keyed_cnt = keyed.total_count if isinstance(keyed, ApiPage) and keyed.ok else "실패"
+                lines.append(f"{tag} → OK, 전체 {outcome.total_count}건 / "
+                             f"'{sample_keyword}' 검색 {keyed_cnt}건")
+                if outcome.items:
+                    lines.append("      응답 필드: " + ", ".join(sorted(outcome.items[0])[:14]))
+        return lines
 
     def _paged(self, url: str, base_params: dict):
         collected = 0
@@ -219,18 +287,29 @@ class G2BClient:
                 continue
 
             bgn_p, end_p, fmt = style
+            keyword_ok = self.supports_keyword(url, style, end - timedelta(days=7), end, keywords[0])
+            if not keyword_ok:
+                log.warning("[%s] 공고명 검색이 먹히지 않아 전체를 받아 직접 걸러냅니다 "
+                            "(시간이 더 걸립니다).", CATEGORY_LABEL[cat])
+                self.keyword_fallback.add(cat)
+
             for w_begin, w_end in _windows(begin, end, days=15):
-                for kw in keywords:
-                    params = {"inqryDiv": "1", "bidNtceNm": kw,
-                              bgn_p: w_begin.strftime(fmt), end_p: w_end.strftime(fmt)}
+                window = {bgn_p: w_begin.strftime(fmt), end_p: w_end.strftime(fmt)}
+                # 키워드가 먹히면 검색어별로, 아니면 기간 전체를 한 번에 받아 제목으로 거른다.
+                queries = [{"bidNtceNm": kw} for kw in keywords] if keyword_ok else [{}]
+                for extra in queries:
+                    params = {"inqryDiv": "1", **window, **extra}
                     try:
                         items = list(self._paged(url, params))
                     except (G2BError, requests.RequestException, ValueError, ET.ParseError) as exc:
                         log.warning("[%s/%s] %s ~ %s 조회 실패: %s",
-                                    CATEGORY_LABEL[cat], kw,
+                                    CATEGORY_LABEL[cat], extra.get("bidNtceNm", "전체"),
                                     w_begin.date(), w_end.date(), exc)
                         continue
                     for item in items:
+                        kw = extra.get("bidNtceNm") or _first_keyword(item, keywords)
+                        if not kw:
+                            continue            # 전체 수집 모드에서 키워드와 무관한 공고
                         award = _to_award(item, cat, kw)
                         if not award.winner_name:
                             continue
@@ -254,6 +333,15 @@ def _to_award(item: dict, category: str, keyword: str) -> Award:
         category=CATEGORY_LABEL.get(category, category),
         keyword=keyword,
     )
+
+
+def _first_keyword(item: dict, keywords: tuple[str, ...]) -> str:
+    """공고명에 걸린 첫 키워드. 전체 수집 모드에서 직접 거를 때 쓴다."""
+    title = _pick(item, WINNER_FIELDS["title"]).upper()
+    for kw in keywords:
+        if kw.upper() in title:
+            return kw
+    return ""
 
 
 def _windows(begin: datetime, end: datetime, days: int = 15):

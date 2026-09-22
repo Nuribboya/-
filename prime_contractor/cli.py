@@ -41,6 +41,10 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--include-excluded", action="store_true", help="CSV 에 제외 후보도 담는다")
     s.add_argument("-v", "--verbose", action="store_true")
 
+    pr = sub.add_parser("probe", help="어떤 API 경로가 살아있고 건수가 잡히는지 진단")
+    pr.add_argument("--days", type=int, default=7, help="진단에 쓸 조회 기간(일)")
+    pr.add_argument("--keyword", default="자동제어", help="검색 지원 여부를 볼 샘플 키워드")
+
     d = sub.add_parser("dart-lookup", help="상호로 DART 업종코드·주소를 조회 (설정값 검증용)")
     d.add_argument("names", nargs="+")
 
@@ -81,6 +85,22 @@ def _cmd_screen(args) -> int:
     if args.out:
         path = write_csv(result, args.out, include_excluded=args.include_excluded)
         print(f"\nCSV 저장: {path}")
+    return 0
+
+
+def _cmd_probe(args) -> int:
+    from prime_contractor.sources.g2b import G2BClient, G2BError
+    cfg = load_config(None, g2b_service_key=os.environ.get("G2B_SERVICE_KEY") or None)
+    try:
+        client = G2BClient(cfg.g2b_service_key)
+    except G2BError as exc:
+        print(f"[오류] {exc}", file=sys.stderr)
+        return 2
+    print("■ 나라장터 낙찰정보 API 진단")
+    for line in client.diagnose(cfg.categories, sample_keyword=args.keyword, days=args.days):
+        print(line)
+    print("\n해석: '전체 N건' 이 0이면 경로/기간 문제, 전체는 있는데 "
+          "'키워드 검색 0건' 이면 공고명 검색 미지원입니다(자동으로 전체 수집으로 전환됩니다).")
     return 0
 
 
@@ -126,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     return {
         "screen": _cmd_screen,
+        "probe": _cmd_probe,
         "dart-lookup": _cmd_dart_lookup,
         "show-config": _cmd_show_config,
     }[args.command](args)
