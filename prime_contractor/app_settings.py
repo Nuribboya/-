@@ -15,28 +15,28 @@ from prime_contractor.config import ScreenConfig, load_config
 APP_NAME = "PrimeFinder"
 
 #: 화면에서 고를 수 있는 탐색 방식
-MODE_PUBLIC = "공공 낙찰 (나라장터)"
-MODE_INDUSTRY = "업종 훑기 (DART 상장사)"
-MODE_SAMPLE = "샘플 데이터 (키 없이 시험)"
+MODE_PUBLIC = "관공서 공사에서 찾기"
+MODE_INDUSTRY = "기업 목록에서 찾기"
+MODE_SAMPLE = "연습용 가짜 자료로 해보기"
 MODES = (MODE_PUBLIC, MODE_INDUSTRY, MODE_SAMPLE)
 
 #: 거리 선택지 (표시 문구 → km, None 이면 제한 없음)
 DISTANCE_CHOICES: dict[str, float | None] = {
-    "50km 이내": 50.0,
-    "70km 이내": 70.0,
-    "100km 이내": 100.0,
-    "150km 이내": 150.0,
-    "전국 (제한 없음)": None,
+    "50km — 가까운 곳만": 50.0,
+    "70km — 당일 왕복": 70.0,
+    "100km — 조금 멀어도": 100.0,
+    "150km — 꽤 멀어도": 150.0,
+    "전국 어디든": None,
 }
 
 #: 겹침 허용 범위 (표시 문구 → max_overlap_rank)
 OVERLAP_CHOICES: dict[str, int] = {
-    "KC 계열사만 제외 (반도체 포함)": 2,
-    "반도체 등 같은 업종까지 제외": 1,
-    "인접 업종까지 모두 제외": 0,
+    "케이씨 계열사만 빼기 (반도체 회사는 봄)": 2,
+    "반도체 쪽은 다 빼기": 1,
+    "비슷한 업종까지 전부 빼기": 0,
 }
 
-SECTOR_ALL = "전체 업종"
+SECTOR_ALL = "업종 안 가림"
 
 
 def settings_path() -> Path:

@@ -3,13 +3,13 @@
 '점수 72점'만 던지면 어디부터 연락해야 할지 알 수 없다. 그래서 다섯 축으로
 나눠 각각 몇 점인지, 왜 그런지, 추정 판넬 물량이 얼마인지까지 같이 낸다.
 
-축                    배점   묻는 것
---------------------  ----  ----------------------------------------------
-product_fit (품목)      30   우리가 만드는 물건이 실제로 들어가는 일인가
-volume      (물량)      25   그래서 판넬이 얼마어치나 나오는가
-access      (접근성)    20   안성에서 대응할 만한 거리인가
-repeat      (지속성)    15   한 번 뚫으면 계속 나오는가
-safety      (안전도)    10   기존 원청과 부딪히지 않고, 정보가 믿을 만한가
+축                        배점   묻는 것
+------------------------  ----  ------------------------------------------
+product_fit (판넬 일감)     30   우리가 만드는 물건이 실제로 들어가는 일인가
+volume      (일감 크기)     25   그래서 판넬이 얼마어치나 나오는가
+access      (거리)          20   안성에서 대응할 만한 거리인가
+repeat      (꾸준함)        15   한 번 뚫으면 계속 나오는가
+safety      (안전)          10   기존 원청과 부딪히지 않고, 정보가 믿을 만한가
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import math
 from dataclasses import dataclass, field
 
 from prime_contractor.models import Candidate
+from prime_contractor.textutil import pad
 
 # --- 우리 품목이 얼마나 직접적으로 걸리는가 -------------------------------------
 #
@@ -47,10 +48,10 @@ DEFAULT_SHARE = 0.05
 
 GRADE_CUTS = ((75, "A"), (60, "B"), (45, "C"), (0, "D"))
 GRADE_ADVICE = {
-    "A": "우선 접촉",
-    "B": "접촉 가치 있음",
-    "C": "여력 될 때",
-    "D": "보류",
+    "A": "먼저 연락해 보세요",
+    "B": "연락해 볼 만합니다",
+    "C": "여유 있을 때",
+    "D": "지금은 아닙니다",
 }
 
 
@@ -84,11 +85,15 @@ class Fitness:
         return next((a for a in self.axes if a.key == key), None)
 
     def explain(self) -> str:
-        lines = [f"{self.grade}등급 {self.total:.1f}점 — {self.advice}", f"  {self.headline}"]
+        lines = [f"{self.grade}등급 · {self.total:.1f}점 — {self.advice}", f"  {self.headline}", ""]
+        lines.append("  왜 이 점수인가")
         for a in self.axes:
-            lines.append(f"  · {a.label:<8} {a.points:5.1f} / {a.weight:.0f}   {a.detail}")
-        for c in self.cautions:
-            lines.append(f"  ⚠ {c}")
+            lines.append(f"   · {pad(a.label, 11)} {a.points:5.1f}점 (최대 {a.weight:2.0f}점)   {a.detail}")
+        if self.cautions:
+            lines.append("")
+            lines.append("  확인하실 점")
+            for c in self.cautions:
+                lines.append(f"   · {c}")
         return "\n".join(lines)
 
 
@@ -125,55 +130,55 @@ def _product_fit(cand: Candidate) -> Axis:
     if not cand.awards:
         # 낙찰 이력이 없는 후보(업종 훑기 모드)는 업종 적합도로 대신 본다.
         score = min(cand.sector_weight / 2.0, 1.0) * 70
-        return Axis("product_fit", "품목", score, 30.0,
-                    f"수주 이력 없음, 업종({cand.sector or '미분류'})으로 추정")
+        return Axis("product_fit", "판넬 일감", score, 30.0,
+                    f"수주 기록이 없어 업종({cand.sector or '미분류'})만 보고 매긴 점수입니다")
 
     if direct:
         score = min(60 + direct * 20, 100)
-        detail = f"판넬 품목 직접 명시 {direct}건"
+        detail = f"공고에 배전반·제어반이 직접 적힌 일 {direct}건 — 판넬이 확실히 들어갑니다"
     elif process:
         score = min(40 + process * 10, 75)
-        detail = f"자동제어·계장 공정 {process}건"
+        detail = f"자동제어·계장 공사 {process}건 — 판넬이 들어갈 가능성이 높습니다"
     elif general:
         score = min(20 + general * 5, 40)
-        detail = f"일반 전기·설비 공사 {general}건 (판넬 포함 여부 확인 필요)"
+        detail = f"일반 전기·설비 공사 {general}건 — 판넬이 들어가는지는 확인이 필요합니다"
     else:
         score = 10
-        detail = "우리 품목과 직접 연결되는 공고 없음"
-    return Axis("product_fit", "품목", score, 30.0, detail)
+        detail = "우리가 만드는 물건과 연결되는 공사가 안 보입니다"
+    return Axis("product_fit", "판넬 일감", score, 30.0, detail)
 
 
 def _volume(cand: Candidate, est: int) -> Axis:
     if est <= 0:
-        return Axis("volume", "물량", 0.0, 25.0, "추정 물량 없음")
+        return Axis("volume", "일감 크기", 0.0, 25.0, "판넬이 들어갈 만한 일이 안 보입니다")
     eok = est / 1e8
     # 10억이면 만점. 로그라 대형 1건이 전부를 먹지 않는다.
     score = min(math.log1p(eok) / math.log(11) * 100, 100)
-    return Axis("volume", "물량", score, 25.0,
-                f"추정 판넬 {eok:.1f}억 (낙찰 {cand.award_amount / 1e8:.1f}억 기준)")
+    return Axis("volume", "일감 크기", score, 25.0,
+                f"공사비 {cand.award_amount / 1e8:.1f}억 중 판넬 몫을 약 {eok:.1f}억으로 봅니다")
 
 
 def _access(cand: Candidate, max_km: float) -> Axis:
     if cand.distance_km is None:
-        return Axis("access", "접근성", 35.0, 20.0, "주소 미확인 — 직접 확인 필요")
+        return Axis("access", "거리", 35.0, 20.0, "주소를 못 찾았습니다 — 직접 확인해 보세요")
     if cand.distance_km >= max_km:
-        return Axis("access", "접근성", 0.0, 20.0, f"{cand.region} {cand.distance_km:.0f}km (권역 밖)")
+        return Axis("access", "거리", 0.0, 20.0, f"{cand.region} {cand.distance_km:.0f}km — 다니기엔 먼 거리입니다")
     score = (1 - cand.distance_km / max_km) * 100
-    return Axis("access", "접근성", score, 20.0, f"{cand.region} {cand.distance_km:.0f}km")
+    return Axis("access", "거리", score, 20.0, f"{cand.region} {cand.distance_km:.0f}km")
 
 
 def _repeat(cand: Candidate) -> Axis:
     """한 번 뚫으면 계속 나올 곳인가. 건수와 '거래처가 여럿인지'를 본다."""
     count = cand.award_count
     if count == 0:
-        return Axis("repeat", "지속성", 0.0, 15.0, "수주 이력 없음")
+        return Axis("repeat", "꾸준함", 0.0, 15.0, "수주 기록이 없습니다")
     if count == 1:
-        return Axis("repeat", "지속성", 25.0, 15.0, "단발 1건 — 반복 여부 미확인")
+        return Axis("repeat", "꾸준함", 25.0, 15.0, "1건뿐이라 계속 일이 나올지는 아직 모릅니다")
     orgs = len({a.demand_org for a in cand.awards if a.demand_org})
     count_part = min(math.log1p(count) / math.log(7), 1.0)        # 6건이면 만점
     org_part = min(orgs / 3, 1.0)                                  # 발주처 3곳이면 만점
     score = (0.65 * count_part + 0.35 * org_part) * 100
-    return Axis("repeat", "지속성", score, 15.0, f"{count}건 / 발주처 {orgs}곳")
+    return Axis("repeat", "꾸준함", score, 15.0, f"{count}건을 {orgs}곳에서 받았습니다")
 
 
 def _safety(cand: Candidate) -> Axis:
@@ -183,7 +188,7 @@ def _safety(cand: Candidate) -> Axis:
     known = sum(bool(v) for v in (cand.ksic_code, cand.bizno, cand.address))
     score = base * (0.6 + 0.4 * known / 3)
     label = cand.overlap.label if cand.overlap else "무관"
-    return Axis("safety", "안전도", score, 10.0, f"{label} / 확인된 정보 {known}/3")
+    return Axis("safety", "안전", score, 10.0, f"기존 원청과 {label} · 확인된 회사 정보 {known}/3가지")
 
 
 def _headline(cand: Candidate, est: int) -> str:
@@ -197,21 +202,21 @@ def _headline(cand: Candidate, est: int) -> str:
         bits.append(f"{cand.award_count}건 {cand.award_amount / 1e8:.1f}억")
     if est:
         bits.append(f"추정 판넬 {est / 1e8:.1f}억")
-    return " · ".join(bits) if bits else "근거 부족"
+    return " · ".join(bits) if bits else "판단할 정보가 부족합니다"
 
 
 def _cautions(cand: Candidate) -> list[str]:
     out = []
     if cand.distance_km is None:
-        out.append("주소를 못 찾아 거리 미반영 — 소재지 직접 확인 필요")
+        out.append("주소를 못 찾아 거리를 못 쟀습니다. 회사 위치를 직접 확인해 보세요")
     if not cand.ksic_code:
-        out.append("업종코드 미확인 (DART 미등록) — 업종 판정이 상호·공고명 추정")
+        out.append("공식 업종 정보가 없어, 회사 이름과 공사명만 보고 업종을 짐작했습니다")
     if cand.award_count == 1:
-        out.append("낙찰 1건뿐 — 지속 거래처인지 확인 필요")
+        out.append("따낸 공사가 1건뿐입니다. 꾸준한 거래처인지 확인이 필요합니다")
     if cand.overlap and cand.overlap.level == "same_industry":
-        out.append("기존 원청과 같은 시장 — 관계 충돌 여부 확인")
+        out.append("케이씨그룹과 같은 분야입니다. 기존 거래에 문제가 없을지 한번 보세요")
     if cand.kind == "demand_org":
-        out.append("발주기관이라 시공사를 통해 들어가야 할 수 있음")
+        out.append("관공서·공공기관이라 공사를 맡은 회사를 거쳐야 할 수 있습니다")
     return out
 
 

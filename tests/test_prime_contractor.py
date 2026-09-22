@@ -230,11 +230,12 @@ def test_offline_screen_ranks_and_excludes(tmp_path):
     assert result.passed == sorted(result.passed, key=lambda c: c.score, reverse=True)
 
     table = render_table(result)
-    assert "원청 후보 스크리닝 결과" in table
+    assert "찾기 결과" in table
+    assert "A 먼저 연락" in table          # 등급 뜻을 표 아래에 적어 준다
 
     csv_path = write_csv(result, tmp_path / "out.csv", include_excluded=True)
     body = csv_path.read_text(encoding="utf-8-sig")
-    assert "업체명" in body and "제외" in body
+    assert "회사 이름" in body and "제외" in body
 
 
 def test_enrich_fills_region_from_org_name_without_address():
@@ -419,6 +420,37 @@ def test_empty_result_table_explains_what_to_check():
     assert "probe" in table and "승인" in table
 
 
+# --- 용어를 다듬어도 앱이 깨지지 않아야 한다 -------------------------------------
+
+def test_saved_settings_from_an_older_wording_fall_back_to_defaults():
+    """문구를 바꾸면 예전에 저장해 둔 선택지가 목록에 없다. 그때 빈 칸이 되면 안 된다."""
+    from prime_contractor.app_settings import (
+        DISTANCE_CHOICES, MODES, OVERLAP_CHOICES, build_config)
+    cfg = build_config({"distance": "70km 이내",          # 옛 문구
+                        "overlap": "KC 계열사만 제외 (반도체 포함)",
+                        "mode": "공공 낙찰 (나라장터)"})
+    base = ScreenConfig()
+    assert cfg.within_km == base.within_km
+    assert cfg.max_overlap_rank == base.max_overlap_rank
+    # 새 문구는 모두 고를 수 있는 값이어야 한다
+    assert all(v in DISTANCE_CHOICES.values() for v in [50.0, 70.0, None])
+    assert set(OVERLAP_CHOICES.values()) == {0, 1, 2}
+    assert len(MODES) == 3
+
+
+def test_help_text_covers_what_a_beginner_asks_first():
+    from prime_contractor.help_text import HELP_TEXT
+    for topic in ("인증키", "data.go.kr", "원청", "발주처", "등급", "매출.csv", "어림짐작"):
+        assert topic in HELP_TEXT, topic
+
+
+def test_grade_advice_is_an_instruction_not_a_label():
+    """'우선 접촉' 같은 명사보다 '먼저 연락해 보세요' 가 바로 이해된다."""
+    from prime_contractor.fitness import GRADE_ADVICE
+    assert all(v.endswith(("요", "다", "때", "니다")) for v in GRADE_ADVICE.values())
+    assert GRADE_ADVICE["A"] != GRADE_ADVICE["D"]
+
+
 def test_variants_rejects_a_bare_string_operation():
     """문자열을 넘기면 한 글자씩 순회해 엉뚱한 URL이 조용히 만들어진다."""
     client = _client(lambda url, params: _envelope([]))
@@ -512,10 +544,16 @@ def test_switchgear_keywords_are_searched():
 
 # --- 데스크톱 앱 설정 -----------------------------------------------------------
 
+def _label_for(choices: dict, value):
+    """표시 문구가 아니라 값으로 선택지를 찾는다 (문구는 언제든 다듬어진다)."""
+    return next(k for k, v in choices.items() if v == value)
+
+
 def test_gui_options_map_to_config():
-    from prime_contractor.app_settings import build_config
-    cfg = build_config({"days": "120", "distance": "50km 이내",
-                        "overlap": "반도체 등 같은 업종까지 제외",
+    from prime_contractor.app_settings import DISTANCE_CHOICES, OVERLAP_CHOICES, build_config
+    cfg = build_config({"days": "120",
+                        "distance": _label_for(DISTANCE_CHOICES, 50.0),
+                        "overlap": _label_for(OVERLAP_CHOICES, 1),
                         "g2b_key": "  abc  ", "include_demand_orgs": False})
     assert cfg.lookback_days == 120
     assert cfg.within_km == 50.0
@@ -535,8 +573,9 @@ def test_gui_blank_or_bad_input_falls_back_to_defaults():
 
 
 def test_nationwide_choice_clears_the_distance_limit():
-    from prime_contractor.app_settings import build_config
-    assert build_config({"distance": "전국 (제한 없음)"}).within_km is None
+    from prime_contractor.app_settings import DISTANCE_CHOICES, build_config
+    label = _label_for(DISTANCE_CHOICES, None)
+    assert build_config({"distance": label}).within_km is None
 
 
 def test_settings_round_trip(tmp_path, monkeypatch):
@@ -664,31 +703,35 @@ def test_weights_are_normalised_to_100():
 def test_candidate_without_awards_scores_on_industry_instead():
     """업종 훑기 모드에는 낙찰 이력이 없다. 그래도 평가는 되어야 한다."""
     cand = _scored("반도체설비(주)", ksic_code="26110")
-    assert cand.fitness.axis("product_fit").score > 0
-    assert "수주 이력 없음" in cand.fitness.axis("product_fit").detail
+    axis = cand.fitness.axis("product_fit")
+    assert axis.score > 0
+    assert "수주 기록이 없" in axis.detail and "업종" in axis.detail
 
 
 def test_cautions_flag_what_the_user_must_verify():
     cand = _scored("주소없는곳", awards=[Award(title="배전반 교체", amount=10**8, category="공사")])
     joined = " ".join(cand.fitness.cautions)
-    assert "소재지" in joined          # 주소 미상
-    assert "업종코드" in joined        # DART 미등록
-    assert "1건" in joined             # 단발
+    assert "위치" in joined            # 주소를 못 찾았다
+    assert "업종" in joined            # 공식 업종 정보가 없다
+    assert "1건" in joined             # 따낸 공사가 하나뿐이다
+    assert len(cand.fitness.cautions) == 3
 
 
 def test_explain_lists_every_axis():
     cand = _scored("갑전기", address="경기도 평택시",
                    awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
     text = cand.fitness.explain()
-    for label in ("품목", "물량", "접근성", "지속성", "안전도"):
-        assert label in text
+    for axis in cand.fitness.axes:
+        assert axis.label in text          # 다섯 축이 모두 설명에 나온다
+    assert len(cand.fitness.axes) == 5
+    assert "왜 이 점수인가" in text
 
 
 def test_csv_carries_grade_and_axis_detail(tmp_path):
     result = run_screen(ScreenConfig(), offline=True)
     body = write_csv(result, tmp_path / "out.csv").read_text(encoding="utf-8-sig")
     header = body.splitlines()[0]
-    for column in ("등급", "적합도", "추정판넬금액", "품목근거", "주의사항"):
+    for column in ("등급", "점수", "예상 판넬 일감(원)", "판넬일감 근거", "확인하실 점"):
         assert column in header
 
 
@@ -796,7 +839,7 @@ def test_plan_skips_candidates_with_no_expected_volume():
 def test_no_gap_means_no_plan():
     from prime_contractor.sales import plan_to_close_gap
     plan = plan_to_close_gap(0, [], lookback_days=180)
-    assert not plan.rows and "채웠습니다" in plan.note
+    assert not plan.rows and "채우셨습니다" in plan.note
 
 
 def test_gap_report_shows_shortfall_and_plan():
@@ -808,7 +851,7 @@ def test_gap_report_shows_shortfall_and_plan():
                    awards=[Award(title="배전반 교체공사", amount=10**9, category="공사")])
     enrich([cand]); score_candidate(cand, ScreenConfig())
     text = render_gap(book, record, plan_to_close_gap(record.gap, [cand], 180))
-    assert "부족" in text and "기대 월매출" in text and "갑전기" in text
+    assert "모자랍니다" in text and "한 달 예상" in text and "갑전기" in text
 
 
 # --- 업데이트 확인 --------------------------------------------------------------

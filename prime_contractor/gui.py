@@ -20,6 +20,7 @@ from prime_contractor.app_settings import (
     DISTANCE_CHOICES, MODE_INDUSTRY, MODE_PUBLIC, MODE_SAMPLE, MODES,
     OVERLAP_CHOICES, SECTOR_ALL, build_config, load_settings, save_settings, sector_names,
 )
+from prime_contractor.help_text import HELP_TEXT
 from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import write_csv
@@ -27,11 +28,17 @@ from prime_contractor.sales import load_sales, plan_to_close_gap
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
 
-COLUMNS = (("순위", 45), ("등급", 45), ("업체/기관", 240), ("구분", 55), ("업종", 125),
-           ("지역", 65), ("거리", 60), ("추정판넬", 85), ("적합도", 60))
-SALES_COLUMNS = (("연월", 90), ("매출", 110), ("목표", 110), ("달성률", 70), ("부족", 110))
-PLAN_COLUMNS = (("#", 35), ("등급", 45), ("업체/기관", 240), ("지역", 70),
-                ("기대 월매출", 110), ("누적", 110))
+COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
+           ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
+SALES_COLUMNS = (("연월", 90), ("실제 매출", 115), ("목표", 115),
+                 ("달성률", 70), ("모자란 돈", 115))
+PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
+                ("한 달 예상 금액", 120), ("합치면", 120))
+
+
+def _label_for(choices: dict, value) -> str:
+    """값으로 선택지 문구를 찾는다. 문구를 다듬어도 기본값이 어긋나지 않는다."""
+    return next((k for k, v in choices.items() if v == value), list(choices)[0])
 
 
 class QueueLogHandler(logging.Handler):
@@ -75,73 +82,83 @@ class App:
         self.tabs.pack(fill=BOTH, expand=True)
         find_tab = ttk.Frame(self.tabs)
         sales_tab = ttk.Frame(self.tabs)
-        self.tabs.add(find_tab, text="  원청 찾기  ")
-        self.tabs.add(sales_tab, text="  매출 · 부족분  ")
+        help_tab = ttk.Frame(self.tabs)
+        self.tabs.add(find_tab, text="  ① 일감 줄 회사 찾기  ")
+        self.tabs.add(sales_tab, text="  ② 매출 보고 채우기  ")
+        self.tabs.add(help_tab, text="  도움말  ")
 
         self._build_inputs(find_tab, saved)
         self._build_table(find_tab)
         self._build_log(find_tab)
         self._build_sales(sales_tab, saved)
+        self._build_help(help_tab)
         self._pump_messages()
         threading.Thread(target=self._check_update, daemon=True).start()
 
     # --- 화면 구성 -----------------------------------------------------------
 
     def _build_inputs(self, root, saved: dict) -> None:
-        box = ttk.LabelFrame(root, text="조건", padding=10)
+        box = ttk.LabelFrame(root, text="찾을 조건", padding=10)
         box.pack(fill=X, padx=10, pady=(10, 5))
 
-        self.mode = StringVar(value=saved.get("mode", MODE_PUBLIC))
+        def remembered(key: str, choices, fallback: str) -> str:
+            """저장된 값이 지금 목록에 없으면(문구를 다듬었다면) 기본값으로 돌린다."""
+            value = saved.get(key)
+            return value if value in choices else fallback
+
+        self.mode = StringVar(value=remembered("mode", MODES, MODE_PUBLIC))
         self.g2b_key = StringVar(value=saved.get("g2b_key", ""))
         self.dart_key = StringVar(value=saved.get("dart_key", ""))
         self.days = StringVar(value=str(saved.get("days", 90)))
-        self.distance = StringVar(value=saved.get("distance", "70km 이내"))
-        self.overlap = StringVar(value=saved.get("overlap", list(OVERLAP_CHOICES)[0]))
+        self.distance = StringVar(
+            value=remembered("distance", DISTANCE_CHOICES, _label_for(DISTANCE_CHOICES, 70.0)))
+        self.overlap = StringVar(
+            value=remembered("overlap", OVERLAP_CHOICES, list(OVERLAP_CHOICES)[0]))
         self.sector = StringVar(value=saved.get("sector", SECTOR_ALL))
         self.include_orgs = BooleanVar(value=saved.get("include_demand_orgs", True))
 
-        ttk.Label(box, text="탐색 방식").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="어디서 찾을까요").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.mode, values=list(MODES),
                      state="readonly", width=28).grid(row=0, column=1, sticky=W, pady=4)
 
-        ttk.Label(box, text="조회 기간(일)").grid(row=0, column=2, sticky=W, padx=(20, 8))
+        ttk.Label(box, text="최근 며칠치").grid(row=0, column=2, sticky=W, padx=(20, 8))
         ttk.Entry(box, textvariable=self.days, width=10).grid(row=0, column=3, sticky=W)
 
-        ttk.Label(box, text="나라장터 키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="나라장터 인증키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Entry(box, textvariable=self.g2b_key, width=46, show="•").grid(
             row=1, column=1, columnspan=2, sticky=W, pady=4)
 
-        ttk.Label(box, text="DART 키(선택)").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="기업정보 인증키").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Entry(box, textvariable=self.dart_key, width=46, show="•").grid(
             row=2, column=1, columnspan=2, sticky=W, pady=4)
 
-        ttk.Label(box, text="납품 반경").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="안성에서 얼마나").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
                      state="readonly", width=18).grid(row=3, column=1, sticky=W, pady=4)
 
-        ttk.Label(box, text="업종").grid(row=3, column=2, sticky=W, padx=(20, 8))
+        ttk.Label(box, text="업종 고르기").grid(row=3, column=2, sticky=W, padx=(20, 8))
         self.sector_box = ttk.Combobox(box, textvariable=self.sector,
                                        values=sector_names(load_config()),
                                        state="readonly", width=22)
         self.sector_box.grid(row=3, column=3, sticky=W)
 
-        ttk.Label(box, text="기존 원청 제외 범위").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="케이씨그룹과 겹치면").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.overlap, values=list(OVERLAP_CHOICES),
                      state="readonly", width=30).grid(row=4, column=1, columnspan=2,
                                                       sticky=W, pady=4)
 
-        ttk.Checkbutton(box, text="발주기관도 후보에 포함",
+        ttk.Checkbutton(box, text="관공서·공공기관도 같이 보기",
                         variable=self.include_orgs).grid(row=4, column=3, sticky=W)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
-        self.run_button = ttk.Button(buttons, text="찾기 시작", command=self.on_run)
+        self.run_button = ttk.Button(buttons, text="  후보 찾기  ", command=self.on_run)
         self.run_button.pack(side=LEFT)
-        self.save_button = ttk.Button(buttons, text="엑셀(CSV)로 저장",
+        self.save_button = ttk.Button(buttons, text="엑셀로 저장",
                                       command=self.on_save, state="disabled")
         self.save_button.pack(side=LEFT, padx=6)
-        ttk.Button(buttons, text="입력값 기억", command=self.on_remember).pack(side=LEFT)
-        self.status = ttk.Label(buttons, text="대기 중")
+        ttk.Button(buttons, text="입력 내용 저장", command=self.on_remember).pack(side=LEFT)
+        self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
     def _build_table(self, root) -> None:
@@ -157,23 +174,31 @@ class App:
         bar.pack(side=RIGHT, fill=Y)
 
     def _build_log(self, root) -> None:
-        box = ttk.LabelFrame(root, text="진행 상황", padding=6)
+        box = ttk.LabelFrame(root, text="진행 상황 (여기에 설명이 나옵니다)", padding=6)
         box.pack(fill=X, padx=10, pady=(0, 10))
         self.log = scrolledtext.ScrolledText(box, height=7, state="disabled")
         self.log.pack(fill=X)
 
+    def _build_help(self, root) -> None:
+        """처음 쓰는 사람이 용어 때문에 막히지 않도록 풀어 쓴다."""
+        text = scrolledtext.ScrolledText(root, wrap="word", padx=14, pady=12,
+                                         font=("", 10), relief="flat")
+        text.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        text.insert(END, HELP_TEXT)
+        text.configure(state="disabled")
+
     def _build_sales(self, root, saved: dict) -> None:
-        top = ttk.LabelFrame(root, text="매출 기록 불러오기", padding=10)
+        top = ttk.LabelFrame(root, text="매출 파일 불러오기", padding=10)
         top.pack(fill=X, padx=10, pady=(10, 5))
 
         self.sales_path = StringVar(value=saved.get("sales_path", ""))
         ttk.Entry(top, textvariable=self.sales_path, width=62).grid(row=0, column=0, sticky=W)
         ttk.Button(top, text="파일 찾기", command=self.on_pick_sales).grid(row=0, column=1, padx=6)
         ttk.Button(top, text="불러오기", command=self.on_load_sales).grid(row=0, column=2)
-        ttk.Label(top, text="매출 앱이 내보낸 JSON 또는  연월,매출,목표  형식의 CSV",
+        ttk.Label(top, text="매출 앱이 내보낸 파일(.json), 또는 엑셀에서 저장한 표(.csv)를 고르세요.\n표는 첫 줄이  연월,매출,목표  이고 그 아래로 2026-08,24900000,27000000  이런 식입니다.",
                   foreground="#666").grid(row=1, column=0, columnspan=3, sticky=W, pady=(6, 0))
 
-        mid = ttk.LabelFrame(root, text="월별 실적", padding=6)
+        mid = ttk.LabelFrame(root, text="달마다 얼마 벌었나", padding=6)
         mid.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.sales_tree = ttk.Treeview(mid, columns=[c for c, _ in SALES_COLUMNS],
                                        show="headings", height=8)
@@ -184,17 +209,17 @@ class App:
 
         act = ttk.Frame(root)
         act.pack(fill=X, padx=10, pady=(0, 5))
-        self.gap_label = ttk.Label(act, text="매출 파일을 불러오세요.", font=("", 10, "bold"))
+        self.gap_label = ttk.Label(act, text="위에서 매출 파일을 먼저 불러오세요.", font=("", 10, "bold"))
         self.gap_label.pack(side=LEFT)
         self.months_back = StringVar(value=str(saved.get("months_back", 1)))
-        ttk.Label(act, text="부족분 집계 개월").pack(side=LEFT, padx=(20, 4))
+        ttk.Label(act, text="몇 달치로 볼까요").pack(side=LEFT, padx=(20, 4))
         ttk.Combobox(act, textvariable=self.months_back, values=["1", "2", "3", "6"],
                      state="readonly", width=4).pack(side=LEFT)
-        self.gap_button = ttk.Button(act, text="이 부족분 채울 후보 찾기",
+        self.gap_button = ttk.Button(act, text="  이만큼 채울 회사 찾기  ",
                                      command=self.on_find_for_gap, state="disabled")
         self.gap_button.pack(side=RIGHT)
 
-        bottom = ttk.LabelFrame(root, text="접촉 계획", padding=6)
+        bottom = ttk.LabelFrame(root, text="어디에 연락하면 되나", padding=6)
         bottom.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
         self.plan_tree = ttk.Treeview(bottom, columns=[c for c, _ in PLAN_COLUMNS],
                                       show="headings", height=8)
@@ -240,7 +265,8 @@ class App:
         try:
             book = load_sales(path)
         except (OSError, ValueError) as exc:
-            messagebox.showerror("읽기 실패", f"{exc}")
+            messagebox.showerror("파일을 읽지 못했습니다",
+                                 f"{exc}\n\n도움말 탭의 '매출 파일 만들기' 를 참고하세요.")
             return
         if not book.months:
             messagebox.showwarning("비어 있음", "매출 기록이 비어 있습니다.")
@@ -320,9 +346,10 @@ class App:
 
     def on_remember(self) -> None:
         path = save_settings(self.current_options())
-        messagebox.showinfo("저장됨",
-                            f"입력값을 기억했습니다.\n{path}\n\n"
-                            "인증키가 그대로 저장되니 공용 PC 에서는 주의하세요.")
+        messagebox.showinfo("저장했습니다",
+                            f"다음에 앱을 켤 때 자동으로 채워집니다.\n\n{path}\n\n"
+                            "인증키가 그대로 적혀 저장되니, 여러 사람이 쓰는 PC 에서는\n"
+                            "이 버튼을 누르지 마세요.")
 
     def on_run(self) -> None:
         if self.running:
@@ -330,11 +357,18 @@ class App:
         options = self.current_options()
         mode = options["mode"]
         if mode == MODE_PUBLIC and not options["g2b_key"].strip():
-            messagebox.showwarning("키 필요", "나라장터 인증키를 넣어주세요.\n"
-                                              "키 없이 보시려면 '샘플 데이터'를 고르세요.")
+            messagebox.showwarning(
+                "인증키가 필요합니다",
+                "'나라장터 인증키' 칸을 채워주세요.\n\n"
+                "키가 아직 없으시면 '어디서 찾을까요' 를\n"
+                f"'{MODE_SAMPLE}' 로 바꾸면 그냥 해보실 수 있습니다.\n\n"
+                "키 받는 곳은 도움말 탭에 적어두었습니다.")
             return
         if mode == MODE_INDUSTRY and not options["dart_key"].strip():
-            messagebox.showwarning("키 필요", "업종 훑기에는 DART 인증키가 필요합니다.")
+            messagebox.showwarning(
+                "인증키가 필요합니다",
+                f"'{MODE_INDUSTRY}' 에는 '기업정보 인증키' 가 필요합니다.\n"
+                "받는 곳은 도움말 탭에 적어두었습니다.")
             return
 
         self.running = True
@@ -364,15 +398,15 @@ class App:
         mode = options["mode"]
 
         if mode == MODE_SAMPLE:
-            self.say("샘플 데이터로 실행합니다 (실제 업체 아님).")
+            self.say("연습용 가짜 자료로 돌립니다. 여기 나오는 회사는 실제로 없는 곳입니다.")
             result = run_screen(cfg, offline=True)
         elif mode == MODE_INDUSTRY:
             from prime_contractor.sources.dart import DartClient
-            self.say("DART 상장사를 훑습니다. 첫 실행은 몇 분 걸립니다…")
+            self.say("상장 회사 목록을 하나씩 확인합니다. 처음에는 몇 분 걸립니다…")
             result = run_industry_screen(cfg, DartClient(cfg.dart_api_key))
         else:
             from prime_contractor.sources.g2b import G2BClient
-            self.say(f"나라장터 최근 {cfg.lookback_days}일치를 조회합니다…")
+            self.say(f"나라장터에서 최근 {cfg.lookback_days}일치 공사를 찾아봅니다…")
             dart = None
             if cfg.dart_api_key:
                 from prime_contractor.sources.dart import DartClient
@@ -404,18 +438,21 @@ class App:
         grades = {}
         for c in result.passed:
             grades[c.grade] = grades.get(c.grade, 0) + 1
-        summary = " ".join(f"{g} {grades[g]}" for g in "ABCD" if g in grades)
-        self.say("등급별: " + (summary or "없음") +
-                 "  (A 우선 접촉 / B 접촉 가치 있음 / C 여력 될 때 / D 보류)")
-        self.say("줄을 더블클릭하면 점수가 어떻게 나왔는지 볼 수 있습니다.")
+        summary = " ".join(f"{g}등급 {grades[g]}곳" for g in "ABCD" if g in grades)
+        self.say("찾은 회사: " + (summary or "없음"))
+        self.say("A등급부터 연락해 보세요. B등급까지는 연락할 만합니다.")
+        self.say("회사 이름을 두 번 클릭하면 왜 그 점수인지 자세히 나옵니다.")
         if self.gap_target:
             self._fill_plan(result)
-        self.status.configure(text=f"후보 {len(result.passed)}곳  [{summary}]")
+        self.status.configure(text=f"{len(result.passed)}곳 찾음")
         self.save_button.configure(state="normal" if result.passed else "disabled")
         if not result.passed:
-            messagebox.showinfo("결과 없음",
-                                "조건에 맞는 후보가 없습니다.\n"
-                                "기간을 늘리거나 납품 반경을 넓혀 보세요.")
+            messagebox.showinfo("찾은 곳이 없습니다",
+                                "조건에 맞는 회사가 없습니다.\n\n"
+                                "이렇게 해보세요\n"
+                                "  · '최근 며칠치' 를 180 이나 365 로 늘리기\n"
+                                "  · '안성에서 얼마나' 를 100km 로 넓히기\n"
+                                "  · '업종 고르기' 를 '업종 안 가림' 으로 두기")
         self._finish()
 
     def _show_detail(self, _event=None) -> None:
@@ -450,14 +487,18 @@ class App:
                 f"{row.monthly_expected / 1e4:,.0f}만원",
                 f"{row.cumulative / 1e4:,.0f}만원{mark}"))
         self.plan_note.configure(
-            text=plan.note + "  기대 월매출 = 추정 판넬 물량 ÷ 조회월수 × 등급별 수주확률"
-                 " (A 35% / B 25% / C 15% / D 8%). 모두 어림값입니다.")
+            text=plan.note + "\n'한 달 예상 금액' 은 그 회사가 최근에 한 공사 규모에서 판넬 몫을"
+                 " 잡고, 연락했을 때 실제로 일이 올 확률(A 35% · B 25% · C 15% · D 8%)을"
+                 " 곱한 값입니다. 모두 어림짐작이니 연락할 순서를 정하는 데만 쓰세요.")
         self.gap_target = 0
         self.tabs.select(1)
-        self.say(f"부족분 채우기 계획: {plan.note}")
+        self.say(f"모자란 만큼 채우려면: {plan.note}")
 
     def _failed(self, exc: Exception) -> None:
-        messagebox.showerror("실패", f"{exc}\n\n아래 진행 상황 창의 내용을 확인해 주세요.")
+        messagebox.showerror(
+            "잘 안 됐습니다",
+            f"{exc}\n\n아래 '진행 상황' 칸에 자세한 내용이 적혀 있습니다.\n"
+            "인증키가 맞는지, 인터넷이 되는지 먼저 확인해 보세요.")
         self.status.configure(text="실패")
         self._finish()
 

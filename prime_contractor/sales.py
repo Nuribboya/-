@@ -160,7 +160,7 @@ def plan_to_close_gap(gap: int, candidates: list[Candidate], lookback_days: int 
     """
     plan = GapPlan(gap=max(gap, 0), lookback_days=lookback_days)
     if plan.gap <= 0:
-        plan.note = "목표를 채웠습니다. 부족분이 없습니다."
+        plan.note = "목표를 채우셨습니다. 더 찾을 필요가 없습니다."
         return plan
 
     ranked = sorted(candidates, key=lambda c: c.score, reverse=True)
@@ -176,12 +176,12 @@ def plan_to_close_gap(gap: int, candidates: list[Candidate], lookback_days: int 
 
     plan.covered = total
     if plan.is_covered:
-        plan.note = (f"{len(plan.rows)}곳을 접촉하면 월 {total / 1e4:,.0f}만원이 기대됩니다 "
-                     f"(부족분 {plan.gap / 1e4:,.0f}만원).")
+        plan.note = (f"아래 {len(plan.rows)}곳에 연락하면 한 달에 약 {total / 1e4:,.0f}만원이 "
+                     f"기대됩니다. 모자란 {plan.gap / 1e4:,.0f}만원은 채울 수 있습니다.")
     else:
-        plan.note = (f"후보 {len(plan.rows)}곳을 다 합쳐도 월 {total / 1e4:,.0f}만원으로 "
-                     f"{plan.shortfall_left / 1e4:,.0f}만원이 모자랍니다. "
-                     f"조회 기간·반경을 넓히거나 업종을 더 열어 보세요.")
+        plan.note = (f"찾은 {len(plan.rows)}곳을 다 합쳐도 한 달 약 {total / 1e4:,.0f}만원이라, "
+                     f"{plan.shortfall_left / 1e4:,.0f}만원이 여전히 모자랍니다. "
+                     f"'최근 며칠치'를 늘리거나 '안성에서 얼마나'를 넓혀서 다시 찾아 보세요.")
     return plan
 
 
