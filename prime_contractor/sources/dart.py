@@ -45,7 +45,8 @@ class DartClient:
         self.sleep_sec = sleep_sec
         self.session = session or requests.Session()
         self._index: dict[str, str] | None = None
-        self._company_cache: dict[str, dict] = {}
+        self._listed: list[tuple[str, str, str]] = []
+        self._company_cache: dict[str, dict] = self._load_company_cache()
 
     # --- 고유번호 인덱스 -----------------------------------------------------
 
@@ -56,10 +57,26 @@ class DartClient:
             self._index = self._load_corp_index()
         return self._index
 
+    @property
+    def listed_companies(self) -> list[tuple[str, str, str]]:
+        """상장사 (상호, 고유번호, 종목코드) 목록.
+
+        DART 전체는 10만 곳이 넘어 개황을 하나씩 받기엔 너무 많다. 종목코드가
+        있는 상장사(2천여 곳)로 좁히면 업종코드 스크리닝이 현실적인 시간에 끝나고,
+        원청이 될 만한 규모의 회사는 대부분 여기 들어 있다.
+        """
+        if not self._listed:
+            self.corp_index          # 인덱스를 만들면서 상장사 목록도 채워진다
+        return self._listed
+
     def _load_corp_index(self) -> dict[str, str]:
         cached = self.cache_dir / "corp_index.json"
         if cached.exists():
-            return json.loads(cached.read_text(encoding="utf-8"))
+            raw = json.loads(cached.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and raw.get("version") == 2:
+                self._listed = [tuple(row) for row in raw["listed"]]
+                return raw["by_name"]
+            log.info("옛 형식 캐시를 새로 받습니다: %s", cached)
 
         resp = self.session.get(CORP_CODE_URL, params={"crtfc_key": self.key}, timeout=self.timeout)
         resp.raise_for_status()
@@ -68,18 +85,47 @@ class DartClient:
             raise DartError(f"고유번호 파일을 받지 못했습니다: {resp.text[:200]}")
 
         index: dict[str, str] = {}
+        listed: list[tuple[str, str, str]] = []
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             with zf.open(zf.namelist()[0]) as fh:
                 root = ET.parse(fh).getroot()
         for node in root.findall("list"):
             name = (node.findtext("corp_name") or "").strip()
             code = (node.findtext("corp_code") or "").strip()
-            if name and code:
-                index.setdefault(normalize_name(name), code)
+            stock = (node.findtext("stock_code") or "").strip()
+            if not (name and code):
+                continue
+            index.setdefault(normalize_name(name), code)
+            if stock:
+                listed.append((name, code, stock))
 
-        cached.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-        log.info("DART 고유번호 %s건 캐시: %s", len(index), cached)
+        self._listed = listed
+        cached.write_text(
+            json.dumps({"version": 2, "by_name": index,
+                        "listed": [list(r) for r in listed]}, ensure_ascii=False),
+            encoding="utf-8")
+        log.info("DART 고유번호 %s건(상장 %s곳) 캐시: %s", len(index), len(listed), cached)
         return index
+
+    # --- 기업개황 디스크 캐시 -------------------------------------------------
+
+    @property
+    def _company_cache_path(self):
+        return self.cache_dir / "companies.json"
+
+    def _load_company_cache(self) -> dict[str, dict]:
+        path = self.cache_dir / "companies.json"
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                log.warning("기업개황 캐시가 깨져 새로 만듭니다: %s", path)
+        return {}
+
+    def save_company_cache(self) -> None:
+        """받아 둔 기업개황을 디스크에 남긴다. 다음 실행이 훨씬 빨라진다."""
+        self._company_cache_path.write_text(
+            json.dumps(self._company_cache, ensure_ascii=False), encoding="utf-8")
 
     # --- 기업개황 ------------------------------------------------------------
 

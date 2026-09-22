@@ -84,6 +84,64 @@ def enrich(cands: list[Candidate], dart_client=None, offline_info: dict | None =
     return notes
 
 
+#: 업종 스크리닝 모드의 배점. 낙찰 이력이 없는 모드라 '수주 활동'을 빼고
+#: 업종 적합도와 거리로 나눈다.
+INDUSTRY_WEIGHTS = {"sector": 45.0, "proximity": 35.0, "activity": 0.0, "profile": 20.0}
+
+
+def run_industry_screen(cfg: ScreenConfig, dart_client, limit: int | None = None,
+                        progress_every: int = 200) -> ScreenResult:
+    """나라장터 낙찰 이력과 무관하게, **업종코드로** 원청 후보를 훑는다.
+
+    나라장터에는 공공 발주만 올라온다. 반도체 팹처럼 민간이 발주하는 물량은
+    아예 안 잡히므로, 그쪽 원청을 찾으려면 업종 자체로 훑는 수밖에 없다.
+    DART 상장사 전체를 돌며 업종코드·주소를 보고 후보를 만든다.
+    """
+    from dataclasses import replace as _replace
+
+    cfg = _replace(cfg, weights={**cfg.weights, **INDUSTRY_WEIGHTS}, min_awards=0)
+    result = ScreenResult()
+
+    companies = dart_client.listed_companies
+    if limit:
+        companies = companies[:limit]
+    result.notes.append(f"DART 상장사 {len(companies)}곳의 업종코드·주소를 확인합니다 "
+                        f"(첫 실행은 몇 분 걸리고, 이후에는 캐시를 씁니다)")
+
+    cands: list[Candidate] = []
+    for i, (name, corp_code, stock) in enumerate(companies, 1):
+        if progress_every and i % progress_every == 0:
+            log.info("  %s/%s 확인", i, len(companies))
+        try:
+            info = dart_client.company(corp_code)
+        except Exception as exc:                     # 한 곳 실패로 전체를 멈추지 않는다
+            log.debug("%s(%s) 개황 실패: %s", name, corp_code, exc)
+            continue
+        cands.append(Candidate(
+            name=info.get("corp_name") or name,
+            kind="contractor",
+            bizno=info.get("bizr_no", ""),
+            address=info.get("adres", ""),
+            ksic_code=info.get("induty_code", ""),
+            ceo=info.get("ceo_nm", ""),
+            homepage=info.get("hm_url", ""),
+            established=info.get("est_dt", ""),
+            corp_code=corp_code,
+            sources={"DART"},
+        ))
+    dart_client.save_company_cache()
+
+    for c in cands:
+        c.region, c.distance_km = distance_from_home(c.address or c.name)
+        score_candidate(c, cfg)
+
+    # 업종이 전혀 안 잡히는 곳(금융·유통 등)은 후보로 볼 이유가 없다.
+    matched = [c for c in cands if c.sector]
+    result.notes.append(f"업종이 타깃과 맞는 곳 {len(matched)}곳")
+    result.passed, result.excluded = split_by_overlap(matched, cfg)
+    return result
+
+
 def run_screen(cfg: ScreenConfig, offline: bool = False,
                g2b_client=None, dart_client=None) -> ScreenResult:
     """전체 파이프라인 1회 실행."""

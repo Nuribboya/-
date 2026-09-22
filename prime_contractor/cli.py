@@ -16,7 +16,7 @@ import os
 import sys
 
 from prime_contractor.config import load_config
-from prime_contractor.pipeline import run_screen
+from prime_contractor.pipeline import run_industry_screen, run_screen
 from prime_contractor.report import render_table, write_csv
 
 
@@ -34,9 +34,15 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", default=None, help="결과 CSV 저장 경로")
     s.add_argument("--limit", type=int, default=20, help="표에 출력할 건수")
     s.add_argument("--min-awards", type=int, default=None, help="최소 낙찰 건수")
-    s.add_argument("--max-distance", type=float, default=None, help="근접 점수 만점 기준 거리(km)")
-    s.add_argument("--strict", action="store_true",
-                   help="인접 업종까지 제외 (기본은 '동일 업종'부터 제외)")
+    s.add_argument("--max-distance", type=float, default=None, help="근접 점수가 0이 되는 거리(km)")
+    s.add_argument("--within", type=float, default=None,
+                   help="이 거리(km)를 넘는 후보는 목록에서 뺀다 (기본 70)")
+    s.add_argument("--nationwide", action="store_true", help="거리 제한 없이 전국")
+    s.add_argument("--sector", default=None,
+                   help="이 업종만 본다 (일부만 적어도 됨, 예: 반도체 / 수처리)")
+    s.add_argument("--exclude-same-industry", action="store_true",
+                   help="KC그룹과 같은 업종(반도체 등)도 제외 — 기본은 계열사만 제외")
+    s.add_argument("--strict", action="store_true", help="인접 업종까지 전부 제외")
     s.add_argument("--no-demand-orgs", action="store_true", help="발주기관은 후보에서 뺀다")
     s.add_argument("--include-excluded", action="store_true", help="CSV 에 제외 후보도 담는다")
     s.add_argument("-v", "--verbose", action="store_true")
@@ -46,11 +52,75 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--keyword", default="자동제어", help="검색 지원 여부를 볼 샘플 키워드")
     pr.add_argument("--dump", action="store_true", help="응답 1건의 실제 항목과 값을 그대로 출력")
 
+    i = sub.add_parser("industry-screen",
+                       help="낙찰 이력과 무관하게 DART 상장사를 업종코드로 훑는다 "
+                            "(민간 발주 원청을 찾을 때)")
+    i.add_argument("--sector", default=None, help="이 업종만 본다 (예: 반도체)")
+    i.add_argument("--within", type=float, default=None, help="거리 상한(km), 기본 70")
+    i.add_argument("--nationwide", action="store_true", help="거리 제한 없이 전국")
+    i.add_argument("--limit-companies", type=int, default=None,
+                   help="확인할 상장사 수 상한 (시험 실행용)")
+    i.add_argument("--limit", type=int, default=30, help="표에 출력할 건수")
+    i.add_argument("--out", default=None, help="결과 CSV 저장 경로")
+    i.add_argument("--config", default=None, help="설정 JSON 경로")
+    i.add_argument("-v", "--verbose", action="store_true")
+
     d = sub.add_parser("dart-lookup", help="상호로 DART 업종코드·주소를 조회 (설정값 검증용)")
     d.add_argument("names", nargs="+")
 
     sub.add_parser("show-config", help="현재 적용되는 제외 업종/타깃 업종을 출력")
     return p
+
+
+def _overlap_rank(args) -> int | None:
+    """겹침 허용 등급. 아무 것도 안 주면 설정 기본값(계열사만 제외)."""
+    if args.strict:
+        return 0
+    if getattr(args, "exclude_same_industry", False):
+        return 1
+    return None
+
+
+def _within(args) -> float | None:
+    if getattr(args, "nationwide", False):
+        return None
+    return args.within
+
+
+def _filter_sector(result, needle: str) -> None:
+    """업종 이름에 needle 이 든 후보만 남긴다 (부분 일치)."""
+    dropped = [c for c in result.passed if needle not in c.sector]
+    result.passed = [c for c in result.passed if needle in c.sector]
+    for c in dropped:
+        if c.overlap:
+            c.overlap.reasons.append(f"업종 '{c.sector or '미분류'}' 이(가) '{needle}' 와(과) 다름")
+    result.excluded = dropped + result.excluded
+    result.notes.append(f"업종 필터 '{needle}' 적용 → {len(result.passed)}곳")
+
+
+def _cmd_industry_screen(args) -> int:
+    from prime_contractor.sources.dart import DartClient, DartError
+    cfg = load_config(args.config, dart_api_key=os.environ.get("DART_API_KEY") or None)
+    if args.nationwide:
+        from dataclasses import replace
+        cfg = replace(cfg, within_km=None)
+    elif args.within is not None:
+        from dataclasses import replace
+        cfg = replace(cfg, within_km=args.within)
+    try:
+        client = DartClient(cfg.dart_api_key)
+    except DartError as exc:
+        print(f"[오류] {exc}\n      opendart.fss.or.kr 에서 인증키를 받아 "
+              f"DART_API_KEY 에 넣어주세요.", file=sys.stderr)
+        return 2
+
+    result = run_industry_screen(cfg, client, limit=args.limit_companies)
+    if args.sector:
+        _filter_sector(result, args.sector)
+    print(render_table(result, limit=args.limit))
+    if args.out:
+        print(f"\nCSV 저장: {write_csv(result, args.out, include_excluded=False)}")
+    return 0
 
 
 def _cmd_screen(args) -> int:
@@ -59,7 +129,8 @@ def _cmd_screen(args) -> int:
         lookback_days=args.days,
         min_awards=args.min_awards,
         max_distance_km=args.max_distance,
-        max_overlap_rank=0 if args.strict else None,
+        within_km=_within(args),
+        max_overlap_rank=_overlap_rank(args),
         include_demand_orgs=False if args.no_demand_orgs else None,
         g2b_service_key=os.environ.get("G2B_SERVICE_KEY") or None,
         dart_api_key=os.environ.get("DART_API_KEY") or None,
@@ -80,7 +151,13 @@ def _cmd_screen(args) -> int:
             except DartError as exc:
                 print(f"[경고] DART 보강 생략: {exc}", file=sys.stderr)
 
+    if args.nationwide:
+        from dataclasses import replace
+        cfg = replace(cfg, within_km=None)
+
     result = run_screen(cfg, offline=args.offline, g2b_client=g2b_client, dart_client=dart_client)
+    if args.sector:
+        _filter_sector(result, args.sector)
     print(render_table(result, limit=args.limit))
 
     if args.out:
@@ -152,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     return {
         "screen": _cmd_screen,
         "probe": _cmd_probe,
+        "industry-screen": _cmd_industry_screen,
         "dart-lookup": _cmd_dart_lookup,
         "show-config": _cmd_show_config,
     }[args.command](args)

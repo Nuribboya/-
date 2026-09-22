@@ -43,6 +43,14 @@ KC_GROUP = IndustryProfile(
 # weight = 자동제어 판넬(MCC/배전반/계장반) 물량이 얼마나 꾸준히 나오는가.
 TARGET_SECTORS: tuple[TargetSector, ...] = (
     TargetSector(
+        "반도체·디스플레이", weight=1.0,
+        keywords=("반도체", "디스플레이", "클린룸", "클린 룸", "FAB", "팹", "웨이퍼",
+                  "OLED", "전공정", "후공정", "나노", "초순수", "스크러버",
+                  "항온항습", "드라이룸", "이차전지", "2차전지", "배터리"),
+        ksic_prefixes=("261", "262", "2923"),
+        note="KC그룹과 같은 시장. 계열사만 피하고 들어가려면 기본 설정 그대로 두면 된다",
+    ),
+    TargetSector(
         "상하수도·수처리", weight=1.0,
         keywords=("상수도", "하수", "정수장", "배수지", "가압장", "취수",
                   "수처리", "폐수", "하수처리장", "물재생", "관로", "펌프장"),
@@ -100,10 +108,14 @@ TARGET_SECTORS: tuple[TargetSector, ...] = (
     ),
     TargetSector(
         "건설·플랜트 EPC", weight=0.9,
-        keywords=("종합건설", "건설", "엔지니어링", "플랜트", "기계설비공사",
-                  "전기공사", "토목", "시설공사"),
+        # '건설'·'엔지니어링'은 상호에 흔해서 keywords 에 두면 모든 종합건설사가
+        # 여기로 빨려 들어간다. 실제 공종을 가리키는 말만 남기고 나머지는 weak 로.
+        keywords=("플랜트", "턴키", "EPC", "증설공사", "신축공사", "리모델링"),
+        weak_keywords=("종합건설", "건설", "엔지니어링", "기계설비공사",
+                       "전기공사", "토목", "시설공사"),
         ksic_prefixes=("41", "42"),
-        note="판넬 제조사 입장에서 가장 전형적인 원청 유형",
+        ksic_strength=0.25,   # 41·42 는 시공사면 거의 다 갖고 있다
+        note="업종이 안 잡힐 때 떨어지는 기본값 성격이라 근거를 약하게 잡았다",
     ),
     TargetSector(
         "공조·냉동·기계설비", weight=0.8,
@@ -132,9 +144,15 @@ TARGET_SECTORS: tuple[TargetSector, ...] = (
 # '판넬을 사가는 공사/용역' 을 잡는 키워드. 너무 일반적인 말(전기)만 쓰면
 # 무관한 공고가 쏟아지므로 판넬이 실제로 들어가는 공종 위주로 구성했다.
 BID_KEYWORDS: tuple[str, ...] = (
-    "자동제어", "제어반", "배전반", "수배전반", "분전반", "MCC",
-    "계장", "감시제어", "원격감시", "SCADA", "PLC",
-    "전기계장", "자동화설비", "전기공사", "기계설비공사",
+    # 자동제어 판넬 (기존 주력)
+    "자동제어", "제어반", "계장", "감시제어", "원격감시", "SCADA", "PLC",
+    "전기계장", "자동화설비",
+    # 배전반 확장 (수배전·특고압 쪽)
+    "배전반", "수배전반", "분전반", "MCC", "고압반", "저압반", "큐비클",
+    "변압기", "특고압", "수변전", "전기실", "변전실", "차단기", "UPS",
+    "비상발전", "전력설비",
+    # 원청이 걸리는 공종
+    "전기공사", "기계설비공사",
 )
 
 #: 업무 구분별 오퍼레이션 접미사 (물품/용역/공사)
@@ -150,10 +168,13 @@ class ScreenConfig:
     keywords: tuple[str, ...] = BID_KEYWORDS
     categories: tuple[str, ...] = BID_CATEGORIES
 
-    #: 이 등급 이상으로 겹치면 결과에서 제외. clear(0) / adjacent(1) / same_industry(2)
-    max_overlap_rank: int = 1
-    #: 이 거리(km)를 넘으면 근접 점수 0
+    #: 이 등급을 '넘으면' 제외. clear(0) / adjacent(1) / same_industry(2) / affiliate(3)
+    #: 기본 2 = 계열사만 제외하고 동일 업종(반도체 등)은 후보로 남긴다.
+    max_overlap_rank: int = 2
+    #: 이 거리(km)를 넘으면 근접 점수 0 (점수에만 반영)
     max_distance_km: float = 150.0
+    #: 이 거리(km)를 넘으면 목록에서 아예 뺀다. None 이면 거리 제한 없음.
+    within_km: float | None = 70.0
     #: 최근 며칠치 낙찰 이력을 볼지
     lookback_days: int = 180
     #: 낙찰 건수가 이보다 적으면 후보에서 뺀다 (일회성 업체 제거)
@@ -198,7 +219,9 @@ def _apply_json(cfg: ScreenConfig, raw: dict) -> ScreenConfig:
             TargetSector(
                 name=s["name"],
                 keywords=tuple(s.get("keywords", ())),
+                weak_keywords=tuple(s.get("weak_keywords", ())),
                 ksic_prefixes=tuple(s.get("ksic_prefixes", ())),
+                ksic_strength=float(s.get("ksic_strength", 0.6)),
                 weight=float(s.get("weight", 1.0)),
                 note=s.get("note", ""),
             )
@@ -212,6 +235,8 @@ def _apply_json(cfg: ScreenConfig, raw: dict) -> ScreenConfig:
             patch[key] = int(raw[key])
     if "max_distance_km" in raw:
         patch["max_distance_km"] = float(raw["max_distance_km"])
+    if "within_km" in raw:
+        patch["within_km"] = None if raw["within_km"] is None else float(raw["within_km"])
     if "include_demand_orgs" in raw:
         patch["include_demand_orgs"] = bool(raw["include_demand_orgs"])
     for key in ("dart_api_key", "g2b_service_key"):

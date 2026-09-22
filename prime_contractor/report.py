@@ -58,7 +58,7 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
 
     if show_excluded and result.excluded:
         lines.append("")
-        lines.append(f"■ 제외된 후보 ({len(result.excluded)}건) — 기존 원청과 업종이 겹치거나 이력 부족")
+        lines.append(f"■ 제외된 후보 ({len(result.excluded)}건) — 사유는 뒤에 적어 두었습니다")
         for c in result.excluded[:limit]:
             reason = c.overlap.reasons[0] if c.overlap and c.overlap.reasons else ""
             label = c.overlap.label if c.overlap else ""

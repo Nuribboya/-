@@ -78,12 +78,25 @@ class Candidate:
         return sum(a.amount for a in self.awards)
 
     @property
-    def haystack(self) -> str:
-        """업종 판정에 쓰는 텍스트 뭉치 (상호 + 업종명 + 수주 공고명)."""
-        parts = [self.name, self.industry_name, self.address]
-        parts += [a.title for a in self.awards[:20]]
-        parts += [a.demand_org for a in self.awards[:20]]
+    def demand_text(self) -> str:
+        """이 회사가 **어디에 납품하는지** 알려주는 텍스트 (공고명 + 수요기관).
+
+        업종 판정의 주 근거다. 종합건설사라도 정수장 공사를 따냈으면 그 회사의
+        판넬 수요는 수처리에서 나온다.
+        """
+        parts = [a.title for a in self.awards[:30]]
+        parts += [a.demand_org for a in self.awards[:30]]
         return " ".join(p for p in parts if p)
+
+    @property
+    def identity_text(self) -> str:
+        """회사가 **무엇을 자처하는지** (상호 + 등록 업종명). 보조 근거."""
+        return " ".join(p for p in (self.name, self.industry_name) if p)
+
+    @property
+    def haystack(self) -> str:
+        """겹침 판정용 전체 텍스트."""
+        return " ".join(p for p in (self.identity_text, self.address, self.demand_text) if p)
 
     def merge(self, other: "Candidate") -> None:
         """같은 업체로 판정된 후보를 흡수한다. 빈 필드만 채운다."""

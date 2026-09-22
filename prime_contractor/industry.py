@@ -42,8 +42,16 @@ class TargetSector:
     """자동제어 판넬 수요가 나오는 업종. weight 가 클수록 판넬 물량이 많다."""
 
     name: str
+    #: 실수요를 가리키는 말. '정수장', '소각로'처럼 현장이 특정되는 단어.
     keywords: tuple[str, ...]
+    #: 업체의 '형태'만 알려주는 말. '건설', '엔지니어링'처럼 상호에 흔해서
+    #: 이것만으로 업종을 정하면 종합건설사가 전부 한 칸에 몰린다.
+    weak_keywords: tuple[str, ...] = ()
     ksic_prefixes: tuple[str, ...] = ()
+    #: 업종코드 일치에 줄 무게. 업종코드는 그 회사가 '무엇을 만드는지'지
+    #: '누구에게 파는지'가 아니라서 수주 근거보다 약하게 잡는다. 41·42(건설·
+    #: 전기공사업)처럼 시공사면 다 갖고 있는 코드는 더 낮춘다.
+    ksic_strength: float = 0.6
     weight: float = 1.0
     note: str = ""
 
@@ -99,26 +107,50 @@ def judge_overlap(cand: Candidate, incumbent: IndustryProfile) -> OverlapVerdict
     return OverlapVerdict("clear", ["기존 원청과 겹치는 신호 없음"])
 
 
+#: match_sector 가 낼 수 있는 최대 strength (정규화용)
+#: 업종코드 0.6 + 수주 1.2 + 상호 0.5 + 일반어 0.25
+MAX_SECTOR_STRENGTH = 2.55
+
+
 def match_sector(cand: Candidate, sectors: tuple[TargetSector, ...]) -> tuple[str, float, list[str]]:
-    """판넬 수요 업종 중 가장 잘 맞는 것을 고른다. (업종명, 가중치, 근거)."""
+    """판넬 수요 업종 중 가장 잘 맞는 것을 고른다. (업종명, 강도, 근거).
+
+    근거마다 무게가 다르다. **무엇을 수주했는지**(공고명·수요기관)가 가장 세고,
+    상호는 약하게, '건설' 같은 일반 명사는 더 약하게 본다. 이렇게 안 하면
+    '○○종합건설'이 실제로 정수장 일을 해도 전부 건설업으로 뭉뚱그려진다.
+    """
+    demand, identity = cand.demand_text, cand.identity_text
     best: tuple[float, TargetSector | None, list[str]] = (0.0, None, [])
-    text = cand.haystack
+
     for sec in sectors:
         why: list[str] = []
         strength = 0.0
+
         if _ksic_hit(cand.ksic_code, sec.ksic_prefixes):
-            strength += 1.0
+            strength += sec.ksic_strength
             why.append(f"업종코드 {cand.ksic_code}")
-        hits = _hit(text, sec.keywords)
-        if hits:
-            # 키워드가 여러 개 걸릴수록 확신이 올라가되 상한을 둔다.
-            strength += min(len(hits), 3) / 3
-            why.append("키워드: " + ", ".join(hits[:3]))
+
+        demand_hits = _hit(demand, sec.keywords)
+        if demand_hits:
+            strength += min(len(demand_hits), 3) / 3 * 1.2
+            why.append("수주: " + ", ".join(demand_hits[:3]))
+
+        identity_hits = _hit(identity, sec.keywords)
+        if identity_hits:
+            strength += min(len(identity_hits), 2) / 2 * 0.5
+            why.append("상호/업종명: " + ", ".join(identity_hits[:2]))
+
+        weak_hits = _hit(demand + " " + identity, sec.weak_keywords)
+        if weak_hits:
+            strength += min(len(weak_hits), 2) / 2 * 0.25
+            why.append("일반: " + ", ".join(weak_hits[:2]))
+
         if strength == 0:
             continue
         score = strength * sec.weight
         if score > best[0]:
             best = (score, sec, why)
+
     if best[1] is None:
         return "", 0.0, []
     return best[1].name, best[0], best[2]

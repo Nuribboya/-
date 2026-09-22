@@ -424,3 +424,87 @@ def test_variants_rejects_a_bare_string_operation():
     client = _client(lambda url, params: _envelope([]))
     with pytest.raises(TypeError):
         client._variants(g2b.SCSBID_BASES, "getScsbidListSttusServcPPSSrch")
+
+
+# --- 업종 분류: 납품처 우선 -----------------------------------------------------
+
+def test_general_contractor_classified_by_what_it_won_not_its_name():
+    """'○○종합건설'이 정수장 일을 했으면 업종은 건설이 아니라 수처리다."""
+    cfg = ScreenConfig()
+    cand = _cand("비씨종합건설 주식회사", ksic_code="41221",
+                 awards=[Award(title="고덕정수장 배수지 자동제어설비 설치공사",
+                               demand_org="평택시 상하수도사업소")])
+    name, _, why = match_sector(cand, cfg.sectors)
+    assert name == "상하수도·수처리", why
+
+
+def test_company_ksic_does_not_outweigh_demand_evidence():
+    """업종코드는 '무엇을 만드는지'지 '누구에게 파는지'가 아니다."""
+    cfg = ScreenConfig()
+    cand = _cand("삼정전기공사(주)", ksic_code="42201",      # 전기공사업 → EPC 코드
+                 awards=[Award(title="열병합발전소 수배전반 증설공사",
+                               demand_org="한국지역난방공사")])
+    name, _, _ = match_sector(cand, cfg.sectors)
+    assert name == "발전·에너지"
+
+
+def test_epc_still_matched_when_nothing_more_specific_fits():
+    cfg = ScreenConfig()
+    cand = _cand("대제종합건설", ksic_code="41221",
+                 awards=[Award(title="사옥 신축공사 전기공사")])
+    name, _, _ = match_sector(cand, cfg.sectors)
+    assert name == "건설·플랜트 EPC"
+
+
+# --- 반도체 포함 / 계열사만 제외 -------------------------------------------------
+
+def test_semiconductor_demand_passes_by_default_but_kc_affiliate_does_not():
+    """'KC 계열사만 빼고 반도체는 본다'가 기본 동작이다."""
+    cfg = ScreenConfig()
+    fab = _cand("한양이엔지풍", awards=[Award(title="반도체 FAB 클린룸 전력제어반")])
+    kc = _cand("케이씨텍", awards=[Award(title="반도체 세정장비 제어반")])
+    for c in (fab, kc):
+        score_candidate(c, cfg)
+    passed, excluded = split_by_overlap([fab, kc], cfg)
+    assert [c.name for c in passed] == ["한양이엔지풍"]
+    assert excluded[0].overlap.level == "affiliate"
+    assert fab.sector == "반도체·디스플레이"
+
+
+def test_exclude_same_industry_restores_the_old_behaviour():
+    cfg = ScreenConfig(max_overlap_rank=1)
+    fab = _cand("한양이엔지풍", awards=[Award(title="반도체 FAB 클린룸 제어반")])
+    score_candidate(fab, cfg)
+    passed, excluded = split_by_overlap([fab], cfg)
+    assert not passed and excluded[0].overlap.level == "same_industry"
+
+
+# --- 거리 하드 필터 -------------------------------------------------------------
+
+def test_candidates_beyond_within_km_are_dropped():
+    cfg = ScreenConfig(within_km=70)
+    near = _cand("가까운설비", address="경기도 평택시", awards=[Award(title="정수장 자동제어")])
+    far = _cand("먼설비", address="강원도 춘천시", awards=[Award(title="정수장 자동제어")])
+    for c in (near, far):
+        enrich([c])
+        score_candidate(c, cfg)
+    passed, excluded = split_by_overlap([near, far], cfg)
+    assert [c.name for c in passed] == ["가까운설비"]
+    assert "km" in excluded[0].overlap.reasons[-1]
+
+
+def test_unknown_address_is_kept_rather_than_silently_dropped():
+    """거리를 모른다는 게 멀다는 뜻은 아니다."""
+    cfg = ScreenConfig(within_km=70)
+    cand = _cand("주소미상설비", awards=[Award(title="정수장 자동제어")])
+    enrich([cand])
+    score_candidate(cand, cfg)
+    passed, _ = split_by_overlap([cand], cfg)
+    assert passed and passed[0].distance_km is None
+
+
+def test_switchgear_keywords_are_searched():
+    """배전반 확장 - 수변전·특고압 쪽 공고도 검색 대상이어야 한다."""
+    cfg = ScreenConfig()
+    for kw in ("수배전반", "특고압", "큐비클", "변전실"):
+        assert kw in cfg.keywords

@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 
 from prime_contractor.config import ScreenConfig
-from prime_contractor.industry import judge_overlap, match_sector
+from prime_contractor.industry import MAX_SECTOR_STRENGTH, judge_overlap, match_sector
 from prime_contractor.models import Candidate
 
 
@@ -50,7 +50,7 @@ def score_candidate(cand: Candidate, cfg: ScreenConfig) -> Candidate:
 
     w = cfg.weights
     breakdown = {
-        "sector": round(min(weight, 2.0) / 2.0 * w["sector"], 1),
+        "sector": round(min(weight, MAX_SECTOR_STRENGTH) / MAX_SECTOR_STRENGTH * w["sector"], 1),
         "proximity": round(_proximity_points(cand.distance_km, cfg.max_distance_km, w["proximity"]), 1),
         "activity": round(_activity_points(cand, w["activity"]), 1),
         "profile": round(_profile_points(cand, w["profile"]), 1),
@@ -61,11 +61,22 @@ def score_candidate(cand: Candidate, cfg: ScreenConfig) -> Candidate:
 
 
 def split_by_overlap(cands: list[Candidate], cfg: ScreenConfig) -> tuple[list[Candidate], list[Candidate]]:
-    """(통과, 제외) 로 나눈다. 제외 사유는 각 후보의 overlap 에 들어 있다."""
+    """(통과, 제외) 로 나눈다. 제외 사유는 각 후보의 overlap 에 들어 있다.
+
+    거리는 '확인된 경우에만' 자른다. 주소를 못 찾은 후보까지 묶어서 버리면
+    멀다는 근거도 없이 사라지므로, 남겨 두고 표에 '미상'으로 보여 준다.
+    """
     passed, excluded = [], []
     for c in cands:
         assert c.overlap is not None, "score_candidate 를 먼저 호출해야 합니다"
+        too_far = (cfg.within_km is not None
+                   and c.distance_km is not None
+                   and c.distance_km > cfg.within_km)
         if c.overlap.rank > cfg.max_overlap_rank:
+            excluded.append(c)
+        elif too_far:
+            c.overlap.reasons.append(
+                f"안성에서 {c.distance_km:.0f}km (기준 {cfg.within_km:.0f}km 초과)")
             excluded.append(c)
         elif c.award_count < cfg.min_awards and c.kind == "contractor":
             c.overlap.reasons.append(f"낙찰 이력 {c.award_count}건 (최소 {cfg.min_awards}건 미달)")
