@@ -24,6 +24,8 @@ from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import write_csv
 from prime_contractor.sales import load_sales, plan_to_close_gap
+from prime_contractor.updater import check_for_update
+from prime_contractor import __version__
 
 COLUMNS = (("순위", 45), ("등급", 45), ("업체/기관", 240), ("구분", 55), ("업종", 125),
            ("지역", 65), ("거리", 60), ("추정판넬", 85), ("적합도", 60))
@@ -51,13 +53,23 @@ class App:
         self.running = False
         saved = load_settings()
 
-        root.title("원청 찾기 — 자동제어 판넬")
+        root.title(f"원청 찾기 — 자동제어 판넬  v{__version__}")
         root.geometry("1060x740")
         root.minsize(920, 620)
 
         self.book = None            # 불러온 매출 기록
         self.plan = None            # 부족분 채우기 계획
         self.gap_target = 0         # 이번 실행이 메워야 할 금액 (0 이면 일반 탐색)
+
+        # 새 버전 알림 띠. 평소에는 숨어 있다가 업데이트가 있을 때만 나타난다.
+        self.update_bar = ttk.Frame(root, padding=(10, 6))
+        self.update_text = ttk.Label(self.update_bar, text="", font=("", 10, "bold"))
+        self.update_text.pack(side=LEFT)
+        ttk.Button(self.update_bar, text="받으러 가기",
+                   command=self.on_open_update).pack(side=RIGHT)
+        ttk.Button(self.update_bar, text="나중에",
+                   command=self.update_bar.pack_forget).pack(side=RIGHT, padx=6)
+        self.update_url = ""
 
         self.tabs = ttk.Notebook(root)
         self.tabs.pack(fill=BOTH, expand=True)
@@ -71,6 +83,7 @@ class App:
         self._build_log(find_tab)
         self._build_sales(sales_tab, saved)
         self._pump_messages()
+        threading.Thread(target=self._check_update, daemon=True).start()
 
     # --- 화면 구성 -----------------------------------------------------------
 
@@ -191,6 +204,24 @@ class App:
         self.plan_tree.pack(fill=BOTH, expand=True)
         self.plan_note = ttk.Label(bottom, text="", foreground="#333", wraplength=980)
         self.plan_note.pack(fill=X, pady=(4, 0))
+
+    # --- 업데이트 -------------------------------------------------------------
+
+    def _check_update(self) -> None:
+        """뒤에서 조용히 확인한다. 실패하면 아무 일도 없었던 것처럼 둔다."""
+        info = check_for_update(__version__)
+        if info:
+            self.root.after(0, self._show_update, info)
+
+    def _show_update(self, info) -> None:
+        self.update_url = info.url
+        self.update_text.configure(text=f"{info.message} — 받아서 덮어쓰시면 됩니다.")
+        self.update_bar.pack(fill=X, before=self.tabs)
+
+    def on_open_update(self) -> None:
+        import webbrowser
+        if self.update_url:
+            webbrowser.open(self.update_url)
 
     # --- 매출 동작 -----------------------------------------------------------
 

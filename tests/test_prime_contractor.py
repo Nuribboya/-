@@ -809,3 +809,69 @@ def test_gap_report_shows_shortfall_and_plan():
     enrich([cand]); score_candidate(cand, ScreenConfig())
     text = render_gap(book, record, plan_to_close_gap(record.gap, [cand], 180))
     assert "부족" in text and "기대 월매출" in text and "갑전기" in text
+
+
+# --- 업데이트 확인 --------------------------------------------------------------
+
+@pytest.mark.parametrize("latest,current,expected", [
+    ("v1.1.0", "1.0.0", True),
+    ("v1.0.1", "1.0.0", True),
+    ("v2.0.0-beta", "1.9.9", True),
+    ("v1.0.0", "1.0.0", False),
+    ("v1.0", "1.0.0", False),          # 1.0 과 1.0.0 은 같다
+    ("v0.9.9", "1.0.0", False),
+    ("", "1.0.0", False),              # 버전을 못 읽으면 업데이트라고 우기지 않는다
+    ("최신판", "1.0.0", False),
+])
+def test_version_comparison(latest, current, expected):
+    from prime_contractor.updater import is_newer
+    assert is_newer(latest, current) is expected
+
+
+def test_update_check_returns_none_when_offline(monkeypatch):
+    """업데이트 확인이 실패해도 앱은 떠야 한다."""
+    from prime_contractor import updater
+
+    def boom(*a, **kw):
+        raise OSError("네트워크 없음")
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", boom)
+    assert updater.check_for_update("1.0.0") is None
+
+
+def test_update_check_reads_release_payload(monkeypatch):
+    from prime_contractor import updater
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({"tag_name": "v1.4.0",
+                               "html_url": "https://example.test/releases/v1.4.0",
+                               "body": "매출 탭 추가"}).encode()
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **kw: FakeResponse())
+    info = updater.check_for_update("1.0.0")
+    assert info is not None
+    assert info.latest == "1.4.0"
+    assert "v1.4.0" in info.url
+    assert "1.4.0" in info.message and "1.0.0" in info.message
+
+
+def test_no_update_when_already_current(monkeypatch):
+    from prime_contractor import updater
+
+    class FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps({"tag_name": "v1.0.0"}).encode()
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **kw: FakeResponse())
+    assert updater.check_for_update("1.0.0") is None
+
+
+def test_package_version_is_parseable():
+    """태그와 맞춰야 하는 값이라 형식이 깨지면 안 된다."""
+    from prime_contractor import __version__
+    from prime_contractor.updater import parse_version
+    assert len(parse_version(__version__)) == 3

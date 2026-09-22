@@ -1,15 +1,21 @@
 name: build-exe
 
 # 윈도우 실행 파일은 윈도우에서만 만들 수 있다. 빌드 환경을 따로 갖추는 대신
-# GitHub 의 윈도우 러너에서 만들어 내려받게 한다.
+# GitHub 의 윈도우 러너에서 만든다.
+#   - 브랜치에 push  → 아티팩트로 올린다 (30일 보관, 확인용)
+#   - v* 태그를 push → Release 를 만들어 exe 를 첨부한다 (고정 링크, 만료 없음)
 on:
   push:
     branches: ['**']
+    tags: ['v*']
     paths:
       - 'prime_contractor/**'
       - 'prime_finder.spec'
       - '.github/workflows/build-exe.yml'
-  workflow_dispatch:        # Actions 탭에서 수동 실행
+  workflow_dispatch:
+
+permissions:
+  contents: write          # Release 를 만들려면 필요하다
 
 jobs:
   windows-exe:
@@ -29,6 +35,20 @@ jobs:
       - name: 테스트
         run: python -m pytest tests/test_prime_contractor.py -q
 
+      - name: 버전 확인
+        # 태그와 코드의 __version__ 이 어긋나면 앱이 자기가 구버전인 줄 알고
+        # 업데이트 알림을 계속 띄운다. 어긋나면 여기서 멈춘다.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          code=$(python -c "import prime_contractor; print(prime_contractor.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "코드 $code / 태그 $tag"
+          if [ "$code" != "$tag" ]; then
+            echo "::error::__version__($code) 과 태그($tag) 가 다릅니다."
+            exit 1
+          fi
+
       - name: exe 빌드
         run: python -m PyInstaller --noconfirm --clean prime_finder.spec
 
@@ -41,3 +61,13 @@ jobs:
           name: PrimeFinder-windows
           path: dist/PrimeFinder.exe
           retention-days: 30
+
+      - name: Release 만들기
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/PrimeFinder.exe \
+            --title "원청 찾기 $GITHUB_REF_NAME" \
+            --notes "받아서 기존 PrimeFinder.exe 에 덮어쓰시면 됩니다. 파이썬 설치는 필요 없습니다."

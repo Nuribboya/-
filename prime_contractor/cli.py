@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 
+from prime_contractor import __version__
 from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import render_table, write_csv
@@ -25,6 +26,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="prime_contractor",
         description="자동제어 판넬 제조사를 위한 원청 후보 탐색 (기존 원청과 업종 중복 제외)",
     )
+    p.add_argument("--version", action="version",
+                   version=f"원청 찾기 v{__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("screen", help="원청 후보를 찾아 순위를 매긴다")
