@@ -2,8 +2,10 @@ name: build-exe
 
 # 윈도우 실행 파일은 윈도우에서만 만들 수 있다. 빌드 환경을 따로 갖추는 대신
 # GitHub 의 윈도우 러너에서 만든다.
-#   - 브랜치에 push  → 아티팩트로 올린다 (30일 보관, 확인용)
-#   - v* 태그를 push → Release 를 만들어 exe 를 첨부한다 (고정 링크, 만료 없음)
+#   - 브랜치에 push   → 아티팩트로 올린다 (30일 보관, 확인용)
+#   - v* 태그를 push  → Release 를 만들어 exe 를 첨부한다 (고정 링크, 만료 없음)
+#   - 수동 실행 + 버전 → 태그까지 여기서 만든다. 태그를 직접 밀 수 없는
+#                        환경에서도 배포할 수 있고, Actions 탭에서 버튼으로 낸다.
 on:
   push:
     branches: ['**']
@@ -13,6 +15,11 @@ on:
       - 'prime_finder.spec'
       - '.github/workflows/build-exe.yml'
   workflow_dispatch:
+    inputs:
+      version:
+        description: '배포할 버전 (예: 1.0.0). 비워 두면 빌드만 하고 Release 는 안 만듭니다.'
+        required: false
+        default: ''
 
 permissions:
   contents: write          # Release 를 만들려면 필요하다
@@ -35,19 +42,27 @@ jobs:
       - name: 테스트
         run: python -m pytest tests/test_prime_contractor.py -q
 
-      - name: 버전 확인
-        # 태그와 코드의 __version__ 이 어긋나면 앱이 자기가 구버전인 줄 알고
-        # 업데이트 알림을 계속 띄운다. 어긋나면 여기서 멈춘다.
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: 배포 버전 결정
+        # 배포 번호와 코드의 __version__ 이 어긋나면 앱이 자기가 구버전인 줄
+        # 알고 업데이트 알림을 계속 띄운다. 어긋나면 여기서 멈춘다.
+        id: ver
         shell: bash
         run: |
           code=$(python -c "import prime_contractor; print(prime_contractor.__version__)")
-          tag="${GITHUB_REF_NAME#v}"
-          echo "코드 $code / 태그 $tag"
-          if [ "$code" != "$tag" ]; then
-            echo "::error::__version__($code) 과 태그($tag) 가 다릅니다."
+          want=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            want="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            want="${{ inputs.version }}"
+            want="${want#v}"
+          fi
+          echo "코드 $code / 배포 요청 ${want:-(없음)}"
+          if [ -n "$want" ] && [ "$code" != "$want" ]; then
+            echo "::error::__version__($code) 과 배포 버전($want) 이 다릅니다. \
+            prime_contractor/__init__.py 를 먼저 맞춰 주세요."
             exit 1
           fi
+          echo "release=$want" >> "$GITHUB_OUTPUT"
 
       - name: exe 빌드
         run: python -m PyInstaller --noconfirm --clean prime_finder.spec
@@ -63,11 +78,20 @@ jobs:
           retention-days: 30
 
       - name: Release 만들기
-        if: startsWith(github.ref, 'refs/tags/v')
+        # gh release create 는 태그가 없으면 이 커밋에 태그까지 만들어 준다.
+        if: steps.ver.outputs.release != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.ver.outputs.release }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/PrimeFinder.exe \
-            --title "원청 찾기 $GITHUB_REF_NAME" \
-            --notes "받아서 기존 PrimeFinder.exe 에 덮어쓰시면 됩니다. 파이썬 설치는 필요 없습니다."
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG 릴리스가 이미 있어 파일만 덮어씁니다."
+            gh release upload "$TAG" dist/PrimeFinder.exe --clobber
+          else
+            gh release create "$TAG" dist/PrimeFinder.exe \
+              --target "$GITHUB_SHA" \
+              --title "원청 찾기 $TAG" \
+              --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
+          fi
+          echo "받는 곳: https://github.com/${GITHUB_REPOSITORY}/releases/latest"
