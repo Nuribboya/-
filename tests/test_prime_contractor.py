@@ -690,3 +690,122 @@ def test_csv_carries_grade_and_axis_detail(tmp_path):
     header = body.splitlines()[0]
     for column in ("등급", "적합도", "추정판넬금액", "품목근거", "주의사항"):
         assert column in header
+
+
+# --- 매출 기록 / 부족분 채우기 ---------------------------------------------------
+
+def _book(rows, targets=None):
+    from prime_contractor.sales import _from_snapshot
+    return _from_snapshot({
+        "months": [{"ym": ym, "revenue": rev} for ym, rev in rows],
+        "targets": targets or {},
+    })
+
+
+def test_reads_the_sales_app_snapshot_schema():
+    """매출 앱이 localStorage 에 담는 모양 그대로 읽어야 한다."""
+    book = _book([("2026-08", 24900000), ("2026-09", 19320000)],
+                 {"2026-08": 27000000, "2026-09": 27000000})
+    aug = book.month("2026-08")
+    assert aug.revenue == 24900000 and aug.target == 27000000
+    assert aug.gap == 2100000
+    assert round(aug.rate * 100) == 92
+
+
+def test_current_month_is_not_counted_as_a_miss():
+    """진행 중인 달은 당연히 목표에 못 미친다. 그걸 미달로 보면 매번 경보가 뜬다."""
+    from datetime import date
+    book = _book([("2026-08", 24900000), ("2026-09", 5000000)],
+                 {"2026-08": 27000000, "2026-09": 27000000})
+    assert book.latest_closed(date(2026, 9, 22)).ym == "2026-08"
+
+
+def test_recent_gap_sums_several_months():
+    from datetime import date
+    book = _book([("2026-07", 25000000), ("2026-08", 24000000)],
+                 {"2026-07": 27000000, "2026-08": 27000000})
+    assert book.recent_gap(2, date(2026, 9, 1)) == 5000000
+    assert book.recent_gap(1, date(2026, 9, 1)) == 3000000
+
+
+def test_exceeding_target_leaves_no_gap():
+    book = _book([("2026-08", 30000000)], {"2026-08": 27000000})
+    assert book.month("2026-08").gap == 0
+    assert book.month("2026-08").achieved is True
+
+
+def test_csv_accepts_korean_headers_and_loose_dates(tmp_path):
+    from prime_contractor.sales import load_sales
+    path = tmp_path / "sales.csv"
+    path.write_text("연월,매출,목표\n2026/7,\"25,000,000\",27000000\n2026.08,24900000,27000000\n",
+                    encoding="utf-8")
+    book = load_sales(path)
+    assert [m.ym for m in book.sorted_months()] == ["2026-07", "2026-08"]
+    assert book.month("2026-07").revenue == 25000000     # 쉼표가 섞여 있어도 읽는다
+
+
+def test_monthly_expected_scales_by_period_and_grade():
+    """추정 물량은 조회 기간 전체 값이라 월로 나누고, 수주 확률을 곱해야 한다."""
+    from prime_contractor.sales import monthly_expected
+    cand = _scored("갑전기", address="경기도 평택시",
+                   awards=[Award(title="배전반 교체공사", amount=12 * 10**8, category="공사",
+                                 demand_org="A시")])
+    enrich([cand]); score_candidate(cand, ScreenConfig())
+    half_year = monthly_expected(cand, lookback_days=180)
+    quarter = monthly_expected(cand, lookback_days=90)
+    assert quarter > half_year          # 같은 물량이 짧은 기간에 나왔으면 월 기대치가 크다
+    assert half_year > 0
+
+
+def test_plan_stops_once_the_gap_is_covered():
+    from prime_contractor.sales import plan_to_close_gap
+    cands = []
+    for i in range(6):
+        c = _scored(f"업체{i}", address="경기도 평택시",
+                    awards=[Award(title="배전반 교체공사", amount=10**9, category="공사",
+                                  demand_org=f"{i}시")])
+        enrich([c]); score_candidate(c, ScreenConfig())
+        cands.append(c)
+    plan = plan_to_close_gap(1_000_000, cands, lookback_days=180)
+    assert plan.is_covered
+    assert len(plan.rows) < len(cands)          # 부족분을 덮으면 거기서 멈춘다
+    assert plan.rows[-1].cumulative >= plan.gap
+
+
+def test_plan_says_so_when_candidates_cannot_cover_the_gap():
+    from prime_contractor.sales import plan_to_close_gap
+    small = _scored("작은곳", address="경기도 평택시",
+                    awards=[Award(title="분전반 교체", amount=10**7, category="공사")])
+    enrich([small]); score_candidate(small, ScreenConfig())
+    plan = plan_to_close_gap(50 * 10**8, [small], lookback_days=180)
+    assert not plan.is_covered
+    assert plan.shortfall_left > 0
+    assert "모자랍니다" in plan.note
+
+
+def test_plan_skips_candidates_with_no_expected_volume():
+    """점수가 높아도 판넬 물량이 안 나오는 곳은 부족분 메우기에 도움이 안 된다."""
+    from prime_contractor.sales import plan_to_close_gap
+    no_volume = _scored("조경업체", address="경기도 안성시",
+                        awards=[Award(title="청사 화단 조경공사", amount=10**10, category="공사")])
+    enrich([no_volume]); score_candidate(no_volume, ScreenConfig())
+    plan = plan_to_close_gap(10**7, [no_volume], lookback_days=180)
+    assert plan.rows == []
+
+
+def test_no_gap_means_no_plan():
+    from prime_contractor.sales import plan_to_close_gap
+    plan = plan_to_close_gap(0, [], lookback_days=180)
+    assert not plan.rows and "채웠습니다" in plan.note
+
+
+def test_gap_report_shows_shortfall_and_plan():
+    from prime_contractor.report import render_gap
+    from prime_contractor.sales import plan_to_close_gap
+    book = _book([("2026-08", 24900000)], {"2026-08": 27000000})
+    record = book.month("2026-08")
+    cand = _scored("갑전기", address="경기도 평택시",
+                   awards=[Award(title="배전반 교체공사", amount=10**9, category="공사")])
+    enrich([cand]); score_candidate(cand, ScreenConfig())
+    text = render_gap(book, record, plan_to_close_gap(record.gap, [cand], 180))
+    assert "부족" in text and "기대 월매출" in text and "갑전기" in text

@@ -132,3 +132,47 @@ def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = F
                 status,
             ])
     return path
+
+
+def render_gap(book, record, plan) -> str:
+    """매출 미달 상황과 그걸 메울 후보를 한 화면에 보여 준다."""
+    lines = ["■ 매출 현황"]
+    if record is None:
+        lines.append("  마감된 달이 없습니다. 매출 데이터를 확인해 주세요.")
+        return "\n".join(lines)
+
+    rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "목표 미설정"
+    lines.append(f"  {record.ym}  실적 {record.revenue / 1e4:,.0f}만원 / "
+                 f"목표 {record.target / 1e4:,.0f}만원  ({rate})")
+    if record.gap:
+        lines.append(f"  → {record.gap / 1e4:,.0f}만원 부족")
+    else:
+        lines.append("  → 목표 달성")
+    if book.source:
+        lines.append(f"  출처: {book.source}")
+
+    lines.append("")
+    lines.append("■ 부족분을 채울 후보")
+    lines.append(f"  {plan.note}")
+    if not plan.rows:
+        return "\n".join(lines)
+
+    cols = [("#", 3), ("등급", 4), ("업체/기관", 26), ("지역", 8),
+            ("기대 월매출", 12), ("누적", 12)]
+    header = " ".join(_pad(n, w) for n, w in cols)
+    lines.append("")
+    lines.append(header)
+    lines.append("-" * _width(header))
+    for i, row in enumerate(plan.rows, 1):
+        c = row.candidate
+        mark = "✔" if row.cumulative >= plan.gap else " "
+        values = [str(i), c.grade or "-", _clip(c.name, 26), c.region or "미상",
+                  f"{row.monthly_expected / 1e4:,.0f}만원",
+                  f"{row.cumulative / 1e4:,.0f}만원 {mark}"]
+        lines.append(" ".join(_pad(v, w) for v, (_, w) in zip(values, cols)))
+
+    lines.append("")
+    lines.append("'기대 월매출' = 추정 판넬 물량 ÷ 조회월수 × 등급별 수주확률"
+                 " (A 35% / B 25% / C 15% / D 8%).")
+    lines.append("전부 어림값입니다. 접촉 우선순위를 정하는 용도로만 쓰세요.")
+    return "\n".join(lines)

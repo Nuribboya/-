@@ -56,6 +56,23 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--keyword", default="자동제어", help="검색 지원 여부를 볼 샘플 키워드")
     pr.add_argument("--dump", action="store_true", help="응답 1건의 실제 항목과 값을 그대로 출력")
 
+    g = sub.add_parser("gap", help="매출 목표 미달분을 확인하고, 그만큼 채울 원청 후보를 고른다")
+    g.add_argument("--sales", required=True,
+                   help="매출 파일 (매출 앱 JSON 스냅샷 또는 연월,매출,목표 CSV)")
+    g.add_argument("--month", default=None, help="볼 연월 (예: 2026-09). 기본은 마지막 마감월")
+    g.add_argument("--months-back", type=int, default=1,
+                   help="부족분을 몇 달치로 볼지 (기본 1). 한 달만 보면 들쑥날쑥하다")
+    g.add_argument("--offline", action="store_true", help="샘플 후보로 시험 실행")
+    g.add_argument("--days", type=int, default=None, help="후보 조회 기간(일)")
+    g.add_argument("--within", type=float, default=None, help="거리 상한(km)")
+    g.add_argument("--nationwide", action="store_true")
+    g.add_argument("--sector", default=None)
+    g.add_argument("--min-grade", choices=["A", "B", "C", "D"], default=None)
+    g.add_argument("--max-rows", type=int, default=12, help="접촉 후보 최대 개수")
+    g.add_argument("--out", default=None, help="후보 CSV 저장 경로")
+    g.add_argument("--config", default=None)
+    g.add_argument("-v", "--verbose", action="store_true")
+
     i = sub.add_parser("industry-screen",
                        help="낙찰 이력과 무관하게 DART 상장사를 업종코드로 훑는다 "
                             "(민간 발주 원청을 찾을 때)")
@@ -89,6 +106,65 @@ def _within(args) -> float | None:
     if getattr(args, "nationwide", False):
         return None
     return args.within
+
+
+def _cmd_gap(args) -> int:
+    from prime_contractor.sales import load_sales, plan_to_close_gap
+    from prime_contractor.report import render_gap
+
+    try:
+        book = load_sales(args.sales)
+    except (OSError, ValueError) as exc:
+        print(f"[오류] 매출 파일을 읽지 못했습니다: {exc}", file=sys.stderr)
+        return 2
+    if not book.months:
+        print("[오류] 매출 기록이 비어 있습니다.", file=sys.stderr)
+        return 2
+
+    record = book.month(args.month) if args.month else book.latest_closed()
+    if record is None:
+        print(f"[오류] {args.month or '마감된 달'} 기록을 찾지 못했습니다.", file=sys.stderr)
+        return 2
+
+    gap = book.recent_gap(args.months_back) if args.months_back > 1 else record.gap
+    cfg = load_config(
+        args.config,
+        lookback_days=args.days,
+        within_km=_within(args),
+        min_grade=args.min_grade,
+        g2b_service_key=os.environ.get("G2B_SERVICE_KEY") or None,
+        dart_api_key=os.environ.get("DART_API_KEY") or None,
+    )
+    if args.nationwide:
+        from dataclasses import replace
+        cfg = replace(cfg, within_km=None)
+
+    g2b_client = dart_client = None
+    if not args.offline:
+        from prime_contractor.sources.g2b import G2BClient, G2BError
+        try:
+            g2b_client = G2BClient(cfg.g2b_service_key)
+        except G2BError as exc:
+            print(f"[오류] {exc}\n      키 없이 보려면 --offline 을 쓰세요.", file=sys.stderr)
+            return 2
+        if cfg.dart_api_key:
+            from prime_contractor.sources.dart import DartClient, DartError
+            try:
+                dart_client = DartClient(cfg.dart_api_key)
+            except DartError:
+                pass
+
+    result = run_screen(cfg, offline=args.offline,
+                        g2b_client=g2b_client, dart_client=dart_client)
+    if args.sector:
+        filter_sector(result, args.sector)
+
+    plan = plan_to_close_gap(gap, result.passed, lookback_days=cfg.lookback_days,
+                             max_rows=args.max_rows)
+    print(render_gap(book, record, plan))
+    if args.out:
+        print(f"\nCSV 저장: {write_csv(result, args.out)}")
+    return 0
 
 
 def _cmd_industry_screen(args) -> int:
@@ -250,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         "screen": _cmd_screen,
         "probe": _cmd_probe,
         "industry-screen": _cmd_industry_screen,
+        "gap": _cmd_gap,
         "dart-lookup": _cmd_dart_lookup,
         "show-config": _cmd_show_config,
     }[args.command](args)
