@@ -36,8 +36,8 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
         lines.append(f"  - {note}")
     lines.append("")
 
-    cols = [("#", 3), ("업체/기관", 26), ("구분", 6), ("업종", 18),
-            ("지역", 8), ("거리", 7), ("수주", 10), ("점수", 6)]
+    cols = [("#", 3), ("등급", 4), ("업체/기관", 26), ("구분", 6), ("업종", 18),
+            ("지역", 8), ("거리", 7), ("추정판넬", 10), ("적합도", 6)]
     if not result.passed and not result.excluded:
         lines.append("후보가 한 곳도 잡히지 않았습니다. 확인할 것:")
         lines.append("  1) python -m prime_contractor.cli probe   ← 어디서 막혔는지 바로 나옵니다")
@@ -51,10 +51,21 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
 
     for i, c in enumerate(result.passed[:limit], 1):
         dist = f"{c.distance_km:.0f}km" if c.distance_km is not None else "미상"
-        awards = f"{c.award_count}건/{c.award_amount / 1e8:.1f}억" if c.award_count else "-"
-        row = [str(i), _clip(c.name, 26), "원청" if c.kind == "contractor" else "발주처",
-               _clip(c.sector or "미분류", 18), c.region or "미상", dist, awards, f"{c.score:.1f}"]
+        est = getattr(c.fitness, "est_panel_amount", 0)
+        panel = f"{est / 1e8:.1f}억" if est else "-"
+        row = [str(i), c.grade or "-", _clip(c.name, 26),
+               "원청" if c.kind == "contractor" else "발주처",
+               _clip(c.sector or "미분류", 18), c.region or "미상", dist, panel, f"{c.score:.1f}"]
         lines.append(" ".join(_pad(v, w) for v, (_, w) in zip(row, cols)))
+
+    by_grade: dict[str, int] = {}
+    for c in result.passed:
+        by_grade[c.grade] = by_grade.get(c.grade, 0) + 1
+    if by_grade:
+        lines.append("")
+        lines.append("등급: " + "  ".join(f"{g} {by_grade[g]}곳" for g in "ABCD" if g in by_grade)
+                     + "   (A 우선 접촉 / B 접촉 가치 있음 / C 여력 될 때 / D 보류)")
+        lines.append("'추정판넬'은 낙찰금액에 공종별 판넬 비중을 곱한 어림값입니다 — 실제 견적과 다릅니다.")
 
     if show_excluded and result.excluded:
         lines.append("")
@@ -67,10 +78,23 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
 
 
 CSV_HEADER = [
-    "순위", "업체명", "구분", "업종", "점수", "지역", "안성거리km",
-    "낙찰건수", "낙찰금액", "사업자번호", "업종코드", "주소", "대표자",
-    "겹침판정", "판정근거", "대표공고", "점수상세",
+    "순위", "등급", "적합도", "추천", "업체명", "구분", "업종",
+    "추정판넬금액", "한줄근거",
+    "품목점수", "물량점수", "접근성점수", "지속성점수", "안전도점수",
+    "품목근거", "물량근거", "접근성근거", "지속성근거", "안전도근거",
+    "지역", "안성거리km", "낙찰건수", "낙찰금액", "사업자번호", "업종코드",
+    "주소", "대표자", "겹침판정", "판정근거", "대표공고", "주의사항",
 ]
+
+
+def _axis_points(fit, key: str):
+    axis = fit.axis(key) if fit else None
+    return axis.points if axis else ""
+
+
+def _axis_detail(fit, key: str) -> str:
+    axis = fit.axis(key) if fit else None
+    return axis.detail if axis else ""
 
 
 def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = False) -> Path:
@@ -84,16 +108,27 @@ def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = F
         writer = csv.writer(fh)
         writer.writerow(CSV_HEADER + ["상태"])
         for rank, c, status in rows:
+            fit = c.fitness
             writer.writerow([
-                rank or "", c.name,
+                rank or "", c.grade, c.score,
+                getattr(fit, "advice", ""),
+                c.name,
                 "원청후보" if c.kind == "contractor" else "발주처",
-                c.sector, c.score, c.region,
-                "" if c.distance_km is None else c.distance_km,
+                c.sector,
+                getattr(fit, "est_panel_amount", 0),
+                getattr(fit, "headline", ""),
+                _axis_points(fit, "product_fit"), _axis_points(fit, "volume"),
+                _axis_points(fit, "access"), _axis_points(fit, "repeat"),
+                _axis_points(fit, "safety"),
+                _axis_detail(fit, "product_fit"), _axis_detail(fit, "volume"),
+                _axis_detail(fit, "access"), _axis_detail(fit, "repeat"),
+                _axis_detail(fit, "safety"),
+                c.region, "" if c.distance_km is None else c.distance_km,
                 c.award_count, c.award_amount, c.bizno, c.ksic_code, c.address, c.ceo,
                 c.overlap.label if c.overlap else "",
                 "; ".join(c.overlap.reasons) if c.overlap else "",
                 c.awards[0].title if c.awards else "",
-                " ".join(f"{k}={v}" for k, v in c.score_breakdown.items()),
+                "; ".join(getattr(fit, "cautions", [])),
                 status,
             ])
     return path

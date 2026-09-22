@@ -54,6 +54,9 @@ class Candidate:
     ksic_code: str = ""           # DART 업종코드(한국표준산업분류)
     industry_name: str = ""
     ceo: str = ""
+    phone: str = ""
+    fax: str = ""
+    notice_url: str = ""          # 대표 공고 상세 페이지
     homepage: str = ""
     established: str = ""
     corp_code: str = ""           # DART 고유번호
@@ -66,8 +69,9 @@ class Candidate:
     overlap: OverlapVerdict | None = None
     sector: str = ""              # 매칭된 타깃 업종명
     sector_weight: float = 0.0
-    score: float = 0.0
-    score_breakdown: dict[str, float] = field(default_factory=dict)
+    score: float = 0.0            # = fitness.total (정렬·표시에 쓰는 대표값)
+    grade: str = ""               # A~D
+    fitness: object | None = None  # fitness.Fitness (순환 임포트를 피해 느슨하게 둔다)
 
     @property
     def award_count(self) -> int:
@@ -101,8 +105,9 @@ class Candidate:
     def merge(self, other: "Candidate") -> None:
         """같은 업체로 판정된 후보를 흡수한다. 빈 필드만 채운다."""
         for attr in (
-            "bizno", "address", "ksic_code", "industry_name",
-            "ceo", "homepage", "established", "corp_code", "region",
+            "bizno", "address", "ksic_code", "industry_name", "ceo",
+            "phone", "fax", "notice_url", "homepage", "established",
+            "corp_code", "region",
         ):
             if not getattr(self, attr) and getattr(other, attr):
                 setattr(self, attr, getattr(other, attr))

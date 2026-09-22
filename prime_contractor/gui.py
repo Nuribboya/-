@@ -24,8 +24,8 @@ from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import write_csv
 
-COLUMNS = (("순위", 50), ("업체/기관", 260), ("구분", 60), ("업종", 130),
-           ("지역", 70), ("거리", 70), ("수주", 110), ("점수", 60))
+COLUMNS = (("순위", 45), ("등급", 45), ("업체/기관", 240), ("구분", 55), ("업종", 125),
+           ("지역", 65), ("거리", 60), ("추정판넬", 85), ("적합도", 60))
 
 
 class QueueLogHandler(logging.Handler):
@@ -233,21 +233,50 @@ class App:
         self.result = result
         for i, c in enumerate(result.passed, 1):
             dist = f"{c.distance_km:.0f}km" if c.distance_km is not None else "미상"
-            awards = f"{c.award_count}건/{c.award_amount / 1e8:.1f}억" if c.award_count else "-"
+            est = getattr(c.fitness, "est_panel_amount", 0)
             self.tree.insert("", END, values=(
-                i, c.name, "원청" if c.kind == "contractor" else "발주처",
-                c.sector or "미분류", c.region or "미상", dist, awards, f"{c.score:.1f}"))
+                i, c.grade or "-", c.name, "원청" if c.kind == "contractor" else "발주처",
+                c.sector or "미분류", c.region or "미상", dist,
+                f"{est / 1e8:.1f}억" if est else "-", f"{c.score:.1f}"),
+                tags=(c.grade,))
+        for grade, color in (("A", "#e8f5e9"), ("B", "#f1f8e9")):
+            self.tree.tag_configure(grade, background=color)
+        self.tree.bind("<Double-1>", self._show_detail)
         for note in result.notes:
             self.say(note)
         stats = " / ".join(f"{k} {v}" for k, v in result.stats.items())
         self.say(f"완료 — {stats}")
-        self.status.configure(text=f"후보 {len(result.passed)}곳")
+        grades = {}
+        for c in result.passed:
+            grades[c.grade] = grades.get(c.grade, 0) + 1
+        summary = " ".join(f"{g} {grades[g]}" for g in "ABCD" if g in grades)
+        self.say("등급별: " + (summary or "없음") +
+                 "  (A 우선 접촉 / B 접촉 가치 있음 / C 여력 될 때 / D 보류)")
+        self.say("줄을 더블클릭하면 점수가 어떻게 나왔는지 볼 수 있습니다.")
+        self.status.configure(text=f"후보 {len(result.passed)}곳  [{summary}]")
         self.save_button.configure(state="normal" if result.passed else "disabled")
         if not result.passed:
             messagebox.showinfo("결과 없음",
                                 "조건에 맞는 후보가 없습니다.\n"
                                 "기간을 늘리거나 납품 반경을 넓혀 보세요.")
         self._finish()
+
+    def _show_detail(self, _event=None) -> None:
+        """줄을 더블클릭하면 그 후보의 점수 내역을 띄운다."""
+        selected = self.tree.focus()
+        if not selected or not self.result:
+            return
+        rank = self.tree.item(selected, "values")[0]
+        try:
+            cand = self.result.passed[int(rank) - 1]
+        except (ValueError, IndexError):
+            return
+        text = cand.fitness.explain() if cand.fitness else "계산 내역이 없습니다."
+        if cand.awards:
+            text += "\n\n수주 내역:\n" + "\n".join(
+                f"  [{a.category}] {a.title} / {a.demand_org} / {a.amount / 1e8:.2f}억"
+                for a in cand.awards[:8])
+        messagebox.showinfo(cand.name, text)
 
     def _failed(self, exc: Exception) -> None:
         messagebox.showerror("실패", f"{exc}\n\n아래 진행 상황 창의 내용을 확인해 주세요.")

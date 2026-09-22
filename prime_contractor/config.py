@@ -181,12 +181,19 @@ class ScreenConfig:
     min_awards: int = 1
     #: 발주기관(수요기관)도 후보에 넣을지
     include_demand_orgs: bool = True
+    #: 공고에서 발주기관 문의처까지 가져올지 (조회 시간이 대략 두 배가 된다)
+    with_contacts: bool = False
 
     dart_api_key: str = ""
     g2b_service_key: str = ""
 
+    #: 이 등급보다 낮으면 목록에서 뺀다 ("A"~"D"). None 이면 전부 보여 준다.
+    min_grade: str | None = None
+
+    #: 적합도 축별 배점. 합이 100 이 아니어도 100점 만점으로 환산된다.
     weights: dict[str, float] = field(
-        default_factory=lambda: {"sector": 40.0, "proximity": 25.0, "activity": 25.0, "profile": 10.0}
+        default_factory=lambda: {"product_fit": 30.0, "volume": 25.0,
+                                 "access": 20.0, "repeat": 15.0, "safety": 10.0}
     )
 
 
@@ -237,11 +244,14 @@ def _apply_json(cfg: ScreenConfig, raw: dict) -> ScreenConfig:
         patch["max_distance_km"] = float(raw["max_distance_km"])
     if "within_km" in raw:
         patch["within_km"] = None if raw["within_km"] is None else float(raw["within_km"])
-    if "include_demand_orgs" in raw:
-        patch["include_demand_orgs"] = bool(raw["include_demand_orgs"])
+    for key in ("include_demand_orgs", "with_contacts"):
+        if key in raw:
+            patch[key] = bool(raw[key])
     for key in ("dart_api_key", "g2b_service_key"):
         if key in raw:
             patch[key] = str(raw[key])
+    if "min_grade" in raw:
+        patch["min_grade"] = raw["min_grade"] or None
     if "weights" in raw:
         patch["weights"] = {**cfg.weights, **{k: float(v) for k, v in raw["weights"].items()}}
     return replace(cfg, **patch)

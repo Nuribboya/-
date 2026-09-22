@@ -40,6 +40,10 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--nationwide", action="store_true", help="거리 제한 없이 전국")
     s.add_argument("--sector", default=None,
                    help="이 업종만 본다 (일부만 적어도 됨, 예: 반도체 / 수처리)")
+    s.add_argument("--min-grade", choices=["A", "B", "C", "D"], default=None,
+                   help="이 등급 이상만 본다")
+    s.add_argument("--explain", default=None, metavar="상호",
+                   help="이 업체의 적합도 계산 내역을 자세히 출력 (일부만 적어도 됨)")
     s.add_argument("--exclude-same-industry", action="store_true",
                    help="KC그룹과 같은 업종(반도체 등)도 제외 — 기본은 계열사만 제외")
     s.add_argument("--strict", action="store_true", help="인접 업종까지 전부 제외")
@@ -120,6 +124,7 @@ def _cmd_screen(args) -> int:
         max_distance_km=args.max_distance,
         within_km=_within(args),
         max_overlap_rank=_overlap_rank(args),
+        min_grade=args.min_grade,
         include_demand_orgs=False if args.no_demand_orgs else None,
         g2b_service_key=os.environ.get("G2B_SERVICE_KEY") or None,
         dart_api_key=os.environ.get("DART_API_KEY") or None,
@@ -147,6 +152,10 @@ def _cmd_screen(args) -> int:
     result = run_screen(cfg, offline=args.offline, g2b_client=g2b_client, dart_client=dart_client)
     if args.sector:
         filter_sector(result, args.sector)
+
+    if args.explain:
+        return _print_explain(result, args.explain)
+
     print(render_table(result, limit=args.limit))
 
     if args.out:
@@ -172,6 +181,28 @@ def _cmd_probe(args) -> int:
     print("  '낙찰업체 추출 실패' → 그 오퍼레이션엔 업체명이 없음 (다른 쪽을 자동으로 씁니다)")
     print("  '키워드 검색 0건'    → 그 기간에 없었거나 공고명 검색 미지원")
     print("  값을 직접 보려면: python -m prime_contractor.cli probe --dump")
+    return 0
+
+
+def _print_explain(result, needle: str) -> int:
+    """한 후보의 점수가 어떻게 나왔는지 축별로 펼쳐 본다."""
+    pool = result.passed + result.excluded
+    hits = [c for c in pool if needle in c.name]
+    if not hits:
+        print(f"'{needle}' 와(과) 맞는 후보가 없습니다. "
+              f"(전체 {len(pool)}곳)", file=sys.stderr)
+        return 1
+    for c in hits[:5]:
+        print(f"\n■ {c.name}  [{'원청 후보' if c.kind == 'contractor' else '발주처'}]")
+        if c.fitness:
+            print(c.fitness.explain())
+        if c.overlap:
+            print(f"  겹침 판정: {c.overlap.label} — {'; '.join(c.overlap.reasons)}")
+        if c.awards:
+            print("  수주 내역:")
+            for a in c.awards[:6]:
+                print(f"    - [{a.category}] {a.title} / {a.demand_org} / "
+                      f"{a.amount / 1e8:.2f}억")
     return 0
 
 

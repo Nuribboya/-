@@ -575,3 +575,118 @@ def test_filter_sector_moves_others_to_excluded_with_a_reason():
     filter_sector(result, "반도체")
     assert [c.name for c in result.passed] == ["반도체설비"]
     assert "다름" in result.excluded[0].overlap.reasons[-1]
+
+
+# --- 적합도 평가 ----------------------------------------------------------------
+
+def _scored(name, cfg=None, **kw):
+    cfg = cfg or ScreenConfig()
+    c = _cand(name, **kw)
+    score_candidate(c, cfg)
+    return c
+
+
+def test_direct_product_mention_beats_generic_electrical_work():
+    """'배전반 교체'는 판넬이 확실히 들어가고, '전기공사'는 들어갈지 모른다."""
+    direct = _scored("갑전기", awards=[Award(title="수배전반 교체공사", amount=10**9, category="공사")])
+    generic = _scored("을전기", awards=[Award(title="청사 전기공사", amount=10**9, category="공사")])
+    assert direct.fitness.axis("product_fit").score > generic.fitness.axis("product_fit").score
+
+
+def test_panel_amount_estimated_by_category_and_directness():
+    from prime_contractor.fitness import estimate_panel_amount
+    goods = _cand("갑", awards=[Award(title="배전반 구매", amount=1_000_000_000, category="물품")])
+    works = _cand("을", awards=[Award(title="배전반 설치공사", amount=1_000_000_000, category="공사")])
+    assert estimate_panel_amount(goods) == 700_000_000      # 물품 direct 0.70
+    assert estimate_panel_amount(works) == 250_000_000      # 공사 direct 0.25
+
+
+def test_unrelated_notice_contributes_no_panel_volume():
+    from prime_contractor.fitness import estimate_panel_amount
+    cand = _cand("갑", awards=[Award(title="청사 화단 조경공사", amount=10**10, category="공사")])
+    assert estimate_panel_amount(cand) == 0
+
+
+def test_repeat_axis_rewards_multiple_buyers_over_one_big_order():
+    spread = _scored("갑전기", awards=[
+        Award(title="배전반 교체", amount=3 * 10**8, category="공사", demand_org="A시"),
+        Award(title="배전반 증설", amount=3 * 10**8, category="공사", demand_org="B시"),
+        Award(title="분전반 설치", amount=3 * 10**8, category="공사", demand_org="C시"),
+    ])
+    single = _scored("을전기", awards=[
+        Award(title="배전반 교체", amount=9 * 10**8, category="공사", demand_org="A시")])
+    assert spread.fitness.axis("repeat").score > single.fitness.axis("repeat").score
+
+
+def test_grades_follow_the_total_score():
+    from prime_contractor.fitness import GRADE_CUTS
+    assert [g for _, g in GRADE_CUTS] == ["A", "B", "C", "D"]
+    strong = _scored("가까운배전반", address="경기도 평택시", awards=[
+        Award(title="수배전반 교체공사", amount=2 * 10**9, category="공사", demand_org="A시"),
+        Award(title="분전반 증설공사", amount=10**9, category="공사", demand_org="B시"),
+    ])
+    enrich([strong]); score_candidate(strong, ScreenConfig())
+    weak = _scored("먼조경", address="부산광역시",
+                   awards=[Award(title="조경 부대 전기공사", amount=2 * 10**7, category="공사")])
+    enrich([weak]); score_candidate(weak, ScreenConfig())
+    assert strong.grade in ("A", "B")
+    assert weak.grade in ("C", "D")
+    assert strong.score > weak.score
+
+
+def test_grade_at_least_ordering():
+    from prime_contractor.scoring import grade_at_least
+    assert grade_at_least("A", "B") and grade_at_least("B", "B")
+    assert not grade_at_least("C", "B")
+    assert grade_at_least("?", "B")            # 모르는 등급은 거르지 않는다
+
+
+def test_min_grade_filters_low_candidates_with_a_reason():
+    cfg = ScreenConfig(min_grade="A")
+    weak = _cand("약한곳", awards=[Award(title="부대 전기공사", amount=10**7, category="공사")])
+    score_candidate(weak, cfg)
+    passed, excluded = split_by_overlap([weak], cfg)
+    assert not passed
+    assert "등급" in excluded[0].overlap.reasons[-1]
+
+
+def test_weights_are_normalised_to_100():
+    """배점을 바꿔도 총점은 100점 만점으로 읽혀야 한다."""
+    awards = [Award(title="배전반 교체공사", amount=10**9, category="공사", demand_org="A시")]
+    base = _scored("갑", ScreenConfig(), address="경기도 평택시", awards=awards)
+    tilted = _scored("갑", ScreenConfig(weights={"product_fit": 60.0, "volume": 10.0,
+                                                 "access": 10.0, "repeat": 10.0, "safety": 10.0}),
+                     address="경기도 평택시", awards=awards)
+    assert 0 <= base.score <= 100 and 0 <= tilted.score <= 100
+    assert base.score != tilted.score          # 배점이 실제로 반영된다
+
+
+def test_candidate_without_awards_scores_on_industry_instead():
+    """업종 훑기 모드에는 낙찰 이력이 없다. 그래도 평가는 되어야 한다."""
+    cand = _scored("반도체설비(주)", ksic_code="26110")
+    assert cand.fitness.axis("product_fit").score > 0
+    assert "수주 이력 없음" in cand.fitness.axis("product_fit").detail
+
+
+def test_cautions_flag_what_the_user_must_verify():
+    cand = _scored("주소없는곳", awards=[Award(title="배전반 교체", amount=10**8, category="공사")])
+    joined = " ".join(cand.fitness.cautions)
+    assert "소재지" in joined          # 주소 미상
+    assert "업종코드" in joined        # DART 미등록
+    assert "1건" in joined             # 단발
+
+
+def test_explain_lists_every_axis():
+    cand = _scored("갑전기", address="경기도 평택시",
+                   awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
+    text = cand.fitness.explain()
+    for label in ("품목", "물량", "접근성", "지속성", "안전도"):
+        assert label in text
+
+
+def test_csv_carries_grade_and_axis_detail(tmp_path):
+    result = run_screen(ScreenConfig(), offline=True)
+    body = write_csv(result, tmp_path / "out.csv").read_text(encoding="utf-8-sig")
+    header = body.splitlines()[0]
+    for column in ("등급", "적합도", "추정판넬금액", "품목근거", "주의사항"):
+        assert column in header
