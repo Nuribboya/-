@@ -952,3 +952,114 @@ def test_package_version_is_parseable():
     from prime_contractor import __version__
     from prime_contractor.updater import parse_version
     assert len(parse_version(__version__)) == 3
+
+
+# --- 폐업 회사 걸러내기 ----------------------------------------------------------
+
+class _FakeNts:
+    """국세청 응답을 흉내낸다. 요청받은 번호와 상태를 기록해 둔다."""
+
+    def __init__(self, table: dict[str, dict]) -> None:
+        self.table = table
+        self.asked: list[str] = []
+
+    def statuses(self, biznos):
+        from prime_contractor.sources.nts import clean_bizno
+        self.asked = [clean_bizno(b) for b in biznos if clean_bizno(b)]
+        return {k: v for k, v in self.table.items() if k in self.asked}
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("123-45-67890", "1234567890"),
+    ("1234567890", "1234567890"),
+    (" 123 45 67890 ", "1234567890"),
+    ("12345", ""),            # 10자리가 아니면 버린다
+    ("", ""),
+    (None, ""),
+])
+def test_bizno_cleaned_before_lookup(raw, expected):
+    from prime_contractor.sources.nts import clean_bizno
+    assert clean_bizno(raw) == expected
+
+
+def test_closed_business_is_dropped_with_a_reason():
+    from prime_contractor.sources.nts import apply_statuses
+    alive = _cand("살아있는전기", bizno="1111111111",
+                  awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
+    closed = _cand("문닫은전기", bizno="2222222222",
+                   awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
+    checked, dead = apply_statuses([alive, closed], {
+        "1111111111": {"code": "01", "label": "계속사업자", "closed_at": ""},
+        "2222222222": {"code": "03", "label": "폐업자", "closed_at": "20250731"},
+    })
+    assert (checked, dead) == (2, 1)
+    assert closed.business_closed and not alive.business_closed
+
+    cfg = ScreenConfig()
+    for c in (alive, closed):
+        score_candidate(c, cfg)
+    passed, excluded = split_by_overlap([alive, closed], cfg)
+    assert [c.name for c in passed] == ["살아있는전기"]
+    assert "폐업" in excluded[0].overlap.reasons[-1]
+    assert "20250731" in excluded[0].overlap.reasons[-1]   # 언제 닫았는지도 남긴다
+
+
+def test_suspended_business_is_kept_but_flagged():
+    """휴업은 다시 열 수도 있다. 빼지 말고 '확인하실 점' 으로만 알린다."""
+    from prime_contractor.sources.nts import apply_statuses
+    cand = _cand("쉬는중전기", bizno="3333333333",
+                 awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
+    apply_statuses([cand], {"3333333333": {"code": "02", "label": "휴업자", "closed_at": ""}})
+    score_candidate(cand, ScreenConfig())
+    passed, _ = split_by_overlap([cand], ScreenConfig())
+    assert passed == [cand]
+    assert any("휴업" in c for c in cand.fitness.cautions)
+
+
+def test_keep_closed_option_leaves_them_in():
+    from prime_contractor.sources.nts import apply_statuses
+    cfg = ScreenConfig(drop_closed_businesses=False)
+    cand = _cand("문닫은전기", bizno="2222222222",
+                 awards=[Award(title="배전반 교체", amount=10**9, category="공사")])
+    apply_statuses([cand], {"2222222222": {"code": "03", "label": "폐업자", "closed_at": ""}})
+    score_candidate(cand, cfg)
+    passed, _ = split_by_overlap([cand], cfg)
+    assert passed == [cand]
+
+
+def test_status_check_runs_over_collected_biznos():
+    """낙찰 자료에 사업자번호가 같이 오므로 따로 입력받을 필요가 없다."""
+    cfg = ScreenConfig()
+    nts = _FakeNts({"1234567890": {"code": "03", "label": "폐업자", "closed_at": ""}})
+    result = run_screen(cfg, offline=False, g2b_client=_StubG2B(), nts_client=nts)
+    assert "1234567890" in nts.asked
+    assert any("폐업" in n for n in result.notes)
+    assert all(not c.business_closed for c in result.passed)
+
+
+class _StubG2B:
+    """낙찰 두 건만 돌려주는 가짜 나라장터."""
+
+    keyword_fallback: set = set()
+
+    def fetch_awards(self, **kw):
+        return [
+            Award(notice_no="1", title="정수장 배전반 교체공사", demand_org="A시",
+                  winner_name="문닫은전기", winner_bizno="123-45-67890",
+                  amount=10**9, category="공사"),
+            Award(notice_no="2", title="하수처리장 제어반 설치", demand_org="B시",
+                  winner_name="살아있는전기", winner_bizno="9999999999",
+                  amount=5 * 10**8, category="공사"),
+        ]
+
+
+def test_lookup_failure_does_not_stop_the_search(monkeypatch):
+    """상태 확인은 부가 정보다. 국세청이 응답 안 해도 탐색은 끝나야 한다."""
+    from prime_contractor.sources import nts as nts_module
+
+    class Boom:
+        def post(self, *a, **kw):
+            raise __import__("requests").RequestException("국세청 응답 없음")
+
+    client = nts_module.NtsClient("key", sleep_sec=0, session=Boom())
+    assert client.statuses(["1234567890"]) == {}

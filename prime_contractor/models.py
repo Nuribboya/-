@@ -54,9 +54,9 @@ class Candidate:
     ksic_code: str = ""           # DART 업종코드(한국표준산업분류)
     industry_name: str = ""
     ceo: str = ""
-    phone: str = ""
-    fax: str = ""
-    notice_url: str = ""          # 대표 공고 상세 페이지
+    business_status: str = ""     # 국세청 확인 (계속사업자/휴업자/폐업자)
+    business_closed: bool = False
+    status_note: str = ""
     homepage: str = ""
     established: str = ""
     corp_code: str = ""           # DART 고유번호
@@ -106,7 +106,7 @@ class Candidate:
         """같은 업체로 판정된 후보를 흡수한다. 빈 필드만 채운다."""
         for attr in (
             "bizno", "address", "ksic_code", "industry_name", "ceo",
-            "phone", "fax", "notice_url", "homepage", "established",
+            "business_status", "status_note", "homepage", "established",
             "corp_code", "region",
         ):
             if not getattr(self, attr) and getattr(other, attr):

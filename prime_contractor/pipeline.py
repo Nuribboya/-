@@ -13,11 +13,6 @@ from prime_contractor.sources.sample import SAMPLE_COMPANY_INFO, sample_awards
 
 log = logging.getLogger(__name__)
 
-def _clean_phone(value: str) -> str:
-    """'02)123-4567 ' 처럼 들쑥날쑥한 표기를 그대로 두되 공백만 정리한다."""
-    return " ".join((value or "").split())
-
-
 #: 발주기관 후보에서 빼는 이름 (판넬을 직접 사지 않는 기관)
 _ORG_STOPWORDS = ("교육청", "학교", "대학교", "경찰", "소방", "법원", "우체국", "도서관")
 
@@ -74,8 +69,6 @@ def enrich(cands: list[Candidate], dart_client=None, offline_info: dict | None =
             c.address = c.address or info.get("adres", "")
             c.ksic_code = c.ksic_code or info.get("induty_code", "")
             c.ceo = c.ceo or info.get("ceo_nm", "")
-            c.phone = c.phone or _clean_phone(info.get("phn_no", ""))
-            c.fax = c.fax or _clean_phone(info.get("fax_no", ""))
             c.homepage = c.homepage or info.get("hm_url", "")
             c.established = c.established or info.get("est_dt", "")
             c.corp_code = c.corp_code or info.get("corp_code", "")
@@ -142,8 +135,6 @@ def run_industry_screen(cfg: ScreenConfig, dart_client, limit: int | None = None
             address=info.get("adres", ""),
             ksic_code=info.get("induty_code", ""),
             ceo=info.get("ceo_nm", ""),
-            phone=_clean_phone(info.get("phn_no", "")),
-            fax=_clean_phone(info.get("fax_no", "")),
             homepage=info.get("hm_url", ""),
             established=info.get("est_dt", ""),
             corp_code=corp_code,
@@ -162,30 +153,8 @@ def run_industry_screen(cfg: ScreenConfig, dart_client, limit: int | None = None
     return result
 
 
-def attach_contacts(cands: list[Candidate], contacts: dict[str, dict[str, str]]) -> int:
-    """공고번호로 발주기관 문의처를 붙인다. 붙은 후보 수를 돌려준다.
-
-    낙찰업체 본인 연락처가 아니라 **그 공고를 낸 기관**의 문의처다. 발주처
-    후보에는 곧바로 쓸 수 있고, 시공사 후보에는 '어느 기관 일을 했는지'를
-    확인할 때 쓴다.
-    """
-    hit = 0
-    for c in cands:
-        for award in c.awards:
-            found = contacts.get(award.notice_no)
-            if not found:
-                continue
-            if c.kind == "demand_org" and not c.phone:
-                c.phone = found["phone"]
-            if not c.notice_url:
-                c.notice_url = found["notice_url"]
-            hit += 1
-            break
-    return hit
-
-
 def run_screen(cfg: ScreenConfig, offline: bool = False,
-               g2b_client=None, dart_client=None) -> ScreenResult:
+               g2b_client=None, dart_client=None, nts_client=None) -> ScreenResult:
     """전체 파이프라인 1회 실행."""
     result = ScreenResult()
 
@@ -210,17 +179,17 @@ def run_screen(cfg: ScreenConfig, offline: bool = False,
 
     cands = build_candidates(result.awards, include_demand_orgs=cfg.include_demand_orgs)
 
-    if cfg.with_contacts and not offline and g2b_client is not None:
-        try:
-            contacts = g2b_client.fetch_notice_contacts(
-                keywords=cfg.keywords, categories=cfg.categories, lookback_days=cfg.lookback_days)
-            hit = attach_contacts(cands, contacts)
-            result.notes.append(f"공고 문의처 {len(contacts)}건 확보 → {hit}곳에 연결")
-        except Exception as exc:              # 연락처는 부가 정보다. 실패해도 계속 간다.
-            log.warning("공고 연락처 조회 실패(계속 진행): %s", exc)
 
     result.notes += enrich(cands, dart_client=dart_client,
                            offline_info=SAMPLE_COMPANY_INFO if offline else None)
+
+    if nts_client is not None and not offline:
+        from prime_contractor.sources.nts import apply_statuses
+        checked, dead = apply_statuses(cands, nts_client.statuses([c.bizno for c in cands]))
+        if checked:
+            tail = " — 목록에서 뺐습니다" if dead and cfg.drop_closed_businesses else ""
+            result.notes.append(f"국세청에서 {checked}곳의 사업자 상태를 확인했습니다. "
+                                f"폐업 {dead}곳{tail}")
 
     for c in cands:
         score_candidate(c, cfg)

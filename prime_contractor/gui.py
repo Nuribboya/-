@@ -109,6 +109,7 @@ class App:
         self.mode = StringVar(value=remembered("mode", MODES, MODE_PUBLIC))
         self.g2b_key = StringVar(value=saved.get("g2b_key", ""))
         self.dart_key = StringVar(value=saved.get("dart_key", ""))
+        self.nts_key = StringVar(value=saved.get("nts_key", ""))
         self.days = StringVar(value=str(saved.get("days", 90)))
         self.distance = StringVar(
             value=remembered("distance", DISTANCE_CHOICES, _label_for(DISTANCE_CHOICES, 70.0)))
@@ -132,23 +133,28 @@ class App:
         ttk.Entry(box, textvariable=self.dart_key, width=46, show="•").grid(
             row=2, column=1, columnspan=2, sticky=W, pady=4)
 
-        ttk.Label(box, text="안성에서 얼마나").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
-                     state="readonly", width=18).grid(row=3, column=1, sticky=W, pady=4)
+        ttk.Label(box, text="폐업조회 인증키").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.nts_key, width=46, show="•").grid(
+            row=3, column=1, columnspan=2, sticky=W, pady=4)
+        ttk.Label(box, text="없어도 됩니다", foreground="#666").grid(row=3, column=3, sticky=W)
 
-        ttk.Label(box, text="업종 고르기").grid(row=3, column=2, sticky=W, padx=(20, 8))
+        ttk.Label(box, text="안성에서 얼마나").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
+                     state="readonly", width=18).grid(row=4, column=1, sticky=W, pady=4)
+
+        ttk.Label(box, text="업종 고르기").grid(row=4, column=2, sticky=W, padx=(20, 8))
         self.sector_box = ttk.Combobox(box, textvariable=self.sector,
                                        values=sector_names(load_config()),
                                        state="readonly", width=22)
-        self.sector_box.grid(row=3, column=3, sticky=W)
+        self.sector_box.grid(row=4, column=3, sticky=W)
 
-        ttk.Label(box, text="케이씨그룹과 겹치면").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="케이씨그룹과 겹치면").grid(row=5, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.overlap, values=list(OVERLAP_CHOICES),
-                     state="readonly", width=30).grid(row=4, column=1, columnspan=2,
+                     state="readonly", width=30).grid(row=5, column=1, columnspan=2,
                                                       sticky=W, pady=4)
 
         ttk.Checkbutton(box, text="관공서·공공기관도 같이 보기",
-                        variable=self.include_orgs).grid(row=4, column=3, sticky=W)
+                        variable=self.include_orgs).grid(row=5, column=3, sticky=W)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
@@ -335,6 +341,7 @@ class App:
             "mode": self.mode.get(),
             "g2b_key": self.g2b_key.get(),
             "dart_key": self.dart_key.get(),
+            "nts_key": self.nts_key.get(),
             "days": self.days.get(),
             "distance": self.distance.get(),
             "overlap": self.overlap.get(),
@@ -407,11 +414,16 @@ class App:
         else:
             from prime_contractor.sources.g2b import G2BClient
             self.say(f"나라장터에서 최근 {cfg.lookback_days}일치 공사를 찾아봅니다…")
-            dart = None
+            dart = nts = None
             if cfg.dart_api_key:
                 from prime_contractor.sources.dart import DartClient
                 dart = DartClient(cfg.dart_api_key)
-            result = run_screen(cfg, g2b_client=G2BClient(cfg.g2b_service_key), dart_client=dart)
+            if cfg.nts_service_key:
+                from prime_contractor.sources.nts import NtsClient
+                nts = NtsClient(cfg.nts_service_key)
+                self.say("폐업한 회사는 국세청에 확인해서 빼겠습니다.")
+            result = run_screen(cfg, g2b_client=G2BClient(cfg.g2b_service_key),
+                                dart_client=dart, nts_client=nts)
 
         sector = options.get("sector")
         if sector and sector != SECTOR_ALL:

@@ -51,6 +51,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="KC그룹과 같은 업종(반도체 등)도 제외 — 기본은 계열사만 제외")
     s.add_argument("--strict", action="store_true", help="인접 업종까지 전부 제외")
     s.add_argument("--no-demand-orgs", action="store_true", help="발주기관은 후보에서 뺀다")
+    s.add_argument("--keep-closed", action="store_true",
+                   help="폐업으로 확인된 곳도 목록에 남긴다 (기본은 뺀다)")
     s.add_argument("--include-excluded", action="store_true", help="CSV 에 제외 후보도 담는다")
     s.add_argument("-v", "--verbose", action="store_true")
 
@@ -207,9 +209,11 @@ def _cmd_screen(args) -> int:
         include_demand_orgs=False if args.no_demand_orgs else None,
         g2b_service_key=os.environ.get("G2B_SERVICE_KEY") or None,
         dart_api_key=os.environ.get("DART_API_KEY") or None,
+        nts_service_key=os.environ.get("NTS_SERVICE_KEY") or None,
+        drop_closed_businesses=False if args.keep_closed else None,
     )
 
-    g2b_client = dart_client = None
+    g2b_client = dart_client = nts_client = None
     if not args.offline:
         from prime_contractor.sources.g2b import G2BClient, G2BError
         try:
@@ -223,12 +227,19 @@ def _cmd_screen(args) -> int:
                 dart_client = DartClient(cfg.dart_api_key)
             except DartError as exc:
                 print(f"[경고] DART 보강 생략: {exc}", file=sys.stderr)
+        if cfg.nts_service_key:
+            from prime_contractor.sources.nts import NtsClient, NtsError
+            try:
+                nts_client = NtsClient(cfg.nts_service_key)
+            except NtsError as exc:
+                print(f"[경고] 사업자 상태 확인 생략: {exc}", file=sys.stderr)
 
     if args.nationwide:
         from dataclasses import replace
         cfg = replace(cfg, within_km=None)
 
-    result = run_screen(cfg, offline=args.offline, g2b_client=g2b_client, dart_client=dart_client)
+    result = run_screen(cfg, offline=args.offline, g2b_client=g2b_client,
+                        dart_client=dart_client, nts_client=nts_client)
     if args.sector:
         filter_sector(result, args.sector)
 

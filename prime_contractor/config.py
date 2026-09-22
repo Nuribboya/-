@@ -181,11 +181,13 @@ class ScreenConfig:
     min_awards: int = 1
     #: 발주기관(수요기관)도 후보에 넣을지
     include_demand_orgs: bool = True
-    #: 공고에서 발주기관 문의처까지 가져올지 (조회 시간이 대략 두 배가 된다)
-    with_contacts: bool = False
 
     dart_api_key: str = ""
     g2b_service_key: str = ""
+    #: 국세청 사업자 상태조회용 키. 공공데이터포털에서 무료로 받는다.
+    nts_service_key: str = ""
+    #: 폐업으로 확인된 곳을 목록에서 뺄지 (키가 있을 때만 동작)
+    drop_closed_businesses: bool = True
 
     #: 이 등급보다 낮으면 목록에서 뺀다 ("A"~"D"). None 이면 전부 보여 준다.
     min_grade: str | None = None
@@ -244,10 +246,12 @@ def _apply_json(cfg: ScreenConfig, raw: dict) -> ScreenConfig:
         patch["max_distance_km"] = float(raw["max_distance_km"])
     if "within_km" in raw:
         patch["within_km"] = None if raw["within_km"] is None else float(raw["within_km"])
-    for key in ("include_demand_orgs", "with_contacts"):
+    for key in ("include_demand_orgs",):
         if key in raw:
             patch[key] = bool(raw[key])
-    for key in ("dart_api_key", "g2b_service_key"):
+    if "drop_closed_businesses" in raw:
+        patch["drop_closed_businesses"] = bool(raw["drop_closed_businesses"])
+    for key in ("dart_api_key", "g2b_service_key", "nts_service_key"):
         if key in raw:
             patch[key] = str(raw[key])
     if "min_grade" in raw:

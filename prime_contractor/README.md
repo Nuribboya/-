@@ -136,6 +136,7 @@ DART 상장사 전체(2천여 곳)의 업종코드와 주소를 확인해서 후
 |---|---|---|
 | `G2B_SERVICE_KEY` | [공공데이터포털](https://www.data.go.kr/data/15129397/openapi.do) → 「조달청_나라장터 낙찰정보서비스」 활용신청 | 필수 |
 | `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) 인증키 신청 | 선택 |
+| `NTS_SERVICE_KEY` | [공공데이터포털](https://www.data.go.kr/data/15081808/openapi.do) → 「국세청_사업자등록정보 진위확인 및 상태조회」 | 선택 |
 
 두 키 모두 무료이고 신청 즉시(또는 1~2시간 내) 발급됩니다.
 조달청 키는 Encoding/Decoding 어느 쪽을 넣어도 됩니다 (퍼센트 인코딩을 자동으로 풀어 씁니다).

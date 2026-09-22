@@ -207,6 +207,8 @@ def _headline(cand: Candidate, est: int) -> str:
 
 def _cautions(cand: Candidate) -> list[str]:
     out = []
+    if cand.status_note:
+        out.append(cand.status_note)
     if cand.distance_km is None:
         out.append("주소를 못 찾아 거리를 못 쟀습니다. 회사 위치를 직접 확인해 보세요")
     if not cand.ksic_code:

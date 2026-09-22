@@ -48,7 +48,11 @@ def split_by_overlap(cands: list[Candidate], cfg: ScreenConfig) -> tuple[list[Ca
                    and c.distance_km is not None
                    and c.distance_km > cfg.within_km)
 
-        if c.overlap.rank > cfg.max_overlap_rank:
+        if c.business_closed and cfg.drop_closed_businesses:
+            # 폐업한 곳은 점수가 아무리 높아도 연락할 이유가 없다.
+            c.overlap.reasons.append(c.status_note or "국세청 확인: 폐업")
+            excluded.append(c)
+        elif c.overlap.rank > cfg.max_overlap_rank:
             excluded.append(c)
         elif too_far:
             c.overlap.reasons.append(

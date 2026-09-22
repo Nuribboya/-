@@ -67,7 +67,7 @@ CSV_HEADER = [
     "판넬일감 점수", "일감크기 점수", "거리 점수", "꾸준함 점수", "안전 점수",
     "판넬일감 근거", "일감크기 근거", "거리 근거", "꾸준함 근거", "안전 근거",
     "지역", "안성에서(km)", "따낸 공사 수", "공사비 합계(원)",
-    "사업자번호", "업종코드", "주소", "대표자",
+    "사업자번호", "사업자 상태", "업종코드", "주소", "대표자",
     "케이씨그룹과", "판정 이유", "대표 공사명", "확인하실 점",
 ]
 
@@ -109,7 +109,8 @@ def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = F
                 _axis_detail(fit, "access"), _axis_detail(fit, "repeat"),
                 _axis_detail(fit, "safety"),
                 c.region, "" if c.distance_km is None else c.distance_km,
-                c.award_count, c.award_amount, c.bizno, c.ksic_code, c.address, c.ceo,
+                c.award_count, c.award_amount, c.bizno,
+                c.business_status or "확인 안 함", c.ksic_code, c.address, c.ceo,
                 c.overlap.label if c.overlap else "",
                 "; ".join(c.overlap.reasons) if c.overlap else "",
                 c.awards[0].title if c.awards else "",
