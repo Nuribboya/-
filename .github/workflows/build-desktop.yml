@@ -7,6 +7,9 @@ on:
       - 'sales_report/**'
       - '.github/workflows/build-desktop.yml'
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     # electron-builder 의 윈도우 타깃은 윈도우 러너에서만 서명·패키징이 끝까지 돌아갑니다.
@@ -26,6 +29,19 @@ jobs:
       - run: npm ci
 
       - run: npm run build
+
+      # Actions 의 artifact 는 공개 저장소라도 로그인해야 받을 수 있어서,
+      # 로그인 없이 받을 수 있는 고정 주소를 만들려고 릴리스에도 올립니다.
+      - name: 릴리스 갱신
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view desktop-latest >/dev/null 2>&1 || \
+            gh release create desktop-latest \
+              --title "매출 목표 페이스 — 윈도우 설치 파일" \
+              --notes "최신 빌드입니다. maechul-pace-setup.exe 를 내려받아 실행하세요. 서명 인증서가 없어 처음 실행할 때 Windows 경고가 뜨면 '추가 정보 → 실행' 을 누르면 됩니다."
+          gh release upload desktop-latest dist/maechul-pace-setup.exe --clobber
 
       - uses: actions/upload-artifact@v4
         with:

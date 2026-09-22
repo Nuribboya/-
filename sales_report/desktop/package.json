@@ -31,7 +31,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "매출 목표 페이스",
       "installerLanguages": ["ko-KR"],
-      "language": "1042"
+      "language": "1042",
+      "artifactName": "maechul-pace-setup.exe"
     }
   }
 }
