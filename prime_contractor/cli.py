@@ -44,6 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pr = sub.add_parser("probe", help="어떤 API 경로가 살아있고 건수가 잡히는지 진단")
     pr.add_argument("--days", type=int, default=7, help="진단에 쓸 조회 기간(일)")
     pr.add_argument("--keyword", default="자동제어", help="검색 지원 여부를 볼 샘플 키워드")
+    pr.add_argument("--dump", action="store_true", help="응답 1건의 실제 항목과 값을 그대로 출력")
 
     d = sub.add_parser("dart-lookup", help="상호로 DART 업종코드·주소를 조회 (설정값 검증용)")
     d.add_argument("names", nargs="+")
@@ -97,10 +98,14 @@ def _cmd_probe(args) -> int:
         print(f"[오류] {exc}", file=sys.stderr)
         return 2
     print("■ 나라장터 낙찰정보 API 진단")
-    for line in client.diagnose(cfg.categories, sample_keyword=args.keyword, days=args.days):
+    for line in client.diagnose(cfg.categories, sample_keyword=args.keyword,
+                                days=args.days, dump=args.dump):
         print(line)
-    print("\n해석: '전체 N건' 이 0이면 경로/기간 문제, 전체는 있는데 "
-          "'키워드 검색 0건' 이면 공고명 검색 미지원입니다(자동으로 전체 수집으로 전환됩니다).")
+    print("\n해석")
+    print("  '전체 N건' 이 0      → 경로 또는 기간 문제")
+    print("  '낙찰업체 추출 실패' → 그 오퍼레이션엔 업체명이 없음 (다른 쪽을 자동으로 씁니다)")
+    print("  '키워드 검색 0건'    → 그 기간에 없었거나 공고명 검색 미지원")
+    print("  값을 직접 보려면: python -m prime_contractor.cli probe --dump")
     return 0
 
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -39,6 +40,15 @@ BIDNOTICE_BASES = (
 CATEGORY_SUFFIX = {"cnstwk": "Cnstwk", "servc": "Servc", "thng": "Thng"}
 CATEGORY_LABEL = {"cnstwk": "공사", "servc": "용역", "thng": "물품"}
 
+#: 오퍼레이션 후보. 낙찰자 정보(업체명·금액)를 주는 '낙찰목록현황'을 먼저 쓰고,
+#: 안 되면 '개찰결과'로 물러선다. 개찰결과는 업체 정보가 opengCorpInfo 한 칸에
+#: 뭉쳐 들어오고 낙찰금액 항목이 없어서 정보량이 적다.
+OP_TEMPLATES = ("getScsbidListSttus{}PPSSrch", "getOpengResultListInfo{}PPSSrch")
+
+
+def ops_for(category: str) -> tuple[str, ...]:
+    return tuple(t.format(CATEGORY_SUFFIX[category]) for t in OP_TEMPLATES)
+
 #: 날짜 파라미터 방식이 오퍼레이션마다 달라 두 가지를 모두 시도한다.
 DATE_STYLES = (
     ("inqryBgnDt", "inqryEndDt", "%Y%m%d%H%M"),
@@ -47,14 +57,20 @@ DATE_STYLES = (
 
 #: 응답 필드명 후보 (앞에서부터 첫 유효값)
 WINNER_FIELDS = {
-    "winner_name": ("bidwinnrNm", "opengCorpNm", "corpNm", "prcbdrNm"),
-    "winner_bizno": ("bidwinnrBizno", "bizno", "prcbdrBizno"),
-    "amount": ("sucsfbidAmt", "bidwinnrAmt", "opengAmt", "presmptPrce"),
+    "winner_name": ("bidwinnrNm", "opengCorpNm", "corpNm", "prcbdrNm", "scsbidCorpNm"),
+    "winner_bizno": ("bidwinnrBizno", "bizno", "prcbdrBizno", "corpBizno"),
+    "amount": ("sucsfbidAmt", "bidwinnrAmt", "opengAmt", "sucsfbidPrce", "presmptPrce"),
     "notice_no": ("bidNtceNo",),
     "title": ("bidNtceNm", "bidNtceNmDtls"),
     "demand_org": ("dminsttNm", "rlDminsttNm", "ntceInsttNm"),
     "opening_dt": ("opengDt", "rlOpengDt", "fnlSucsfDt"),
 }
+
+#: 개찰결과 응답은 낙찰업체를 이 한 칸에 몰아 넣는다. 형식이 문서로 공개돼 있지
+#: 않아 dict / list / 구분자 문자열을 모두 받아 본다.
+CORP_INFO_FIELD = "opengCorpInfo"
+_CORP_NAME_KEYS = ("bidwinnrNm", "corpNm", "cmpnyNm", "opengCorpNm", "prcbdrNm")
+_CORP_BIZNO_KEYS = ("bidwinnrBizno", "bizno", "corpBizno", "prcbdrBizno")
 
 
 class G2BError(RuntimeError):
@@ -73,9 +89,31 @@ class ApiPage:
 def _pick(item: dict, names: tuple[str, ...]) -> str:
     for n in names:
         v = item.get(n)
-        if v not in (None, "", "null"):
-            return str(v).strip()
+        if v in (None, "", "null") or isinstance(v, (dict, list)):
+            continue
+        return str(v).strip()
     return ""
+
+
+def _corp_info(item: dict) -> tuple[str, str]:
+    """opengCorpInfo 에서 (업체명, 사업자번호)를 최대한 뽑아낸다.
+
+    JSON 이면 dict/list 로, 아니면 '업체명|사업자번호|...' 류의 구분자 문자열로
+    온다. 어느 쪽으로도 못 읽으면 빈 값을 주고 호출부가 그 건을 버린다.
+    """
+    raw = item.get(CORP_INFO_FIELD)
+    if raw in (None, "", "null"):
+        return "", ""
+    if isinstance(raw, list):
+        raw = raw[0] if raw else {}
+    if isinstance(raw, dict):
+        return _pick(raw, _CORP_NAME_KEYS), _pick(raw, _CORP_BIZNO_KEYS)
+
+    parts = [t.strip() for t in re.split(r"[|^\t]|,\s", str(raw)) if t.strip()]
+    name = next((t for t in parts if not t.replace("-", "").isdigit()), "")
+    bizno = next((t for t in parts
+                  if t.replace("-", "").isdigit() and len(t.replace("-", "")) == 10), "")
+    return name, bizno
 
 
 def _to_int(text: str) -> int:
@@ -151,8 +189,13 @@ class G2BClient:
         time.sleep(self.sleep_sec)          # 명세상 30 tps 제한
         return _parse(resp.text)
 
-    def _variants(self, bases: tuple[str, ...], op: str) -> list[tuple[str, tuple[str, str, str]]]:
-        return [(f"{base}/{op}", style) for base in bases for style in DATE_STYLES]
+    def _variants(self, bases: tuple[str, ...],
+                  ops: tuple[str, ...]) -> list[tuple[str, tuple[str, str, str]]]:
+        if isinstance(ops, str):
+            # 문자열도 iterable 이라 한 글자씩 돌며 엉뚱한 URL을 조용히 만든다.
+            raise TypeError("ops 는 오퍼레이션 이름들의 튜플이어야 합니다 (문자열 아님)")
+        return [(f"{base}/{op}", style)
+                for op in ops for base in bases for style in DATE_STYLES]
 
     def _try_variant(self, url: str, style: tuple[str, str, str],
                      begin: datetime, end: datetime, keyword: str = "") -> ApiPage | str:
@@ -167,68 +210,81 @@ class G2BClient:
         except (requests.RequestException, ValueError, ET.ParseError) as exc:
             return f"{type(exc).__name__}: {exc}"
 
-    def _resolve(self, key: str, bases: tuple[str, ...], op: str,
+    def _resolve(self, key: str, bases: tuple[str, ...], ops: tuple[str, ...],
                  begin: datetime, end: datetime) -> tuple[str, tuple[str, str, str]]:
-        """살아있는 (URL, 날짜방식) 조합을 찾아 캐시한다.
+        """쓸 만한 (URL, 날짜방식) 조합을 찾아 캐시한다.
 
-        응답코드가 정상이어도 건수가 0이면 '경로는 살아있지만 조회 조건이 안 맞는'
-        상태다. 그런 조합을 덜컥 채택하면 전체 수집이 조용히 0건으로 끝나므로,
-        **실제로 건수가 잡히는 조합을 우선** 고른다.
+        경로가 살아있는 것만으로는 부족하다. 오퍼레이션에 따라 낙찰업체명이 아예
+        안 들어오기도 해서(개찰결과 계열), **업체명이 실제로 뽑히는 조합**을 최우선
+        으로 고른다. 등급은 이렇다.
+
+            3 - 정상 + 건수 있음 + 업체명 추출됨   ← 원하는 것
+            2 - 정상 + 건수 있음 (업체명 없음)
+            1 - 정상이지만 0건
         """
         if key in self._resolved:
             return self._resolved[key]
 
-        fallback: tuple[str, tuple[str, str, str]] | None = None
         notes: list[str] = []
-        for url, style in self._variants(bases, op):
+        best: tuple[int, str, tuple[str, str, str]] | None = None
+        for url, style in self._variants(bases, ops):
             outcome = self._try_variant(url, style, begin, end)
-            label = f"  {url} [{style[0]}]"
+            label = f"  {url.rsplit('/1230000/', 1)[-1]} [{style[0]}]"
             if isinstance(outcome, str):
                 notes.append(f"{label} → {outcome}")
                 continue
             if not outcome.ok:
                 notes.append(f"{label} → {outcome.result_code} {outcome.result_msg}")
                 continue
-            notes.append(f"{label} → OK, 총 {outcome.total_count}건")
-            if outcome.total_count > 0:
-                self._resolved[key] = (url, style)
-                self.last_probe += notes
-                return url, style
-            if fallback is None:
-                fallback = (url, style)
+            if not outcome.total_count or not outcome.items:
+                notes.append(f"{label} → OK, 0건")
+                grade = 1
+            else:
+                has_name = bool(_to_award(outcome.items[0], "servc", "").winner_name)
+                grade = 3 if has_name else 2
+                notes.append(f"{label} → OK, {outcome.total_count}건, "
+                             f"업체명 {'확인' if has_name else '없음'}")
+            if best is None or grade > best[0]:
+                best = (grade, url, style)
+            if grade == 3:
+                break                       # 더 볼 필요 없다
 
         self.last_probe += notes
-        if fallback is not None:
-            log.warning("[%s] 응답은 정상인데 건수가 0입니다. 조회 조건을 확인하세요.", key)
-            self._resolved[key] = fallback
-            return fallback
-        raise G2BError(f"[{key}] 사용 가능한 오퍼레이션을 찾지 못했습니다:\n" + "\n".join(notes))
+        if best is None:
+            raise G2BError(f"[{key}] 사용 가능한 오퍼레이션을 찾지 못했습니다:\n" + "\n".join(notes))
+        grade, url, style = best
+        if grade < 3:
+            log.warning("[%s] 낙찰업체명이 확인되지 않는 조합을 씁니다(등급 %s). "
+                        "probe --dump 로 응답을 확인해 보세요.", key, grade)
+        self._resolved[key] = (url, style)
+        return url, style
 
     def supports_keyword(self, url: str, style: tuple[str, str, str],
-                         begin: datetime, end: datetime, keyword: str) -> bool:
-        """이 오퍼레이션이 공고명 부분검색(bidNtceNm)을 실제로 지원하는지 확인.
+                         begin: datetime, end: datetime) -> bool:
+        """공고명 검색(bidNtceNm)이 실제로 먹히는지 확인.
 
-        명세에 없는 파라미터를 넘기면 에러가 아니라 '0건'으로 조용히 돌아오는
-        경우가 있다. 키워드를 넣은 결과와 안 넣은 결과를 비교해서 판단한다.
+        명세에 없는 파라미터는 에러가 아니라 그냥 '무시'되기도 한다. 그래서 실제
+        키워드가 아니라 **있을 리 없는 문자열**을 넣어 본다. 건수가 그대로면
+        파라미터가 무시된 것이고, 줄어들면 제대로 걸러진 것이다. 실제 키워드로
+        재면 '그 기간에 그런 공고가 없었을 뿐'인 경우와 구분이 안 된다.
         """
         plain = self._try_variant(url, style, begin, end)
         if isinstance(plain, str) or not plain.ok or plain.total_count == 0:
-            return True          # 비교 기준 자체가 없으면 판단 보류 (원래대로 진행)
-        keyed = self._try_variant(url, style, begin, end, keyword=keyword)
-        if isinstance(keyed, str) or not keyed.ok:
+            return True                     # 비교 기준이 없으면 판단 보류
+        probe = self._try_variant(url, style, begin, end, keyword="없을법한공고명ZZQX")
+        if isinstance(probe, str) or not probe.ok:
             return False
-        return keyed.total_count > 0
+        return probe.total_count < plain.total_count
 
     def diagnose(self, categories: tuple[str, ...], sample_keyword: str = "자동제어",
-                 days: int = 7, end: datetime | None = None) -> list[str]:
-        """어떤 경로가 살아있고 건수가 잡히는지 그대로 찍어 준다 (문제 파악용)."""
+                 days: int = 7, end: datetime | None = None, dump: bool = False) -> list[str]:
+        """어떤 경로가 살아있고 무엇이 들어오는지 그대로 찍어 준다 (문제 파악용)."""
         end = end or datetime.now()
         begin = end - timedelta(days=days)
         lines = [f"조회창: {begin:%Y-%m-%d} ~ {end:%Y-%m-%d} / 샘플 키워드: {sample_keyword}"]
         for cat in categories:
-            op = f"getOpengResultListInfo{CATEGORY_SUFFIX[cat]}PPSSrch"
-            lines.append(f"\n[{CATEGORY_LABEL[cat]}] {op}")
-            for url, style in self._variants(SCSBID_BASES, op):
+            lines.append(f"\n[{CATEGORY_LABEL[cat]}]")
+            for url, style in self._variants(SCSBID_BASES, ops_for(cat)):
                 outcome = self._try_variant(url, style, begin, end)
                 tag = f"  {url.rsplit('/1230000/', 1)[-1]} [{style[0]}]"
                 if isinstance(outcome, str):
@@ -239,10 +295,13 @@ class G2BClient:
                     continue
                 keyed = self._try_variant(url, style, begin, end, keyword=sample_keyword)
                 keyed_cnt = keyed.total_count if isinstance(keyed, ApiPage) and keyed.ok else "실패"
+                award = _to_award(outcome.items[0], cat, "") if outcome.items else None
+                got = f"낙찰업체 '{award.winner_name}'" if award and award.winner_name else "낙찰업체 추출 실패"
                 lines.append(f"{tag} → OK, 전체 {outcome.total_count}건 / "
-                             f"'{sample_keyword}' 검색 {keyed_cnt}건")
-                if outcome.items:
-                    lines.append("      응답 필드: " + ", ".join(sorted(outcome.items[0])[:14]))
+                             f"'{sample_keyword}' 검색 {keyed_cnt}건 / {got}")
+                if dump and outcome.items:
+                    for k, v in sorted(outcome.items[0].items()):
+                        lines.append(f"      {k} = {str(v)[:70]}")
         return lines
 
     def _paged(self, url: str, base_params: dict):
@@ -279,15 +338,15 @@ class G2BClient:
         seen: set[tuple[str, str]] = set()
 
         for cat in categories:
-            op = f"getOpengResultListInfo{CATEGORY_SUFFIX[cat]}PPSSrch"
             try:
-                url, style = self._resolve(f"scsbid:{cat}", SCSBID_BASES, op, end - timedelta(days=7), end)
+                url, style = self._resolve(f"scsbid:{cat}", SCSBID_BASES, ops_for(cat),
+                                           end - timedelta(days=7), end)
             except G2BError as exc:
                 log.warning("%s 낙찰 조회 불가: %s", CATEGORY_LABEL[cat], exc)
                 continue
 
             bgn_p, end_p, fmt = style
-            keyword_ok = self.supports_keyword(url, style, end - timedelta(days=7), end, keywords[0])
+            keyword_ok = self.supports_keyword(url, style, end - timedelta(days=7), end)
             if not keyword_ok:
                 log.warning("[%s] 공고명 검색이 먹히지 않아 전체를 받아 직접 걸러냅니다 "
                             "(시간이 더 걸립니다).", CATEGORY_LABEL[cat])
@@ -322,12 +381,17 @@ class G2BClient:
 
 
 def _to_award(item: dict, category: str, keyword: str) -> Award:
+    name = _pick(item, WINNER_FIELDS["winner_name"])
+    bizno = _pick(item, WINNER_FIELDS["winner_bizno"])
+    if not name:
+        name, info_bizno = _corp_info(item)
+        bizno = bizno or info_bizno
     return Award(
         notice_no=_pick(item, WINNER_FIELDS["notice_no"]),
         title=_pick(item, WINNER_FIELDS["title"]),
         demand_org=_pick(item, WINNER_FIELDS["demand_org"]),
-        winner_name=_pick(item, WINNER_FIELDS["winner_name"]),
-        winner_bizno=_pick(item, WINNER_FIELDS["winner_bizno"]),
+        winner_name=name,
+        winner_bizno=bizno,
         amount=_to_int(_pick(item, WINNER_FIELDS["amount"])),
         opening_dt=_pick(item, WINNER_FIELDS["opening_dt"]),
         category=CATEGORY_LABEL.get(category, category),

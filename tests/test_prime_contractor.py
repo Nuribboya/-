@@ -289,7 +289,7 @@ def test_resolve_prefers_variant_that_actually_returns_rows():
     from datetime import datetime, timedelta
     end = datetime(2026, 9, 1)
     url, style = client._resolve("scsbid:cnstwk", g2b.SCSBID_BASES,
-                                 "getOpengResultListInfoCnstwkPPSSrch", end - timedelta(days=7), end)
+                                 g2b.ops_for("cnstwk"), end - timedelta(days=7), end)
     assert style[0] == "inqryBgnDate"
 
 
@@ -299,34 +299,89 @@ def test_resolve_falls_back_to_zero_row_variant_rather_than_failing():
     from datetime import datetime, timedelta
     end = datetime(2026, 9, 1)
     url, style = client._resolve("scsbid:servc", g2b.SCSBID_BASES,
-                                 "getOpengResultListInfoServcPPSSrch", end - timedelta(days=7), end)
+                                 g2b.ops_for("servc"), end - timedelta(days=7), end)
     assert url.startswith("http://apis.data.go.kr/1230000/")
 
 
-def test_supports_keyword_detects_silent_zero_result():
-    """명세에 없는 파라미터는 에러가 아니라 0건으로 조용히 돌아온다."""
+def test_supports_keyword_detects_ignored_parameter():
+    """명세에 없는 파라미터는 에러가 아니라 '무시'된다 — 건수가 그대로다."""
+    client = _client(lambda url, params: _envelope([{"bidwinnrNm": "갑사"}], total=500))
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    assert client.supports_keyword(
+        "http://x/op", g2b.DATE_STYLES[0], end - timedelta(days=7), end) is False
+
+
+def test_supports_keyword_true_when_unknown_term_returns_nothing():
     def handler(url, params):
-        if "bidNtceNm" in params:
-            return _envelope([], total=0)
+        if params.get("bidNtceNm"):
+            return _envelope([], total=0)          # 없는 공고명 → 제대로 0건
         return _envelope([{"bidwinnrNm": "갑사"}], total=500)
 
     client = _client(handler)
     from datetime import datetime, timedelta
     end = datetime(2026, 9, 1)
     assert client.supports_keyword(
-        "http://x/op", g2b.DATE_STYLES[0], end - timedelta(days=7), end, "자동제어") is False
+        "http://x/op", g2b.DATE_STYLES[0], end - timedelta(days=7), end) is True
+
+
+def test_resolve_prefers_operation_that_exposes_winner_name():
+    """개찰결과 계열은 낙찰업체명이 안 들어온다. 업체명이 나오는 쪽을 골라야 한다."""
+    def handler(url, params):
+        if "getScsbidListSttus" in url:
+            return _envelope([{"bidNtceNo": "1", "bidwinnrNm": "갑전기"}], total=10)
+        return _envelope([{"bidNtceNo": "1", "progrsDivCdNm": "개찰완료"}], total=99)
+
+    client = _client(handler)
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    url, _ = client._resolve("scsbid:cnstwk", g2b.SCSBID_BASES, g2b.ops_for("cnstwk"),
+                             end - timedelta(days=7), end)
+    assert "getScsbidListSttus" in url
+
+
+def test_resolve_settles_for_opening_result_when_nothing_better():
+    """업체명이 안 나와도 유일하게 응답하는 경로라면 일단 쓴다 (경고만)."""
+    def handler(url, params):
+        if "getScsbidListSttus" in url:
+            return _envelope([], total=0)
+        return _envelope([{"bidNtceNo": "1", "progrsDivCdNm": "개찰완료"}], total=99)
+
+    client = _client(handler)
+    from datetime import datetime, timedelta
+    end = datetime(2026, 9, 1)
+    url, _ = client._resolve("scsbid:servc", g2b.SCSBID_BASES, g2b.ops_for("servc"),
+                             end - timedelta(days=7), end)
+    assert "getOpengResultListInfo" in url
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ({"bidwinnrNm": "(주)한빛전기", "bidwinnrBizno": "1234567890"}, ("(주)한빛전기", "1234567890")),
+    ([{"corpNm": "대성설비"}], ("대성설비", "")),
+    ("가나전기^2211133344", ("가나전기", "2211133344")),
+    ("(주)한빛전기|1234567890|홍길동", ("(주)한빛전기", "1234567890")),
+    ("", ("", "")),
+])
+def test_openg_corp_info_parsed_from_various_shapes(raw, expected):
+    """개찰결과는 낙찰업체를 opengCorpInfo 한 칸에 몰아 넣는다. 형식이 제각각이다."""
+    assert g2b._corp_info({"opengCorpInfo": raw} if raw != "" else {}) == expected
+
+
+def test_award_falls_back_to_corp_info_when_winner_field_absent():
+    award = g2b._to_award(
+        {"bidNtceNo": "7", "bidNtceNm": "정수장 자동제어", "opengCorpInfo": "가나전기^2211133344"},
+        "servc", "자동제어")
+    assert award.winner_name == "가나전기" and award.winner_bizno == "2211133344"
 
 
 def test_fetch_awards_filters_titles_locally_when_keyword_unsupported():
     rows = [
-        {"bidNtceNo": "1", "bidNtceNm": "정수장 자동제어설비 공사", "bidwinnrNm": "갑전기", "sucsfbidAmt": "100"},
-        {"bidNtceNo": "2", "bidNtceNm": "청사 화단 조경공사", "bidwinnrNm": "을조경", "sucsfbidAmt": "200"},
-        {"bidNtceNo": "3", "bidNtceNm": "배전반 교체", "bidwinnrNm": "병전기", "sucsfbidAmt": "300"},
+        {"bidNtceNo": "1", "bidNtceNm": "정수장 자동제어설비 공사", "bidwinnrNm": "갑전기"},
+        {"bidNtceNo": "2", "bidNtceNm": "청사 화단 조경공사", "bidwinnrNm": "을조경"},
+        {"bidNtceNo": "3", "bidNtceNm": "배전반 교체", "bidwinnrNm": "병전기"},
     ]
 
-    def handler(url, params):
-        if "bidNtceNm" in params:
-            return _envelope([], total=0)        # 키워드 검색 미지원
+    def handler(url, params):                      # bidNtceNm 을 통째로 무시한다
         if params.get("numOfRows") == "1":
             return _envelope(rows[:1], total=len(rows))
         return _envelope(rows, total=len(rows))
@@ -335,18 +390,20 @@ def test_fetch_awards_filters_titles_locally_when_keyword_unsupported():
     from datetime import datetime
     awards = client.fetch_awards(keywords=("자동제어", "배전반"), categories=("cnstwk",),
                                  lookback_days=10, end=datetime(2026, 9, 1))
-    names = {a.winner_name for a in awards}
-    assert names == {"갑전기", "병전기"}          # 조경공사는 걸러진다
+    assert {a.winner_name for a in awards} == {"갑전기", "병전기"}   # 조경공사는 걸러진다
     assert "cnstwk" in client.keyword_fallback
 
 
 def test_fetch_awards_uses_server_side_search_when_supported():
     def handler(url, params):
-        if params.get("bidNtceNm") == "자동제어":
+        kw = params.get("bidNtceNm")
+        if kw == "자동제어":
             return _envelope([{"bidNtceNo": "1", "bidNtceNm": "자동제어 공사",
-                               "bidwinnrNm": "갑전기", "sucsfbidAmt": "100"}], total=1)
+                               "bidwinnrNm": "갑전기"}], total=1)
+        if kw:
+            return _envelope([], total=0)          # 그 밖의 검색어는 0건
         return _envelope([{"bidNtceNo": "9", "bidNtceNm": "아무거나",
-                           "bidwinnrNm": "무관사", "sucsfbidAmt": "1"}], total=1)
+                           "bidwinnrNm": "무관사"}], total=50)
 
     client = _client(handler)
     from datetime import datetime
@@ -360,3 +417,10 @@ def test_empty_result_table_explains_what_to_check():
     from prime_contractor.pipeline import ScreenResult
     table = render_table(ScreenResult())
     assert "probe" in table and "승인" in table
+
+
+def test_variants_rejects_a_bare_string_operation():
+    """문자열을 넘기면 한 글자씩 순회해 엉뚱한 URL이 조용히 만들어진다."""
+    client = _client(lambda url, params: _envelope([]))
+    with pytest.raises(TypeError):
+        client._variants(g2b.SCSBID_BASES, "getScsbidListSttusServcPPSSrch")
