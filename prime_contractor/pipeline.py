@@ -78,6 +78,11 @@ def enrich(cands: list[Candidate], dart_client=None, offline_info: dict | None =
         region, dist = distance_from_home(c.address or c.name)
         c.region, c.distance_km = region, dist
 
+    if dart_client is not None and hasattr(dart_client, "save_company_cache"):
+        try:
+            dart_client.save_company_cache()      # 다음 조회 때 같은 회사는 바로 나온다
+        except OSError:
+            pass
     contractors = sum(1 for c in cands if c.kind == "contractor")
     if contractors:
         notes.append(f"업종·주소 보강: {hit}/{contractors}개사 (DART 미등록 업체는 상호·공고명 기반으로만 판정)")

@@ -124,6 +124,7 @@ class App:
             value=remembered("overlap", OVERLAP_CHOICES, list(OVERLAP_CHOICES)[0]))
         self.sector = StringVar(value=saved.get("sector", SECTOR_ALL))
         self.include_orgs = BooleanVar(value=saved.get("include_demand_orgs", True))
+        self.fresh = BooleanVar(value=False)
 
         ttk.Label(box, text="어디서 찾을까요").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.mode, values=list(MODES),
@@ -162,6 +163,8 @@ class App:
 
         ttk.Checkbutton(box, text="관공서·공공기관도 같이 보기",
                         variable=self.include_orgs).grid(row=5, column=3, sticky=W)
+        ttk.Checkbutton(box, text="저장해 둔 결과 무시하고 전부 새로 받기 (느림)",
+                        variable=self.fresh).grid(row=6, column=1, columnspan=3, sticky=W)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
@@ -616,8 +619,11 @@ class App:
                 from prime_contractor.sources.nts import NtsClient
                 nts = NtsClient(cfg.nts_service_key)
                 self.say("폐업한 회사는 국세청에 확인해서 빼겠습니다.")
-            result = run_screen(cfg, g2b_client=G2BClient(cfg.g2b_service_key),
-                                dart_client=dart, nts_client=nts)
+            from prime_contractor.sources.g2b import default_cache_dir
+            g2b = G2BClient(cfg.g2b_service_key, cache_dir=default_cache_dir())
+            if self.fresh.get() and g2b.cache:
+                self.say(f"저장해 둔 조회 결과 {g2b.cache.clear()}건을 지우고 새로 받습니다.")
+            result = run_screen(cfg, g2b_client=g2b, dart_client=dart, nts_client=nts)
 
         sector = options.get("sector")
         if sector and sector != SECTOR_ALL:

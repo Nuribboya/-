@@ -1601,3 +1601,118 @@ def test_screen_cli_takes_our_revenue_from_the_ledger(tmp_path, capsys):
     path.write_text("연월,매출\n2026-06,100000000\n2026-07,100000000\n", encoding="utf-8")
     assert cli.main(["screen", "--offline", "--sales", str(path), "--explain", "포스코"]) == 0
     assert "우리 월매출의" in capsys.readouterr().out
+
+
+# --- 빠르게: 동시 조회·결과 저장·검색어 정리 ---------------------------------------
+
+def _speed_handler(fail_keyword=None):
+    def handler(url, params):
+        kw = params.get("bidNtceNm")
+        if kw == "없을법한공고명ZZQX":
+            return _envelope([], total=0)
+        if kw and kw == fail_keyword:
+            raise __import__("requests").RequestException("일시 오류")
+        if kw:
+            return _envelope([{"bidNtceNo": f"{kw}-{params.get('inqryBgnDt')}",
+                               "bidNtceNm": f"정수장 {kw} 공사", "bidwinnrNm": f"{kw}전기"}])
+        return _envelope([{"bidNtceNo": "0", "bidNtceNm": "정수장 배전반",
+                           "bidwinnrNm": "갑전기"}], total=50)
+    return handler
+
+
+def test_parallel_fetch_gives_the_same_result_as_one_at_a_time():
+    """동시에 부르면 끝나는 순서가 매번 다르다. 결과와 순서는 늘 같아야 한다."""
+    from datetime import datetime
+    end = datetime(2026, 9, 23)
+    kws = ("자동제어", "배전반", "계장")
+    one = g2b.G2BClient("k", sleep_sec=0, workers=1, session=FakeSession(_speed_handler()))
+    many = g2b.G2BClient("k", sleep_sec=0, workers=8, session=FakeSession(_speed_handler()))
+    a = one.fetch_awards(kws, ("cnstwk", "servc"), lookback_days=60, end=end)
+    b = many.fetch_awards(kws, ("cnstwk", "servc"), lookback_days=60, end=end)
+    assert [(x.notice_no, x.winner_name) for x in a] == [(x.notice_no, x.winner_name) for x in b]
+    assert a
+
+
+def test_second_search_reuses_settled_windows(tmp_path):
+    """끝난 낙찰은 안 바뀐다. 지난 구간은 저장분을 쓰고, 최근 구간만 새로 부른다."""
+    from datetime import datetime
+    end = datetime(2026, 9, 23)
+    kws = ("자동제어", "배전반")
+    first_session = FakeSession(_speed_handler())
+    first = g2b.G2BClient("k", sleep_sec=0, session=first_session, cache_dir=tmp_path)
+    got1 = first.fetch_awards(kws, ("cnstwk",), lookback_days=90, end=end)
+
+    second_session = FakeSession(_speed_handler())
+    second = g2b.G2BClient("k", sleep_sec=0, session=second_session, cache_dir=tmp_path)
+    got2 = second.fetch_awards(kws, ("cnstwk",), lookback_days=90, end=end)
+
+    assert {(a.notice_no, a.winner_name) for a in got1} == \
+           {(a.notice_no, a.winner_name) for a in got2}
+    # 두 번째에는 길 찾기도 저장분으로 건너뛰고, 마지막(최근) 구간의 검색어만 부른다
+    assert len(second_session.calls) == len(kws)
+    assert len(second_session.calls) < len(first_session.calls) / 5
+
+
+def test_recent_window_is_never_served_from_cache(tmp_path):
+    """최근 며칠은 늦게 등록되는 건이 있어 저장하지 않는다."""
+    from datetime import datetime
+    end = datetime(2026, 9, 23)
+    for _ in range(2):
+        sess = FakeSession(_speed_handler())
+        g2b.G2BClient("k", sleep_sec=0, session=sess, cache_dir=tmp_path).fetch_awards(
+            ("배전반",), ("cnstwk",), lookback_days=10, end=end)
+    recent = [p for _, p in sess.calls if p.get("bidNtceNm") == "배전반"]
+    assert recent                               # 두 번째에도 최근 구간은 다시 불렀다
+
+
+def test_service_key_is_not_written_to_the_cache(tmp_path):
+    from datetime import datetime
+    client = g2b.G2BClient("비밀키12345", sleep_sec=0,
+                           session=FakeSession(_speed_handler()), cache_dir=tmp_path)
+    client.fetch_awards(("배전반",), ("cnstwk",), lookback_days=60, end=datetime(2026, 9, 23))
+    for path in tmp_path.glob("*.json"):
+        assert "비밀키12345" not in path.read_text(encoding="utf-8")
+
+
+def test_one_failed_query_does_not_lose_the_rest():
+    from datetime import datetime
+    client = g2b.G2BClient("k", sleep_sec=0,
+                           session=FakeSession(_speed_handler(fail_keyword="계장")))
+    got = client.fetch_awards(("자동제어", "계장"), ("cnstwk",), lookback_days=30,
+                              end=datetime(2026, 9, 23))
+    names = {a.winner_name for a in got}
+    assert "자동제어전기" in names and "계장전기" not in names
+
+
+@pytest.mark.parametrize("given,expected", [
+    (("배전반", "수배전반"), ("배전반",)),              # 부분일치라 '배전반'이 '수배전반'도 찾는다
+    (("계장", "전기계장", "자동제어"), ("계장", "자동제어")),
+    (("MCC", "mcc", "PLC"), ("MCC", "PLC")),
+    (("분전반", "배전반"), ("분전반", "배전반")),        # 서로 품지 않으면 둘 다 남긴다
+])
+def test_keywords_covered_by_another_are_dropped(given, expected):
+    assert g2b.dedupe_keywords(given) == expected
+
+
+def test_default_keywords_shrink_without_losing_coverage():
+    """뺀 검색어는 모두 남은 검색어 중 하나를 품고 있어야 한다."""
+    kws = ScreenConfig().keywords
+    kept = g2b.dedupe_keywords(kws)
+    assert len(kept) < len(kws)
+    for dropped in set(kws) - set(kept):
+        assert any(k.upper() in dropped.upper() for k in kept), dropped
+
+
+def test_rate_limiter_spaces_requests_across_threads():
+    import threading, time
+    limiter = g2b.RateLimiter(0.02)
+    stamps = []
+    def hit():
+        limiter.wait()
+        stamps.append(time.monotonic())
+    threads = [threading.Thread(target=hit) for _ in range(6)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    stamps.sort()
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert min(gaps) >= 0.015                    # 여러 스레드가 동시에 몰려도 간격은 지킨다

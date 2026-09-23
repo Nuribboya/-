@@ -12,14 +12,19 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
+import threading
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 
@@ -75,6 +80,104 @@ _CORP_BIZNO_KEYS = ("bidwinnrBizno", "bizno", "corpBizno", "prcbdrBizno")
 
 class G2BError(RuntimeError):
     pass
+
+
+# --- 빠르게 ------------------------------------------------------------------
+#
+# 90일 조회 한 번에 나라장터를 수백 번 부른다(업무 3 × 15일 구간 6 × 검색어).
+# 하나씩 차례로 부르면 응답 기다리는 시간만 몇 분이다. 그래서
+#   1) 겹치는 검색어를 뺀다 — 공고명은 부분일치라 '배전반'이 '수배전반'도 찾는다
+#   2) 여러 개를 동시에 부른다 — 명세 한도(초당 30건) 안에서
+#   3) 이미 지난 기간의 결과는 저장해 두고 다시 쓴다 — 끝난 낙찰은 안 바뀐다
+
+#: 이 날수보다 오래된 구간만 저장한다. 최근 며칠은 늦게 등록되는 건이 있다.
+SETTLE_DAYS = 3
+#: 저장한 조회 결과를 이 날수 동안 쓴다. 지나면 다시 받는다.
+CACHE_TTL_DAYS = 30
+#: 어느 주소·날짜방식이 되는지 같은 '길 찾기' 결과는 더 짧게.
+META_TTL_DAYS = 7
+
+
+def dedupe_keywords(keywords) -> tuple[str, ...]:
+    """다른 검색어를 품은 검색어는 뺀다. '배전반'이 있으면 '수배전반'은 필요 없다."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    lowered = [k.upper() for k in keywords]
+    for i, kw in enumerate(keywords):
+        if any(other and other in lowered[i] and other != lowered[i] for other in lowered):
+            continue
+        if lowered[i] in seen:            # 'MCC' 와 'mcc' 는 같은 검색이다
+            continue
+        seen.add(lowered[i])
+        kept.append(kw)
+    return tuple(kept)
+
+
+class RateLimiter:
+    """여러 스레드가 함께 써도 요청 시작 간격이 min_interval 초 이상 벌어지게 한다."""
+
+    def __init__(self, min_interval: float) -> None:
+        self.min_interval = max(0.0, min_interval)
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        if self.min_interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next)
+            self._next = start + self.min_interval
+        delay = start - now
+        if delay > 0:
+            time.sleep(delay)
+
+
+class ResponseCache:
+    """조회 결과를 파일로 저장해 두고 다시 쓴다. 인증키는 저장하지 않는다."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def key(*parts) -> str:
+        raw = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    def get(self, key: str, ttl_days: float):
+        path = self.root / f"{key}.json"
+        try:
+            if time.time() - path.stat().st_mtime > ttl_days * 86400:
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def put(self, key: str, value) -> None:
+        path = self.root / f"{key}.json"
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        try:
+            tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:            # 저장 실패는 속도만 손해다. 조회는 계속한다.
+            log.debug("조회 결과 저장 실패: %s", exc)
+
+    def clear(self) -> int:
+        removed = 0
+        for path in self.root.glob("*.json"):
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+        return removed
+
+
+def default_cache_dir() -> Path:
+    base = os.environ.get("APPDATA")
+    root = Path(base) if base else Path.home() / ".config"
+    return root / "PrimeFinder" / "cache" / "g2b"
 
 
 @dataclass
@@ -164,8 +267,10 @@ class G2BClient:
         timeout: float = 20.0,
         num_of_rows: int = 100,
         max_pages: int = 20,
-        sleep_sec: float = 0.1,
+        sleep_sec: float = 0.05,
         session: requests.Session | None = None,
+        workers: int = 8,
+        cache_dir: Path | str | None = None,
     ) -> None:
         if not service_key:
             raise G2BError("조달청 서비스키가 없습니다. G2B_SERVICE_KEY 를 설정하세요.")
@@ -174,7 +279,13 @@ class G2BClient:
         self.num_of_rows = num_of_rows
         self.max_pages = max_pages
         self.sleep_sec = sleep_sec
-        self.session = session or requests.Session()
+        # 요청 시작 간격. 기본 0.05초 = 초당 20건으로 명세 한도(30건)보다 여유 있게.
+        self.limiter = RateLimiter(sleep_sec)
+        self.workers = max(1, workers)
+        self._shared_session = session
+        self._local = threading.local()
+        #: None 이면 저장하지 않는다 (테스트·일회성 조회).
+        self.cache = ResponseCache(cache_dir) if cache_dir else None
         self._resolved: dict[str, tuple[str, tuple[str, str, str]]] = {}
         self.last_probe: list[str] = []
         #: 공고명 검색이 안 먹혀 전체 수집으로 돌린 업무구분
@@ -182,11 +293,21 @@ class G2BClient:
 
     # --- 저수준 호출 ---------------------------------------------------------
 
+    @property
+    def session(self):
+        """스레드마다 따로 쓴다. requests.Session 은 여러 스레드가 같이 쓰기 불안하다."""
+        if self._shared_session is not None:
+            return self._shared_session
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = self._local.session = requests.Session()
+        return sess
+
     def _call(self, url: str, params: dict) -> ApiPage:
         query = {"ServiceKey": self.key, "type": "json", **params}
+        self.limiter.wait()                 # 명세상 초당 30건 제한
         resp = self.session.get(url, params=query, timeout=self.timeout)
         resp.raise_for_status()
-        time.sleep(self.sleep_sec)          # 명세상 30 tps 제한
         return _parse(resp.text)
 
     def _variants(self, bases: tuple[str, ...],
@@ -224,6 +345,13 @@ class G2BClient:
         """
         if key in self._resolved:
             return self._resolved[key]
+        meta_key = ResponseCache.key("resolve", key, ops)
+        if self.cache:
+            saved = self.cache.get(meta_key, META_TTL_DAYS)
+            if saved:
+                url, style = saved[0], tuple(saved[1])
+                self._resolved[key] = (url, style)
+                return url, style
 
         notes: list[str] = []
         best: tuple[int, str, tuple[str, str, str]] | None = None
@@ -257,6 +385,8 @@ class G2BClient:
             log.warning("[%s] 낙찰업체명이 확인되지 않는 조합을 씁니다(등급 %s). "
                         "probe --dump 로 응답을 확인해 보세요.", key, grade)
         self._resolved[key] = (url, style)
+        if self.cache and grade == 3:        # 확실히 되는 조합만 기억한다
+            self.cache.put(meta_key, [url, list(style)])
         return url, style
 
     def supports_keyword(self, url: str, style: tuple[str, str, str],
@@ -268,13 +398,21 @@ class G2BClient:
         파라미터가 무시된 것이고, 줄어들면 제대로 걸러진 것이다. 실제 키워드로
         재면 '그 기간에 그런 공고가 없었을 뿐'인 경우와 구분이 안 된다.
         """
+        meta_key = ResponseCache.key("keyword-ok", url, list(style))
+        if self.cache:
+            saved = self.cache.get(meta_key, META_TTL_DAYS)
+            if saved is not None:
+                return bool(saved)
         plain = self._try_variant(url, style, begin, end)
         if isinstance(plain, str) or not plain.ok or plain.total_count == 0:
-            return True                     # 비교 기준이 없으면 판단 보류
+            return True                     # 비교 기준이 없으면 판단 보류 (기억하지 않음)
         probe = self._try_variant(url, style, begin, end, keyword="없을법한공고명ZZQX")
         if isinstance(probe, str) or not probe.ok:
             return False
-        return probe.total_count < plain.total_count
+        answer = probe.total_count < plain.total_count
+        if self.cache:
+            self.cache.put(meta_key, answer)
+        return answer
 
     def diagnose(self, categories: tuple[str, ...], sample_keyword: str = "자동제어",
                  days: int = 7, end: datetime | None = None, dump: bool = False) -> list[str]:
@@ -330,13 +468,17 @@ class G2BClient:
     ) -> list[Award]:
         """키워드 × 업무구분으로 낙찰 이력을 모은다.
 
-        조회 창이 길면 API 가 거절하므로 15일씩 끊어서 돈다.
+        조회 창이 길면 API 가 거절하므로 15일씩 끊는다. 끊은 조각들은 동시에
+        부르고, 이미 지난 조각은 저장해 둔 결과를 쓴다. 결과는 부른 순서와
+        상관없이 늘 같은 순서로 정리한다 — 동시에 부르면 끝나는 순서가 매번 다르다.
         """
         end = end or datetime.now()
         begin = end - timedelta(days=lookback_days)
-        awards: list[Award] = []
-        seen: set[tuple[str, str]] = set()
+        settled = end - timedelta(days=SETTLE_DAYS)
+        keywords = dedupe_keywords(keywords)
 
+        # 1) 할 일 목록 (업무구분별 '길 찾기'는 짧으니 차례로)
+        tasks: list[tuple[str, str, dict, str | None, bool, datetime, datetime]] = []
         for cat in categories:
             try:
                 url, style = self._resolve(f"scsbid:{cat}", SCSBID_BASES, ops_for(cat),
@@ -358,26 +500,77 @@ class G2BClient:
                 queries = [{"bidNtceNm": kw} for kw in keywords] if keyword_ok else [{}]
                 for extra in queries:
                     params = {"inqryDiv": "1", **window, **extra}
-                    try:
-                        items = list(self._paged(url, params))
-                    except (G2BError, requests.RequestException, ValueError, ET.ParseError) as exc:
-                        log.warning("[%s/%s] %s ~ %s 조회 실패: %s",
-                                    CATEGORY_LABEL[cat], extra.get("bidNtceNm", "전체"),
-                                    w_begin.date(), w_end.date(), exc)
-                        continue
-                    for item in items:
-                        kw = extra.get("bidNtceNm") or _first_keyword(item, keywords)
-                        if not kw:
-                            continue            # 전체 수집 모드에서 키워드와 무관한 공고
-                        award = _to_award(item, cat, kw)
-                        if not award.winner_name:
-                            continue
-                        dedupe = (award.notice_no, award.winner_name)
-                        if dedupe in seen:
-                            continue
-                        seen.add(dedupe)
-                        awards.append(award)
+                    tasks.append((cat, url, params, extra.get("bidNtceNm"),
+                                  w_end <= settled, w_begin, w_end))
+
+        # 2) 동시에 부른다
+        results = self._run_tasks(tasks)
+
+        # 3) 늘 같은 순서로 정리
+        awards: list[Award] = []
+        seen: set[tuple[str, str]] = set()
+        for (cat, _url, _params, kw_param, *_rest), items in zip(tasks, results):
+            for item in items or ():
+                kw = kw_param or _first_keyword(item, keywords)
+                if not kw:
+                    continue            # 전체 수집 모드에서 키워드와 무관한 공고
+                award = _to_award(item, cat, kw)
+                if not award.winner_name:
+                    continue
+                dedupe = (award.notice_no, award.winner_name)
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                awards.append(award)
         return awards
+
+    def _run_tasks(self, tasks) -> list[list[dict] | None]:
+        total = len(tasks)
+        results: list[list[dict] | None] = [None] * total
+        if not total:
+            return results
+        state = {"done": 0, "reused": 0, "failed": 0, "next_report": 10}
+        lock = threading.Lock()
+
+        def work(task):
+            cat, url, params, _kw, cacheable, _b, _e = task
+            key = ResponseCache.key("items", url, params) if self.cache and cacheable else None
+            if key:
+                hit = self.cache.get(key, CACHE_TTL_DAYS)
+                if hit is not None:
+                    return hit, True
+            items = list(self._paged(url, params))
+            if key:
+                self.cache.put(key, items)
+            return items, False
+
+        log.info("나라장터에서 %d번 조회합니다 (동시에 %d개씩).", total, self.workers)
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures = {pool.submit(work, t): i for i, t in enumerate(tasks)}
+            for future in as_completed(futures):
+                i = futures[future]
+                cat, _url, _params, kw, _c, w_begin, w_end = tasks[i]
+                try:
+                    items, reused = future.result()
+                    results[i] = items
+                except (G2BError, requests.RequestException, ValueError, ET.ParseError) as exc:
+                    log.warning("[%s/%s] %s ~ %s 조회 실패: %s", CATEGORY_LABEL[cat],
+                                kw or "전체", w_begin.date(), w_end.date(), exc)
+                    reused = False
+                    with lock:
+                        state["failed"] += 1
+                with lock:
+                    state["done"] += 1
+                    state["reused"] += reused
+                    pct = state["done"] * 100 // total
+                    if pct >= state["next_report"] or state["done"] == total:
+                        state["next_report"] = pct // 10 * 10 + 10
+                        extra = (f" · 저장해 둔 결과 {state['reused']}건 재사용"
+                                 if state["reused"] else "")
+                        log.info("  조회 %d/%d (%d%%)%s", state["done"], total, pct, extra)
+        if state["failed"]:
+            log.warning("조회 %d건이 실패해 그 부분은 빠졌습니다.", state["failed"])
+        return results
 
 
 def _to_award(item: dict, category: str, keyword: str) -> Award:

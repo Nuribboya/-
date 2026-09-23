@@ -55,6 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="우리 월매출(원). 넣으면 '우리 크기에 맞는 곳'으로 점수를 매긴다")
     s.add_argument("--sales", default=None,
                    help="매출 장부 — 최근 평균을 우리 월매출로 쓴다 (--our-revenue 대신)")
+    s.add_argument("--fresh", action="store_true",
+                   help="저장해 둔 조회 결과를 지우고 새로 받는다")
     s.add_argument("--keep-closed", action="store_true",
                    help="폐업으로 확인된 곳도 목록에 남긴다 (기본은 뺀다)")
     s.add_argument("--include-excluded", action="store_true", help="CSV 에 제외 후보도 담는다")
@@ -85,6 +87,7 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--months-back", type=int, default=1,
                    help="부족분을 몇 달치로 볼지 (기본 1). 한 달만 보면 들쑥날쑥하다")
     g.add_argument("--offline", action="store_true", help="샘플 후보로 시험 실행")
+    g.add_argument("--fresh", action="store_true", help="저장해 둔 조회 결과를 지우고 새로 받는다")
     g.add_argument("--days", type=int, default=None, help="후보 조회 기간(일)")
     g.add_argument("--within", type=float, default=None, help="거리 상한(km)")
     g.add_argument("--nationwide", action="store_true")
@@ -156,6 +159,16 @@ def _within(args) -> float | None:
     if getattr(args, "nationwide", False):
         return None
     return args.within
+
+
+def _g2b_client(cfg, fresh: bool = False):
+    """조회 결과를 저장해 두는 나라장터 클라이언트. fresh 면 저장분을 지우고 시작."""
+    from prime_contractor.sources.g2b import G2BClient, default_cache_dir
+    client = G2BClient(cfg.g2b_service_key, cache_dir=default_cache_dir())
+    if fresh and client.cache:
+        removed = client.cache.clear()
+        print(f"저장해 둔 조회 결과 {removed}건을 지웠습니다.", file=sys.stderr)
+    return client
 
 
 def _our_revenue(args) -> int | None:
@@ -243,9 +256,9 @@ def _cmd_gap(args) -> int:
 
     g2b_client = dart_client = None
     if not args.offline:
-        from prime_contractor.sources.g2b import G2BClient, G2BError
+        from prime_contractor.sources.g2b import G2BError
         try:
-            g2b_client = G2BClient(cfg.g2b_service_key)
+            g2b_client = _g2b_client(cfg, fresh=getattr(args, "fresh", False))
         except G2BError as exc:
             print(f"[오류] {exc}\n      키 없이 보려면 --offline 을 쓰세요.", file=sys.stderr)
             return 2
@@ -396,9 +409,9 @@ def _cmd_screen(args) -> int:
 
     g2b_client = dart_client = nts_client = None
     if not args.offline:
-        from prime_contractor.sources.g2b import G2BClient, G2BError
+        from prime_contractor.sources.g2b import G2BError
         try:
-            g2b_client = G2BClient(cfg.g2b_service_key)
+            g2b_client = _g2b_client(cfg, fresh=getattr(args, "fresh", False))
         except G2BError as exc:
             print(f"[오류] {exc}\n      키 없이 확인만 하려면 --offline 을 쓰세요.", file=sys.stderr)
             return 2
