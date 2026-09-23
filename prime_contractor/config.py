@@ -192,9 +192,13 @@ class ScreenConfig:
     #: 이 등급보다 낮으면 목록에서 뺀다 ("A"~"D"). None 이면 전부 보여 준다.
     min_grade: str | None = None
 
+    #: 우리 월매출(원). 알면 '일감 크기' 대신 '규모 맞음'으로 본다. 0 이면 모름.
+    our_monthly_revenue: int = 0
+
     #: 적합도 축별 배점. 합이 100 이 아니어도 100점 만점으로 환산된다.
+    #: volume 과 scale 은 둘 중 하나만 쓰인다 (우리 매출을 알면 scale).
     weights: dict[str, float] = field(
-        default_factory=lambda: {"product_fit": 30.0, "volume": 25.0,
+        default_factory=lambda: {"product_fit": 30.0, "volume": 25.0, "scale": 25.0,
                                  "access": 20.0, "repeat": 15.0, "safety": 10.0}
     )
 
@@ -239,7 +243,7 @@ def _apply_json(cfg: ScreenConfig, raw: dict) -> ScreenConfig:
     for key in ("keywords", "categories"):
         if key in raw:
             patch[key] = tuple(raw[key])
-    for key in ("max_overlap_rank", "min_awards", "lookback_days"):
+    for key in ("max_overlap_rank", "min_awards", "lookback_days", "our_monthly_revenue"):
         if key in raw:
             patch[key] = int(raw[key])
     if "max_distance_km" in raw:

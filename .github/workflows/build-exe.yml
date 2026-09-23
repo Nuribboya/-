@@ -31,6 +31,10 @@ concurrency:
 jobs:
   windows-exe:
     runs-on: windows-latest
+    env:
+      # 윈도우 러너의 콘솔은 cp1252 라 한글을 찍으면 죽는다(베타 첫 빌드가 이걸로 실패).
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 

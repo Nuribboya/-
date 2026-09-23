@@ -47,6 +47,22 @@ PANEL_SHARE = {
 DEFAULT_SHARE = 0.05
 
 GRADE_CUTS = ((75, "A"), (60, "B"), (45, "C"), (0, "D"))
+
+# --- 규모 맞음 -----------------------------------------------------------------
+#
+# '일감 크기' 축은 클수록 점수를 준다. 그런데 우리 월매출이 1억 안팎이면,
+# 한 달에 판넬 50만원어치 주는 곳은 영업 들인 만큼 안 남고, 한 달에 2억어치
+# 주는 곳은 감당이 안 되거나 그 한 곳에 새로 매이게 된다. 우리 매출을 알면
+# '클수록 좋다' 대신 '우리 크기에 맞나'로 본다.
+#
+# (그 곳의 월 판넬 물량 ÷ 우리 월매출, 점수) — 사이는 직선으로 잇는다.
+SCALE_CURVE = (
+    (0.00, 0), (0.03, 30), (0.10, 100), (0.40, 100),
+    (0.80, 50), (1.50, 15), (3.00, 10),
+)
+SWEET_SPOT = (0.10, 0.40)
+#: 한 건의 판넬 몫이 우리 월매출의 몇 배를 넘으면 자재 선투입 경고를 붙이나
+BIG_JOB_MONTHS = 1.5
 GRADE_ADVICE = {
     "A": "먼저 연락해 보세요",
     "B": "연락해 볼 만합니다",
@@ -222,11 +238,66 @@ def _cautions(cand: Candidate) -> list[str]:
     return out
 
 
+def _curve(x: float, points=SCALE_CURVE) -> float:
+    if x <= points[0][0]:
+        return float(points[0][1])
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return float(points[-1][1])
+
+
+def monthly_panel(est: int, lookback_days: int) -> int:
+    """조회 기간 전체의 판넬 물량을 한 달치로."""
+    return round(est / max(lookback_days / 30.0, 1.0)) if est else 0
+
+
+def largest_job_panel(cand: Candidate) -> int:
+    """가장 큰 한 건에서 나오는 판넬 몫."""
+    best = 0
+    for a in cand.awards:
+        level = _match_level(a.title)
+        if level == "none":
+            continue
+        best = max(best, int(a.amount * PANEL_SHARE.get((a.category, level), DEFAULT_SHARE)))
+    return best
+
+
+def _scale(cand: Candidate, est: int, our_monthly: int, lookback_days: int) -> Axis:
+    per_month = monthly_panel(est, lookback_days)
+    if not cand.awards:
+        return Axis("scale", "규모 맞음", 50.0, 25.0,
+                    "수주 기록이 없어 크기를 모릅니다 — 중간으로 둡니다")
+    if per_month <= 0:
+        return Axis("scale", "규모 맞음", 0.0, 25.0, "판넬 들어갈 일이 안 보여 크기를 잴 수 없습니다")
+
+    ratio = per_month / our_monthly
+    score = _curve(ratio)
+    amount = f"한 달 판넬 약 {per_month / 1e4:,.0f}만원 = 우리 월매출의 {ratio * 100:.0f}%"
+    low, high = SWEET_SPOT
+    if ratio < low:
+        why = "작아서 영업 들인 만큼 남기 어렵습니다"
+    elif ratio <= high:
+        why = "무리 없이 받으면서 의존도도 낮추기 좋은 크기입니다"
+    elif ratio <= 1.0:
+        why = "지금 인력·자금으로는 빠듯한 크기입니다"
+    else:
+        why = "이 한 곳이 지금 매출보다 커서, 또 한 곳에 매이게 됩니다"
+    return Axis("scale", "규모 맞음", score, 25.0, f"{amount} — {why}")
+
+
 def evaluate(cand: Candidate, max_distance_km: float = 150.0,
-             weights: dict[str, float] | None = None) -> Fitness:
-    """후보 하나의 적합도를 낸다."""
+             weights: dict[str, float] | None = None,
+             our_monthly_revenue: int = 0, lookback_days: int = 180) -> Fitness:
+    """후보 하나의 적합도를 낸다.
+
+    우리 월매출을 알면 '일감 크기'(클수록 좋다) 자리에 '규모 맞음'(우리 크기에
+    맞나)을 쓴다. 둘을 같이 넣으면 여전히 큰 곳이 유리해진다.
+    """
     est = estimate_panel_amount(cand)
-    axes = [_product_fit(cand), _volume(cand, est), _access(cand, max_distance_km),
+    size_axis = (_scale(cand, est, our_monthly_revenue, lookback_days)
+                 if our_monthly_revenue > 0 else _volume(cand, est))
+    axes = [_product_fit(cand), size_axis, _access(cand, max_distance_km),
             _repeat(cand), _safety(cand)]
     if weights:
         axes = [Axis(a.key, a.label, a.score, weights.get(a.key, a.weight), a.detail) for a in axes]
@@ -236,6 +307,15 @@ def evaluate(cand: Candidate, max_distance_km: float = 150.0,
     span = sum(a.weight for a in axes) or 1.0
     total = round(total / span * 100, 1)
     grade = next(g for cut, g in GRADE_CUTS if total >= cut)
+    cautions = _cautions(cand)
+    if our_monthly_revenue > 0:
+        biggest = largest_job_panel(cand)
+        # 한 달 매출보다 조금 큰 건은 공공 공사에선 흔하다. 거기까지 경고하면
+        # 모든 후보에 붙어 잡음이 된다(연습 자료에서 6곳 모두에 붙었다).
+        if biggest > our_monthly_revenue * BIG_JOB_MONTHS:
+            cautions.append(f"가장 큰 한 건의 판넬만 약 {biggest / 1e8:.1f}억 — 우리 한 달 매출의 "
+                            f"{biggest / our_monthly_revenue:.1f}배입니다. 자재를 먼저 사 넣을 "
+                            f"돈이 되는지부터 보세요")
     return Fitness(total=total, grade=grade, axes=axes,
-                   headline=_headline(cand, est), cautions=_cautions(cand),
+                   headline=_headline(cand, est), cautions=cautions,
                    est_panel_amount=est)

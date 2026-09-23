@@ -19,7 +19,9 @@ def score_candidate(cand: Candidate, cfg: ScreenConfig) -> Candidate:
     cand.overlap = judge_overlap(cand, cfg.incumbent)
     cand.sector, cand.sector_weight, _why = match_sector(cand, cfg.sectors)
 
-    fit = evaluate(cand, max_distance_km=cfg.max_distance_km, weights=cfg.weights)
+    fit = evaluate(cand, max_distance_km=cfg.max_distance_km, weights=cfg.weights,
+                   our_monthly_revenue=cfg.our_monthly_revenue,
+                   lookback_days=cfg.lookback_days)
     cand.fitness = fit
     cand.score = fit.total
     cand.grade = fit.grade

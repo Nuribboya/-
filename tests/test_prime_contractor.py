@@ -1534,3 +1534,70 @@ def test_readme_still_documents_every_feature():
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값"):
         assert must in text, must
+
+
+# --- 규모 맞음 (우리 매출 기준) ---------------------------------------------------
+
+def _sized(name, monthly_panel_amount, ours=100_000_000, **kw):
+    """월 판넬 물량이 정해진 크기가 되도록 공사 한 건을 만든다 (공사·직접 품목 25%)."""
+    total = monthly_panel_amount * 6 / 0.25          # 180일 = 6개월
+    cand = _cand(name, address="경기도 평택시",
+                 awards=[Award(title="배전반 교체공사", amount=int(total), category="공사",
+                               demand_org="A시")], **kw)
+    enrich([cand])
+    score_candidate(cand, ScreenConfig(our_monthly_revenue=ours))
+    return cand
+
+
+def test_right_sized_client_beats_tiny_and_huge_ones():
+    tiny = _sized("아주작은곳", 1_000_000)          # 우리 월매출의 1%
+    right = _sized("딱맞는곳", 25_000_000)          # 25%
+    huge = _sized("아주큰곳", 200_000_000)          # 200%
+    s = {c.name: c.fitness.axis("scale").score for c in (tiny, right, huge)}
+    assert s["딱맞는곳"] == 100
+    assert s["딱맞는곳"] > s["아주작은곳"]
+    assert s["딱맞는곳"] > s["아주큰곳"]
+
+
+def test_scale_replaces_bigger_is_better_when_our_revenue_is_known():
+    """두 축을 같이 넣으면 여전히 큰 곳이 유리해진다. 하나만 쓴다."""
+    known = _sized("갑", 25_000_000)
+    keys = [a.key for a in known.fitness.axes]
+    assert "scale" in keys and "volume" not in keys
+
+    unknown = _cand("을", awards=[Award(title="배전반 교체공사", amount=10**9, category="공사")])
+    score_candidate(unknown, ScreenConfig())
+    keys = [a.key for a in unknown.fitness.axes]
+    assert "volume" in keys and "scale" not in keys
+
+
+def test_bigger_than_us_says_it_creates_a_new_dependency():
+    huge = _sized("아주큰곳", 150_000_000)
+    assert "또 한 곳에 매이게" in huge.fitness.axis("scale").detail
+
+
+def test_single_huge_job_warns_about_upfront_material_money():
+    big = _sized("큰한건", 25_000_000)              # 한 건 판넬 1.5억 = 월매출 1.5배
+    small = _sized("작은한건", 10_000_000)          # 한 건 판넬 6천만
+    assert not any("자재를 먼저" in c for c in small.fitness.cautions)
+    # 1.5배 '초과'여야 경고 — 딱 1.5배는 경계라 붙지 않는다
+    assert not any("자재를 먼저" in c for c in big.fitness.cautions)
+    bigger = _sized("더큰한건", 30_000_000)         # 한 건 1.8억
+    assert any("자재를 먼저" in c for c in bigger.fitness.cautions)
+
+
+def test_scale_curve_is_continuous_at_the_edges():
+    from prime_contractor.fitness import _curve
+    assert _curve(0.10) == 100 and _curve(0.40) == 100
+    assert 0 < _curve(0.05) < 100
+    assert _curve(0.80) == 50
+    assert _curve(10.0) == 10
+    assert _curve(-1) == 0
+
+
+def test_screen_cli_takes_our_revenue_from_the_ledger(tmp_path, capsys):
+    from prime_contractor import cli
+    path = tmp_path / "매출.csv"
+    path.write_text("연월,매출\n2026-06,100000000\n2026-07,100000000\n", encoding="utf-8")
+    assert cli.main(["screen", "--offline", "--sales", str(path), "--explain", "포스코"]) == 0
+    assert "우리 월매출의" in capsys.readouterr().out

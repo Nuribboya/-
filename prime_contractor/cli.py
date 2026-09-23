@@ -51,6 +51,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="KC그룹과 같은 업종(반도체 등)도 제외 — 기본은 계열사만 제외")
     s.add_argument("--strict", action="store_true", help="인접 업종까지 전부 제외")
     s.add_argument("--no-demand-orgs", action="store_true", help="발주기관은 후보에서 뺀다")
+    s.add_argument("--our-revenue", type=int, default=None,
+                   help="우리 월매출(원). 넣으면 '우리 크기에 맞는 곳'으로 점수를 매긴다")
+    s.add_argument("--sales", default=None,
+                   help="매출 장부 — 최근 평균을 우리 월매출로 쓴다 (--our-revenue 대신)")
     s.add_argument("--keep-closed", action="store_true",
                    help="폐업으로 확인된 곳도 목록에 남긴다 (기본은 뺀다)")
     s.add_argument("--include-excluded", action="store_true", help="CSV 에 제외 후보도 담는다")
@@ -154,6 +158,19 @@ def _within(args) -> float | None:
     return args.within
 
 
+def _our_revenue(args) -> int | None:
+    """우리 월매출: 직접 넣은 값 > 매출 장부의 최근 평균 > 모름."""
+    if getattr(args, "our_revenue", None):
+        return args.our_revenue
+    if getattr(args, "sales", None):
+        from prime_contractor.sales import load_sales
+        try:
+            return load_sales(args.sales).average_revenue() or None
+        except (OSError, ValueError) as exc:
+            print(f"[경고] 매출 장부를 못 읽어 규모 비교는 생략합니다: {exc}", file=sys.stderr)
+    return None
+
+
 def _cost_model(args):
     """명령줄에서 비용 구조를 만든다. 아무것도 안 주면 None."""
     from prime_contractor.breakeven import CostModel, from_financials, parse_ratio
@@ -213,6 +230,7 @@ def _cmd_gap(args) -> int:
     gap = book.recent_gap(args.months_back) if args.months_back > 1 else record.gap
     cfg = load_config(
         args.config,
+        our_monthly_revenue=book.average_revenue() or None,
         lookback_days=args.days,
         within_km=_within(args),
         min_grade=args.min_grade,
@@ -373,6 +391,7 @@ def _cmd_screen(args) -> int:
         dart_api_key=os.environ.get("DART_API_KEY") or None,
         nts_service_key=os.environ.get("NTS_SERVICE_KEY") or None,
         drop_closed_businesses=False if args.keep_closed else None,
+        our_monthly_revenue=_our_revenue(args),
     )
 
     g2b_client = dart_client = nts_client = None

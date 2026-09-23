@@ -588,6 +588,14 @@ class App:
 
     def _screen(self, options: dict):
         cfg = build_config(options)
+        if self.book and self.book.average_revenue():
+            from dataclasses import replace
+            ours = self.book.average_revenue()
+            cfg = replace(cfg, our_monthly_revenue=ours)
+            self.say(f"우리 월매출 {ours / 1e4:,.0f}만원 기준으로, 너무 작거나 너무 큰 곳은 "
+                     f"점수를 낮춥니다.")
+        else:
+            self.say("② 탭에서 매출 장부를 불러오면 '우리 크기에 맞는 곳'으로 점수를 매깁니다.")
         mode = options["mode"]
 
         if mode == MODE_SAMPLE:
