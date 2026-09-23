@@ -79,29 +79,25 @@ jobs:
           retention-days: 30
 
       - name: Release 만들기
-        # 릴리스를 먼저 만들고(파일 없이), 파일은 따로 올린 뒤 실제로 붙었는지
-        # 확인한다. 한 번에 만들면서 올리는 방식은 파일이 조용히 빠진 채 '성공'
-        # 으로 끝난 적이 있다(v1.3.0·v1.4.0). 파일 없는 릴리스는 받는 사람에게
-        # 빈 페이지일 뿐이라, 확인이 안 되면 여기서 빌드를 실패시킨다.
+        # 파일이 붙었는지는 '실제로 받아지나'로 확인한다. 릴리스의 파일 목록(API)은
+        # 늦게 갱신되거나 비어 보일 때가 있어서, 목록만 믿으면 멀쩡한 릴리스를
+        # 망가진 걸로 오판한다(v1.3~1.5 에서 실제로 그랬다 — 받기는 됐다).
         if: steps.ver.outputs.release != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: finder-v${{ steps.ver.outputs.release }}
         run: |
-          exe_size() {
-            gh release view "$TAG" --json assets \
-              --jq '.assets[] | select(.name=="PrimeFinder.exe") | .size' 2>/dev/null || true
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/PrimeFinder.exe"
+          downloadable() {
+            # 1MB 넘게 실제로 받아지면 된 것. 올린 직후엔 늦게 보일 수 있어 몇 번 기다린다.
+            for wait in 0 5 10 20; do
+              sleep "$wait"
+              got=$(curl -sL -r 0-1048575 -o /dev/null -w '%{size_download}' "$url" || echo 0)
+              [ "${got:-0}" -ge 1000000 ] && return 0
+            done
+            return 1
           }
-
-          # 업로드가 중간에 깨지면 목록에는 안 보이는 반쪽짜리 파일 기록이 남아
-          # 이름을 차지한다. 그러면 다시 올려도 'already exists' 로 거절된다
-          # (v1.3.0·v1.4.0). 파일 없는 릴리스는 지우고 새로 만든다.
-          if gh release view "$TAG" > /dev/null 2>&1 && [ -z "$(exe_size)" ]; then
-            echo "$TAG 에 파일이 없어 릴리스를 지우고 다시 만듭니다."
-            gh release delete "$TAG" --yes --cleanup-tag
-            sleep 5
-          fi
 
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" \
@@ -110,15 +106,14 @@ jobs:
               --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
           fi
 
-          for attempt in 1 2 3; do
-            gh release upload "$TAG" dist/PrimeFinder.exe --clobber && break
-            echo "업로드 재시도 $attempt..."; sleep $((attempt * 5))
-          done
+          # 같은 버전을 다시 돌리면 이미 올라간 파일과 이름이 겹쳐 거절될 수 있다.
+          # 그때는 이미 받아지는지 보고, 받아지면 그대로 둔다.
+          if ! gh release upload "$TAG" dist/PrimeFinder.exe --clobber; then
+            echo "업로드가 거절됐습니다. 이미 올라가 있는지 확인합니다."
+          fi
 
-          size=$(exe_size)
-          if [ -z "$size" ] || [ "$size" -lt 1000000 ]; then
-            echo "::error::$TAG 에 PrimeFinder.exe 가 붙지 않았습니다 (크기: ${size:-없음})."
+          if ! downloadable; then
+            echo "::error::$TAG 의 PrimeFinder.exe 를 받을 수 없습니다: $url"
             exit 1
           fi
-          echo "확인: PrimeFinder.exe ${size} bytes 첨부됨"
-          echo "받는 곳: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          echo "확인: $url 에서 받아집니다"

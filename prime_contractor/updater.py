@@ -61,12 +61,17 @@ ASSET_NAME = "PrimeFinder.exe"
 
 
 def _has_exe(release: dict) -> bool:
-    """받을 파일이 실제로 붙어 있나. 없으면 알려 봐야 빈 페이지로 안내하게 된다."""
-    assets = release.get("assets")
-    if assets is None:              # 목록에 assets 칸 자체가 없으면 판단하지 않는다
-        return True
-    return any(a.get("name") == ASSET_NAME and a.get("state", "uploaded") == "uploaded"
-               for a in assets)
+    """받을 파일이 망가진 게 확실한 릴리스만 거른다.
+
+    파일 목록(assets)이 비어 보인다고 거르면 안 된다. GitHub 의 목록은 늦게
+    갱신되거나 비어 보일 때가 있는데, 그래도 파일은 실제로 받아진다
+    (v1.3~1.5 에서 확인). 목록만 믿고 거르면 새 버전을 영영 알려주지 못한다.
+    업로드가 끝나지 않은 상태로 남은 파일이 목록에 보일 때만 건너뛴다.
+    """
+    for asset in release.get("assets") or []:
+        if asset.get("name") == ASSET_NAME:
+            return asset.get("state", "uploaded") == "uploaded"
+    return True
 
 
 def pick_latest(releases: list[dict], prefix: str = TAG_PREFIX) -> dict | None:

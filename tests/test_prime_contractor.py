@@ -1465,12 +1465,23 @@ def test_goal_cli_reads_the_ledger(tmp_path, capsys, monkeypatch):
     assert "이번 주 목표" in out and "새 원청 5곳" in out
 
 
-def test_release_without_the_exe_is_not_offered_as_an_update():
-    """파일 업로드가 깨진 릴리스(v1.3.0·v1.4.0)가 실제로 있었다. 빈 페이지로 안내하면 안 된다."""
+def test_empty_asset_list_does_not_hide_a_new_version():
+    """GitHub 의 파일 목록은 비어 보여도 파일은 받아질 때가 있다(v1.3~1.5 실제 사례).
+
+    목록이 비었다고 건너뛰면 앱이 새 버전을 영영 알려주지 못한다.
+    """
     from prime_contractor.updater import pick_latest
     picked = pick_latest([
-        {"tag_name": "finder-v1.4.0", "assets": []},
-        {"tag_name": "finder-v1.3.0", "assets": [{"name": "PrimeFinder.exe", "state": "starter"}]},
+        {"tag_name": "finder-v1.5.0", "assets": []},
         {"tag_name": "finder-v1.2.0", "assets": [{"name": "PrimeFinder.exe", "state": "uploaded"}]},
     ])
-    assert picked["tag_name"] == "finder-v1.2.0"
+    assert picked["tag_name"] == "finder-v1.5.0"
+
+
+def test_release_with_an_unfinished_upload_is_skipped():
+    from prime_contractor.updater import pick_latest
+    picked = pick_latest([
+        {"tag_name": "finder-v1.6.0", "assets": [{"name": "PrimeFinder.exe", "state": "starter"}]},
+        {"tag_name": "finder-v1.5.0", "assets": [{"name": "PrimeFinder.exe", "state": "uploaded"}]},
+    ])
+    assert picked["tag_name"] == "finder-v1.5.0"
