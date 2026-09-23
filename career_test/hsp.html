@@ -1,0 +1,368 @@
+<title>액셀과 브레이크</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;600;800&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --ground: #F2F3F7;
+    --surface: #FFFFFF;
+    --ink: #1A1C26;
+    --muted: #5D6173;
+    --line: #D9DBE5;
+    --brake: #3D5A99;
+    --brake-soft: #E3E9F6;
+    --gas: #C95A36;
+    --gas-soft: #F8E5DD;
+    --accent-ink: #FFFFFF;
+    --display: "Gothic A1", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground: #111219; --surface: #1A1C25; --ink: #E8E9F0; --muted: #9B9FB2; --line: #2D3040;
+      --brake: #8EA8E6; --brake-soft: #222B42; --gas: #EE8D69; --gas-soft: #3A2419; --accent-ink: #10131F;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #111219; --surface: #1A1C25; --ink: #E8E9F0; --muted: #9B9FB2; --line: #2D3040;
+    --brake: #8EA8E6; --brake-soft: #222B42; --gas: #EE8D69; --gas-soft: #3A2419; --accent-ink: #10131F;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 32px 64px; }
+  .wrap { max-width: 780px; margin: 0 auto; display: grid; gap: 28px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(28px, 6vw, 40px); font-weight: 800; line-height: 1.2; }
+  h2 { font-size: 22px; font-weight: 800; }
+  h3 { font-size: 17px; font-weight: 600; }
+  p, ul { margin: 0; }
+  ul { padding-left: 1.1em; display: grid; gap: 4px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .lede { color: var(--muted); max-width: 62ch; }
+  .meta { color: var(--muted); font-size: 14px; }
+
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--brake); outline-offset: 2px; }
+  .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 18px; font-weight: 600; }
+  .btn.primary { background: var(--brake); color: var(--accent-ink); border-color: var(--brake); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  .scales { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 600px) { .scales { grid-template-columns: repeat(2, 1fr); } }
+  .scale-chip { border-top: 2px solid var(--c); padding-top: 8px; display: grid; gap: 1px; }
+  .scale-chip span { font-weight: 600; }
+  .scale-chip small { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+  .quiz { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: clamp(20px, 5vw, 36px); display: grid; gap: 24px; }
+  .progress { display: grid; gap: 8px; }
+  .progress-top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--brake); width: 0; transition: width .25s ease; }
+  .question { font-family: var(--display); font-size: clamp(20px, 4.4vw, 26px); font-weight: 600; line-height: 1.45; min-height: 2.9em; text-wrap: balance; }
+  .scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .scale button { border: 1px solid var(--line); background: var(--ground); border-radius: 12px; padding: 14px 6px; display: grid; gap: 4px; justify-items: center; font-size: 13px; color: var(--muted); transition: border-color .15s, background .15s; }
+  .scale button b { font-family: var(--mono); font-size: 18px; color: var(--ink); }
+  .scale button:hover { border-color: var(--brake); }
+  .scale button[aria-pressed="true"] { background: var(--brake-soft); border-color: var(--brake); color: var(--ink); }
+  @media (max-width: 520px) {
+    .scale { grid-template-columns: 1fr; }
+    .scale button { grid-template-columns: 28px 1fr; justify-items: start; text-align: left; padding: 12px 14px; font-size: 15px; color: var(--ink); }
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  /* 결과: 2x2 지도 */
+  .map-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: center; }
+  @media (max-width: 640px) { .map-wrap { grid-template-columns: 1fr; } }
+  .map { position: relative; width: 100%; max-width: 340px; aspect-ratio: 1; margin: 0 auto; }
+  .map .grid { position: absolute; inset: 0 0 28px 28px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 3px; }
+  .map .q { border-radius: 8px; padding: 8px; font-size: 12px; line-height: 1.35; color: var(--muted); background: var(--surface); border: 1px solid var(--line); display: flex; }
+  .map .q.tl { align-items: flex-start; }
+  .map .q.tr { align-items: flex-start; justify-content: flex-end; text-align: right; }
+  .map .q.bl { align-items: flex-end; }
+  .map .q.br { align-items: flex-end; justify-content: flex-end; text-align: right; }
+  .map .q.on { background: var(--brake-soft); border-color: var(--brake); color: var(--ink); font-weight: 600; }
+  .map .dot { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--gas); border: 3px solid var(--surface); box-shadow: 0 0 0 2px var(--gas); transform: translate(-50%, 50%); }
+  .map .ax-x { position: absolute; left: 28px; right: 0; bottom: 0; height: 24px; display: flex; justify-content: center; align-items: center; font-size: 12px; color: var(--gas); font-weight: 600; }
+  .map .ax-y { position: absolute; left: 0; top: 0; bottom: 28px; width: 24px; display: flex; justify-content: center; align-items: center; font-size: 12px; color: var(--brake); font-weight: 600; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+  .big-scores { display: grid; gap: 14px; }
+  .big { display: grid; gap: 4px; }
+  .big .lbl { display: flex; justify-content: space-between; font-weight: 600; }
+  .big .lbl span:last-child { font-family: var(--mono); }
+  .big .track { height: 12px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .big .track i { display: block; height: 100%; background: var(--c); border-radius: 99px; }
+
+  .profile { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; gap: 12px; }
+  .sub { display: grid; grid-template-columns: 110px 1fr 40px; gap: 10px; align-items: center; font-size: 14px; }
+  @media (max-width: 460px) { .sub { grid-template-columns: 88px 1fr 36px; } }
+  .sub .nm { font-weight: 600; }
+  .sub .track { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .sub .track i { display: block; height: 100%; background: var(--c); border-radius: 99px; }
+  .sub .v { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+
+  .type-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; display: grid; gap: 12px; }
+  .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 20px; }
+  @media (max-width: 560px) { .cols { grid-template-columns: 1fr; } }
+  .cols h4 { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .note { border-left: 3px solid var(--c, var(--brake)); background: var(--surface); border-radius: 0 12px 12px 0; padding: 14px 16px; display: grid; gap: 4px; }
+  .notes { display: grid; gap: 10px; }
+
+  .disclaimer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+  .toast { font-size: 13px; color: var(--muted); }
+  textarea { font: inherit; font-size: 14px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <section id="intro" class="wrap" style="gap:24px">
+    <div style="display:grid;gap:12px">
+      <p class="eyebrow">예민성 · 자극추구 기질 검사 · 38문항</p>
+      <h1>나는 브레이크형일까, 액셀형일까, 둘 다일까?</h1>
+      <p class="lede">예민함(브레이크)과 자극을 찾는 성향(액셀)은 서로 다른 기질이라 둘 다 높을 수도 있어요. 예민함을 다섯 갈래로 나눠 보고, 자극추구와 함께 2×2 지도에서 내 위치를 찾아봐요.</p>
+    </div>
+    <div class="scales" id="scaleLegend"></div>
+    <div class="row">
+      <button class="btn primary" id="startBtn" type="button">검사 시작하기</button>
+      <button class="btn" id="resumeBtn" type="button" hidden>이어서 하기</button>
+      <span class="meta">약 6분 · 요즘 말고 ‘평소의 나’ 기준으로</span>
+    </div>
+  </section>
+
+  <section id="quiz" class="quiz" hidden aria-live="polite">
+    <div class="progress">
+      <div class="progress-top"><span id="progText">1 / 38</span><span id="progPct">0%</span></div>
+      <div class="bar"><i id="progBar"></i></div>
+    </div>
+    <p class="question" id="qText"></p>
+    <div class="scale" id="scale" role="group" aria-label="응답 선택"></div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="prevBtn" type="button">← 이전</button>
+      <span class="hint">키보드 1–5로도 선택할 수 있어요</span>
+    </div>
+  </section>
+
+  <section id="result" class="wrap" hidden></section>
+</div>
+
+<script>
+(function () {
+  const SENS = ["DEP", "OVR", "EMO", "SEN", "SUB"];
+  const S = {
+    DEP: { name: "깊은 처리", q: "정보를 깊게, 오래 곱씹는 정도", c: "var(--brake)",
+      items: ["결정을 내리기 전에 여러 가능성을 오래 따져 본다.", "대화가 끝난 뒤에도 그 내용을 한참 곱씹는다.", "책이나 영화를 보고 나면 그 의미를 오래 생각한다.", "겉으로 드러난 것보다 그 이면의 이유가 궁금하다.", "실수를 하면 왜 그랬는지 여러 번 되짚어 본다.", "사람들이 쉽게 넘기는 일도 나는 깊게 생각하게 된다."] },
+    OVR: { name: "과자극", q: "자극이 많으면 쉽게 지치는 정도", c: "var(--brake)",
+      items: ["할 일이 한꺼번에 몰리면 머리가 하얘진다.", "바쁜 하루를 보내고 나면 조용한 곳에 혼자 있고 싶다.", "여러 사람이 동시에 말하면 금방 지친다.", "짧은 시간 안에 많은 걸 해내야 하면 실력이 잘 안 나온다.", "누가 지켜보고 있으면 평소보다 실수가 많아진다.", "일정이 빽빽한 날이 이어지면 쉽게 녹초가 된다."] },
+    EMO: { name: "감정 반응성", q: "감정을 크고 강하게 느끼는 정도", c: "var(--brake)",
+      items: ["감정이 한 번 올라오면 쉽게 가라앉지 않는다.", "슬픈 장면이나 음악에 쉽게 눈물이 난다.", "작은 비판에도 오래 마음이 쓰인다.", "기쁜 일도, 속상한 일도 남들보다 크게 느끼는 편이다.", "불안한 일이 있으면 다른 일에 집중하기 어렵다.", "기분이 두통이나 소화 같은 몸 상태로 잘 나타난다."] },
+    SEN: { name: "감각 예민성", q: "소리, 빛, 냄새, 몸의 감각에 민감한 정도", c: "var(--brake)",
+      items: ["큰 소리나 갑작스러운 소음에 깜짝 놀라거나 불편하다.", "밝은 조명이나 강한 냄새가 신경 쓰인다.", "옷의 까슬한 촉감이나 태그가 거슬린다.", "카페인이나 약에 남들보다 크게 반응한다.", "배가 고프면 기분이나 집중력이 확 떨어진다.", "통증이나 온도 변화에 민감한 편이다."] },
+    SUB: { name: "미묘함·공감", q: "남의 감정과 작은 변화를 알아채는 정도", c: "var(--brake)",
+      items: ["다른 사람의 기분 변화를 금방 알아챈다.", "공간의 분위기나 긴장감을 빨리 느낀다.", "음악, 그림, 자연의 아름다움에 깊이 감동한다.", "다른 사람이 불편해 보이면 나도 마음이 불편하다.", "남들이 놓치는 작은 변화나 디테일을 잘 알아챈다.", "상대가 말하지 않아도 무엇을 원하는지 느껴진다."] },
+    HSS: { name: "자극추구", q: "새로움과 짜릿함을 찾는 정도", c: "var(--gas)",
+      items: ["새로운 장소나 경험에 끌린다.", "같은 일이 반복되면 금방 지루해진다.", "조금 위험해도 짜릿한 경험을 해 보고 싶다.", "계획 없이 떠나는 여행이 설렌다.", "낯선 음식이나 새로운 문화를 시도하는 게 즐겁다.", "지루한 사람과 오래 있으면 답답하다.", "새로운 아이디어나 프로젝트에 쉽게 빠져든다.", "자극 없는 조용한 주말이 이어지면 좀이 쑤신다."] }
+  };
+  const ALL = [...SENS, "HSS"];
+
+  // 척도를 번갈아 배치. 자극추구 8문항도 고르게 섞음
+  const QUESTIONS = [];
+  for (let i = 0; i < 8; i++) ALL.forEach(k => { if (S[k].items[i]) QUESTIONS.push({ k, text: S[k].items[i] }); });
+
+  const TYPES = {
+    both: { name: "액셀과 브레이크형", sub: "자극추구형 예민한 사람 (HSS + HSP)",
+      desc: "새로운 걸 원해서 뛰어드는데, 뛰어들고 나면 쉽게 지치거나 불안해지는 타입이에요. 지루한 것도 못 견디고, 자극이 너무 많은 것도 못 견뎌서 ‘딱 좋은 자극’의 폭이 좁아요. 그래서 조절이 늘 숙제지만, 잘 맞추면 새로운 걸 깊이 있게 해내는 드문 조합이에요.",
+      good: ["새로운 걸 시도하면서도 위험을 미리 알아챈다", "아이디어가 많고, 그걸 깊게 생각한다", "도전과 신중함을 둘 다 쓸 수 있다"],
+      tips: ["새로움은 ‘일의 내용’에서, 안정은 ‘환경’에서 얻기 (예: 새 프로젝트를 하되 익숙한 장소와 루틴에서)", "자극이 큰 일정 뒤에는 회복 시간을 미리 달력에 넣기", "몰아서 불태우고 방전되는 패턴을 조심하기. 작게 자주가 더 잘 맞아요"] },
+    hsp: { name: "브레이크형", sub: "예민한 사람 (HSP)",
+      desc: "정보를 깊게 처리하고, 감정과 자극을 크게 느끼는 타입이에요. 조용하고 예측 가능한 환경에서 실력이 가장 잘 나와요.",
+      good: ["깊이 있게 생각하고 신중하다", "남들이 놓치는 걸 알아챈다", "감수성과 공감이 풍부하다"],
+      tips: ["혼자 쉬는 시간을 사치가 아니라 필수로 챙기기", "자극이 적은 작업 환경 만들기 (이어폰, 조용한 시간대)", "결정할 때 충분히 생각할 시간을 확보하기"] },
+    hss: { name: "액셀형", sub: "자극추구형 (HSS)",
+      desc: "새로움과 짜릿함에서 에너지를 얻고, 자극이 많아도 크게 지치지 않는 타입이에요. 변화가 많은 환경에서 살아나요.",
+      good: ["변화와 위기에 강하다", "새로운 걸 빨리 시도한다", "지루함을 에너지로 바꾼다"],
+      tips: ["충동적인 결정 전에 하루만 기다려 보기", "재미없는 마무리 작업은 보상을 붙여서 처리하기", "위험을 체크해 줄 신중한 파트너 두기"] },
+    calm: { name: "안정형", sub: "예민성과 자극추구 모두 보통 이하",
+      desc: "자극에 크게 흔들리지 않고, 새로움을 특별히 쫓지도 않는 타입이에요. 꾸준하고 안정적으로 페이스를 유지해요.",
+      good: ["감정 기복이 적고 침착하다", "꾸준하게 오래 간다", "환경 변화에 덜 흔들린다"],
+      tips: ["가끔 의식적으로 새로운 경험을 넣어 보기", "다른 사람의 예민함을 ‘과하다’고 넘기지 않기"] }
+  };
+
+  const SCALE = ["전혀 아니다", "아니다", "보통이다", "그렇다", "매우 그렇다"];
+  const STORE_KEY = "hsp-hss-answers-v1";
+  const $ = id => document.getElementById(id);
+  let answers = new Array(QUESTIONS.length).fill(null);
+  let idx = 0;
+
+  function load() {
+    try { const a = JSON.parse(localStorage.getItem(STORE_KEY)); if (Array.isArray(a) && a.length === QUESTIONS.length) return a; } catch (e) {}
+    return null;
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(answers)); } catch (e) {} }
+  function clearSave() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
+
+  $("scaleLegend").innerHTML = ALL.map(k => `<div class="scale-chip" style="--c:${S[k].c}"><span>${S[k].name}</span><small>${S[k].q}</small></div>`).join("");
+
+  const saved = load();
+  if (saved && saved.some(v => v !== null)) {
+    const done = saved.filter(v => v !== null).length;
+    $("resumeBtn").hidden = false;
+    $("resumeBtn").textContent = done === QUESTIONS.length ? "지난 결과 보기" : `이어서 하기 (${done}/${QUESTIONS.length})`;
+  }
+
+  $("scale").innerHTML = SCALE.map((s, i) => `<button type="button" data-v="${i}" aria-pressed="false"><b>${i + 1}</b>${s}</button>`).join("");
+  $("scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) choose(+b.dataset.v); });
+
+  function show(section) { ["intro", "quiz", "result"].forEach(s => $(s).hidden = s !== section); window.scrollTo({ top: 0 }); }
+  function renderQ() {
+    const done = answers.filter(v => v !== null).length;
+    $("qText").textContent = QUESTIONS[idx].text;
+    $("progText").textContent = `${idx + 1} / ${QUESTIONS.length}`;
+    $("progPct").textContent = Math.round(done / QUESTIONS.length * 100) + "%";
+    $("progBar").style.width = (done / QUESTIONS.length * 100) + "%";
+    $("scale").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === answers[idx])));
+    $("prevBtn").disabled = idx === 0;
+  }
+  let locked = false;
+  function choose(v) {
+    if (locked) return;
+    answers[idx] = v; save(); renderQ();
+    locked = true;
+    setTimeout(() => {
+      locked = false;
+      const next = answers.findIndex((a, i) => a === null && i > idx);
+      const any = answers.indexOf(null);
+      if (next !== -1) idx = next;
+      else if (any !== -1) idx = any;
+      else { showResult(); return; }
+      renderQ();
+    }, 180);
+  }
+  function restart() { answers = new Array(QUESTIONS.length).fill(null); idx = 0; clearSave(); show("quiz"); renderQ(); }
+
+  $("startBtn").addEventListener("click", restart);
+  $("resumeBtn").addEventListener("click", () => {
+    answers = load() || answers;
+    const any = answers.indexOf(null);
+    if (any === -1) { showResult(); return; }
+    idx = any; show("quiz"); renderQ();
+  });
+  $("prevBtn").addEventListener("click", () => { if (idx > 0) { idx--; renderQ(); } });
+  document.addEventListener("keydown", e => {
+    if ($("quiz").hidden) return;
+    if (e.key >= "1" && e.key <= "5") choose(+e.key - 1);
+    else if (e.key === "ArrowLeft" && idx > 0) { idx--; renderQ(); }
+  });
+
+  function scores() {
+    const sum = Object.fromEntries(ALL.map(k => [k, 0]));
+    QUESTIONS.forEach((q, i) => sum[q.k] += answers[i] ?? 2);
+    const sc = Object.fromEntries(ALL.map(k => [k, Math.round(sum[k] / (S[k].items.length * 4) * 100)]));
+    sc.HSP = Math.round(SENS.reduce((a, k) => a + sc[k], 0) / SENS.length);
+    return sc;
+  }
+  const HIGH = 60;
+
+  function showResult() {
+    const sc = scores();
+    const hspHi = sc.HSP >= HIGH, hssHi = sc.HSS >= HIGH;
+    const key = hspHi && hssHi ? "both" : hspHi ? "hsp" : hssHi ? "hss" : "calm";
+    const t = TYPES[key];
+    const edge = Math.abs(sc.HSP - HIGH) < 6 || Math.abs(sc.HSS - HIGH) < 6;
+
+    const cls = { both: "tr", hsp: "tl", hss: "br", calm: "bl" }[key];
+    const quad = (c, label) => `<div class="q ${c} ${c === cls ? "on" : ""}">${label}</div>`;
+    const map = `
+      <div class="map" role="img" aria-label="예민성 ${sc.HSP}점, 자극추구 ${sc.HSS}점 위치">
+        <div class="grid">${quad("tl", "브레이크형")}${quad("tr", "액셀과 브레이크형")}${quad("bl", "안정형")}${quad("br", "액셀형")}</div>
+        <span class="dot" style="left:calc(28px + (100% - 28px) * ${sc.HSS / 100});bottom:calc(28px + (100% - 28px) * ${sc.HSP / 100})"></span>
+        <div class="ax-x"><span>자극추구 (액셀) →</span></div>
+        <div class="ax-y"><span>예민성 (브레이크) →</span></div>
+      </div>`;
+
+    const subs = ALL.map(k => `
+      <div class="sub" style="--c:${S[k].c}"><span class="nm">${S[k].name}</span><span class="track"><i style="width:${Math.max(sc[k], 2)}%"></i></span><span class="v">${sc[k]}</span></div>`).join("");
+
+    // 세부 척도 패턴에 따른 해석
+    const notes = [];
+    const others = ["DEP", "OVR", "EMO", "SEN"];
+    const othersAvg = others.reduce((a, k) => a + sc[k], 0) / others.length;
+    if (sc.SUB <= othersAvg - 15)
+      notes.push(["안쪽으로 예민한 타입", `미묘함·공감(${sc.SUB})이 다른 예민성 척도 평균(${Math.round(othersAvg)})보다 낮아요. 내 감정과 자극에는 예민하지만, 다른 사람의 감정 신호는 상대적으로 덜 잡는 편이에요. 서운함이 쌓이기 전에 작게 말하고, 상대 감정은 추측보다 직접 물어보는 게 잘 맞아요.`, "var(--brake)"]);
+    if (sc.SUB >= othersAvg + 15)
+      notes.push(["바깥으로 예민한 타입", `미묘함·공감(${sc.SUB})이 특히 높아요. 다른 사람의 감정을 잘 느끼는 만큼, 남의 감정을 내 것처럼 떠안아 지치기 쉬워요. 공감과 책임을 구분하는 연습이 도움이 돼요.`, "var(--brake)"]);
+    if (sc.OVR >= 70)
+      notes.push(["과부하에 약해요", `과자극(${sc.OVR})이 높아요. 일이 몰리면 실력이 떨어지기 쉬워서, 할 일을 쪼개서 한 번에 하나씩 처리하고, 마감 직전으로 몰지 않는 게 중요해요.`, "var(--brake)"]);
+    if (sc.SEN >= 70)
+      notes.push(["몸의 감각이 예민해요", `감각 예민성(${sc.SEN})이 높아요. 소음, 조명, 배고픔, 카페인 같은 몸 쪽 요인이 기분과 집중력에 크게 영향을 줘요. 이어폰, 규칙적인 식사, 카페인 양 조절처럼 몸을 먼저 챙기면 마음도 덜 흔들려요.`, "var(--brake)"]);
+    if (sc.EMO >= 70)
+      notes.push(["감정이 크게 움직여요", `감정 반응성(${sc.EMO})이 높아요. 감정이 올라왔을 때 바로 반응하기보다, 이름을 붙여 보고(‘지금 불안하구나’) 잠깐 시간을 두면 훨씬 덜 휩쓸려요.`, "var(--brake)"]);
+    if (sc.DEP >= 70)
+      notes.push(["깊게 생각하는 힘", `깊은 처리(${sc.DEP})가 높아요. 큰 그림과 이면을 보는 강점이지만, 같은 생각을 반복해서 곱씹는 쪽으로 흐르면 지쳐요. 생각을 종이에 적어서 머리 밖으로 꺼내 두는 게 효과가 커요.`, "var(--brake)"]);
+    if (key === "both" && sc.HSS >= 70 && sc.HSP >= 70)
+      notes.push(["액셀과 브레이크가 둘 다 세요", `예민성(${sc.HSP})과 자극추구(${sc.HSS})가 모두 높아요. ‘해 보고 싶다’와 ‘괜찮을까?’가 동시에 강하게 올라오는 게 자연스러운 상태예요. 이 갈등은 고쳐야 할 결함이 아니라, 속도를 조절하는 법을 익히면 되는 기질이에요.`, "var(--gas)"]);
+
+    const summary = `나의 예민성·자극추구 기질: ${t.name}\n예민성 ${sc.HSP} / 자극추구 ${sc.HSS}\n` +
+      ALL.map(k => `${S[k].name} ${sc[k]}`).join(" · ");
+
+    $("result").innerHTML = `
+      <div style="display:grid;gap:12px">
+        <p class="eyebrow">검사 결과</p>
+        <h1>${t.name}</h1>
+        <p class="meta">${t.sub}${edge ? " · 기준선(60점) 근처라 경계에 가까워요" : ""}</p>
+        <p class="lede">${t.desc}</p>
+      </div>
+
+      <div class="map-wrap">
+        ${map}
+        <div class="big-scores">
+          <div class="big" style="--c:var(--brake)"><div class="lbl"><span>예민성 (브레이크)</span><span>${sc.HSP}</span></div><div class="track"><i style="width:${Math.max(sc.HSP, 2)}%"></i></div></div>
+          <div class="big" style="--c:var(--gas)"><div class="lbl"><span>자극추구 (액셀)</span><span>${sc.HSS}</span></div><div class="track"><i style="width:${Math.max(sc.HSS, 2)}%"></i></div></div>
+          <p class="meta">0–100 · 60 이상이면 높음으로 봐요. 예민성은 아래 다섯 척도의 평균이에요.</p>
+        </div>
+      </div>
+
+      <div class="profile">
+        <h3>세부 척도</h3>
+        ${subs}
+      </div>
+
+      <div class="type-card">
+        <h2>이 유형의 강점과 다루는 법</h2>
+        <div class="cols">
+          <div><h4>이런 점이 강해요</h4><ul>${t.good.map(x => `<li>${x}</li>`).join("")}</ul></div>
+          <div><h4>이렇게 다뤄 보세요</h4><ul>${t.tips.map(x => `<li>${x}</li>`).join("")}</ul></div>
+        </div>
+      </div>
+
+      ${notes.length ? `<div style="display:grid;gap:12px"><h2>세부 패턴에서 보이는 것</h2><div class="notes">${notes.map(n => `<div class="note" style="--c:${n[2]}"><b>${n[0]}</b><span>${n[1]}</span></div>`).join("")}</div></div>` : ""}
+
+      <div class="note" style="--c:var(--muted)">
+        <b>지금의 상태도 영향을 줘요</b>
+        <span>예민성은 타고난 기질이지만, 불안이나 우울이 심한 시기에는 실제보다 높게 나오기 쉬워요. 컨디션이 좋아진 뒤 다시 해 보면 ‘기질’과 ‘지금의 상태’를 구분하는 데 도움이 돼요.</span>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="copyBtn" type="button">결과 복사하기</button>
+        <button class="btn" id="retryBtn" type="button">다시 검사하기</button>
+        <span class="toast" id="toast" role="status"></span>
+      </div>
+      <textarea id="copyText" readonly hidden style="width:100%;min-height:100px">${summary}</textarea>
+
+      <p class="disclaimer">이 검사는 일레인 아론의 ‘매우 예민한 사람(HSP)’ 개념과 자극추구(Sensation Seeking) 연구를 참고해 새로 만든 비공식 간이 검사예요. 공식 HSP 척도가 아니고 진단 도구도 아니에요. 예민함은 병이 아니라 기질의 한 모습이라는 점을 기억해 주세요.</p>
+    `;
+    show("result");
+
+    $("retryBtn").addEventListener("click", restart);
+    $("copyBtn").addEventListener("click", () => {
+      const ok = () => $("toast").textContent = "결과를 복사했어요.";
+      const fallback = () => { const t = $("copyText"); t.hidden = false; t.select(); $("toast").textContent = "아래 글을 직접 복사해 주세요."; };
+      try { navigator.clipboard.writeText(summary).then(ok, fallback); } catch (e) { fallback(); }
+    });
+  }
+})();
+</script>
