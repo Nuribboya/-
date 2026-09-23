@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -201,8 +202,17 @@ class App:
         ttk.Entry(top, textvariable=self.sales_path, width=62).grid(row=0, column=0, sticky=W)
         ttk.Button(top, text="파일 찾기", command=self.on_pick_sales).grid(row=0, column=1, padx=6)
         ttk.Button(top, text="불러오기", command=self.on_load_sales).grid(row=0, column=2)
-        ttk.Label(top, text="매출 앱이 내보낸 파일(.json), 또는 엑셀에서 저장한 표(.csv)를 고르세요.\n표는 첫 줄이  연월,매출,목표  이고 그 아래로 2026-08,24900000,27000000  이런 식입니다.",
+        ttk.Label(top, text="엑셀 장부(.xlsx)를 그대로 고르셔도 됩니다. '1월' 옆 칸의 금액을 읽고,\n합계 줄은 알아서 걸러냅니다.  매출 앱이 내보낸 .json 이나 .csv 도 됩니다.",
                   foreground="#666").grid(row=1, column=0, columnspan=3, sticky=W, pady=(6, 0))
+
+        ttk.Label(top, text="월 목표").grid(row=2, column=0, sticky=W, pady=(8, 0))
+        self.monthly_target = StringVar(value=str(saved.get("monthly_target", "")))
+        target_row = ttk.Frame(top)
+        target_row.grid(row=2, column=1, columnspan=2, sticky=W, pady=(8, 0))
+        ttk.Entry(target_row, textvariable=self.monthly_target, width=16).pack(side=LEFT)
+        ttk.Label(target_row, text="원  — 장부에 목표가 없을 때 여기에 적으세요",
+                  foreground="#666").pack(side=LEFT, padx=6)
+        ttk.Button(target_row, text="적용", command=self.on_apply_target).pack(side=LEFT)
 
         mid = ttk.LabelFrame(root, text="달마다 얼마 벌었나", padding=6)
         mid.pack(fill=BOTH, expand=True, padx=10, pady=5)
@@ -258,10 +268,26 @@ class App:
 
     def on_pick_sales(self) -> None:
         path = filedialog.askopenfilename(
-            filetypes=[("매출 기록", "*.json *.csv"), ("모든 파일", "*.*")])
+            filetypes=[("매출 파일", "*.xlsx *.xlsm *.csv *.json"),
+                       ("엑셀", "*.xlsx *.xlsm"), ("모든 파일", "*.*")])
         if path:
             self.sales_path.set(path)
             self.on_load_sales()
+
+    def on_apply_target(self) -> None:
+        if not self.book:
+            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
+            return
+        try:
+            target = int(re.sub(r"[^\d]", "", self.monthly_target.get() or "0"))
+        except ValueError:
+            target = 0
+        if target <= 0:
+            messagebox.showwarning("금액 확인", "월 목표 금액을 숫자로 적어주세요. (예: 100000000)")
+            return
+        self.book.apply_target(target, overwrite=True)
+        self._render_sales()
+        self.say(f"월 목표를 {target / 1e4:,.0f}만원으로 잡았습니다.")
 
     def on_load_sales(self) -> None:
         path = self.sales_path.get().strip()
@@ -279,6 +305,17 @@ class App:
             return
 
         self.book = book
+        # 장부에 목표가 없으면 최근 평균을 제안해 둔다. 그대로 쓰든 고치든 사장님 몫.
+        if not book.has_targets and not self.monthly_target.get().strip():
+            average = book.average_revenue()
+            if average:
+                self.monthly_target.set(str(average))
+                self.say(f"장부에 목표가 없어 최근 평균({average / 1e4:,.0f}만원)을 "
+                         f"'월 목표' 칸에 넣어 두었습니다. 고치고 [적용]을 누르세요.")
+        self._render_sales()
+
+    def _render_sales(self) -> None:
+        book = self.book
         self.sales_tree.delete(*self.sales_tree.get_children())
         for m in book.sorted_months():
             rate = f"{m.rate * 100:.0f}%" if m.rate is not None else "-"
@@ -293,7 +330,11 @@ class App:
     def _refresh_gap(self) -> None:
         record = self.book.latest_closed() if self.book else None
         if record is None:
-            self.gap_label.configure(text="마감된 달이 없습니다.")
+            self.gap_label.configure(text="끝난 달이 없습니다. 장부를 확인해 주세요.")
+            self.gap_button.configure(state="disabled")
+            return
+        if not self.book.has_targets:
+            self.gap_label.configure(text="'월 목표'를 적고 [적용]을 누르세요.")
             self.gap_button.configure(state="disabled")
             return
         months_back = int(self.months_back.get() or 1)
@@ -348,6 +389,7 @@ class App:
             "sector": self.sector.get(),
             "include_demand_orgs": self.include_orgs.get(),
             "sales_path": self.sales_path.get(),
+            "monthly_target": self.monthly_target.get(),
             "months_back": self.months_back.get(),
         }
 

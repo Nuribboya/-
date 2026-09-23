@@ -1063,3 +1063,146 @@ def test_lookup_failure_does_not_stop_the_search(monkeypatch):
 
     client = nts_module.NtsClient("key", sleep_sec=0, session=Boom())
     assert client.statuses(["1234567890"]) == {}
+
+
+# --- 엑셀 장부 읽기 --------------------------------------------------------------
+
+def _make_xlsx(tmp_path, sheets: dict[str, dict[str, object]], name="장부.xlsx"):
+    """{시트이름: {'B4': '1월', 'C4': 88158000}} 로 최소한의 xlsx 를 만든다."""
+    import re as _re
+    import zipfile
+
+    strings: list[str] = []
+
+    def sid(text: str) -> int:
+        if text not in strings:
+            strings.append(text)
+        return strings.index(text)
+
+    sheet_xml = {}
+    for i, (title, cells) in enumerate(sheets.items(), 1):
+        rows: dict[int, list[str]] = {}
+        for ref, value in cells.items():
+            row = int(_re.match(r"[A-Z]+(\d+)", ref).group(1))
+            if isinstance(value, str):
+                cell = f'<c r="{ref}" t="s"><v>{sid(value)}</v></c>'
+            else:
+                cell = f'<c r="{ref}"><v>{value}</v></c>'
+            rows.setdefault(row, []).append(cell)
+        body = "".join(f'<row r="{r}">{"".join(cs)}</row>' for r, cs in sorted(rows.items()))
+        sheet_xml[f"xl/worksheets/sheet{i}.xml"] = (
+            '<?xml version="1.0"?><worksheet xmlns='
+            '"http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f"<sheetData>{body}</sheetData></worksheet>")
+
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as zf:
+        sheet_tags = "".join(
+            f'<sheet name="{t}" sheetId="{i}" r:id="rId{i}"/>'
+            for i, t in enumerate(sheets, 1))
+        zf.writestr("xl/workbook.xml",
+                    '<?xml version="1.0"?><workbook xmlns='
+                    '"http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/'
+                    f'relationships"><sheets>{sheet_tags}</sheets></workbook>')
+        rels = "".join(f'<Relationship Id="rId{i}" Target="worksheets/sheet{i}.xml"/>'
+                       for i in range(1, len(sheets) + 1))
+        zf.writestr("xl/_rels/workbook.xml.rels",
+                    '<?xml version="1.0"?><Relationships xmlns='
+                    f'"http://schemas.openxmlformats.org/package/2006/relationships">{rels}'
+                    "</Relationships>")
+        zf.writestr("xl/sharedStrings.xml",
+                    '<?xml version="1.0"?><sst xmlns='
+                    '"http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                    + "".join(f"<si><t>{t}</t></si>" for t in strings) + "</sst>")
+        for member, xml in sheet_xml.items():
+            zf.writestr(member, xml)
+    return path
+
+
+def test_reads_a_handwritten_excel_ledger(tmp_path):
+    from prime_contractor.sales import load_sales
+    path = _make_xlsx(tmp_path, {"월매출장": {
+        "C2": "2026년 월매출원장리스트", "C3": "매출금액",
+        "B4": "1월", "C4": 88158000,
+        "B5": "2월", "C5": 88392000,
+        "B6": "3월", "C6": 120105000,
+    }})
+    book = load_sales(path)
+    assert [m.ym for m in book.sorted_months()] == ["2026-01", "2026-02", "2026-03"]
+    assert book.month("2026-01").revenue == 88158000
+
+
+def test_total_row_is_not_read_as_a_month():
+    """실제 장부에서 1~9월 합계가 '10월' 칸에 들어앉아 있었다.
+
+    그냥 읽으면 '10월에 8억 벌었다'가 되어 목표 대비 계산이 통째로 어긋난다.
+    """
+    from prime_contractor.sales import _block_to_months
+    block = {"col": "C", "rows": {
+        4: (1, 100.0), 5: (2, 200.0), 6: (3, 300.0),
+        7: (4, 600.0),                      # ← 앞선 세 달의 합계
+    }}
+    months = _block_to_months(block, 2026)
+    assert [m.ym for m in months] == ["2026-01", "2026-02", "2026-03"]
+    assert sum(m.revenue for m in months) == 600
+
+
+def test_side_by_side_blocks_are_kept_apart(tmp_path):
+    """한 행에 우리 매출과 거래처 마감이 나란히 있는 장부가 실제로 있다."""
+    from prime_contractor.sales import load_sales
+    path = _make_xlsx(tmp_path, {"월매출장": {
+        "C2": "2026년 월매출", "C3": "매출금액", "G3": "결제금액",
+        "B4": "1월", "C4": 88158000, "F4": "1월", "G4": 13003045,
+        "B5": "2월", "C5": 88392000, "F5": "2월", "G5": 15005813,
+    }})
+    book = load_sales(path)
+    # 왼쪽(우리 매출) 블록을 골라야 한다. 오른쪽 거래처 금액이 섞이면 안 된다.
+    assert book.month("2026-01").revenue == 88158000
+    assert sum(m.revenue for m in book.months) == 88158000 + 88392000
+
+
+def test_year_comes_from_the_title_when_cells_only_say_month(tmp_path):
+    from prime_contractor.sales import load_sales
+    path = _make_xlsx(tmp_path, {"월매출장": {
+        "C2": "2024년 월매출원장리스트", "C3": "매출금액",
+        "B4": "1월", "C4": 5000000,
+    }}, name="ledger.xlsx")
+    assert load_sales(path).months[0].ym == "2024-01"
+
+
+def test_customer_sheet_loses_to_the_revenue_sheet(tmp_path):
+    from prime_contractor.sales import load_sales
+    path = _make_xlsx(tmp_path, {
+        "거래처매출장": {"C2": "2026년", "C3": "결제금액", "B4": "1월", "C4": 238000},
+        "월매출장": {"C2": "2026년", "C3": "매출금액", "B4": "1월", "C4": 88158000},
+    })
+    assert load_sales(path).month("2026-01").revenue == 88158000
+
+
+def test_excel_without_any_month_rows_says_so(tmp_path):
+    from prime_contractor.sales import load_sales
+    path = _make_xlsx(tmp_path, {"연차표": {"B2": "홍길동", "C2": 15}})
+    with pytest.raises(ValueError, match="월별 매출"):
+        load_sales(path)
+
+
+def test_target_can_be_supplied_when_the_ledger_has_none():
+    book = _book([("2026-07", 90000000), ("2026-08", 82142000)])
+    assert not book.has_targets
+    assert book.apply_target(100000000) == 2
+    assert book.has_targets
+    assert book.month("2026-08").gap == 17858000
+
+
+def test_apply_target_keeps_targets_already_written():
+    book = _book([("2026-07", 90000000), ("2026-08", 82142000)], {"2026-07": 95000000})
+    book.apply_target(100000000)
+    assert book.month("2026-07").target == 95000000      # 적혀 있던 값은 그대로
+    assert book.month("2026-08").target == 100000000
+
+
+def test_average_revenue_ignores_the_running_month():
+    from datetime import date
+    book = _book([("2026-06", 60000000), ("2026-07", 80000000), ("2026-09", 1000000)])
+    assert book.average_revenue(6, date(2026, 9, 15)) == 70000000

@@ -65,6 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--sales", required=True,
                    help="매출 파일 (매출 앱 JSON 스냅샷 또는 연월,매출,목표 CSV)")
     g.add_argument("--month", default=None, help="볼 연월 (예: 2026-09). 기본은 마지막 마감월")
+    g.add_argument("--target", type=int, default=None,
+                   help="월 목표 금액(원). 매출 파일에 목표가 없을 때 쓴다")
     g.add_argument("--months-back", type=int, default=1,
                    help="부족분을 몇 달치로 볼지 (기본 1). 한 달만 보면 들쑥날쑥하다")
     g.add_argument("--offline", action="store_true", help="샘플 후보로 시험 실행")
@@ -124,6 +126,15 @@ def _cmd_gap(args) -> int:
         return 2
     if not book.months:
         print("[오류] 매출 기록이 비어 있습니다.", file=sys.stderr)
+        return 2
+
+    if args.target:
+        book.apply_target(args.target)
+    elif not book.has_targets:
+        average = book.average_revenue()
+        print(f"[안내] 매출 파일에 목표가 없습니다. --target 으로 월 목표를 넣어주세요.\n"
+              f"       참고로 최근 평균 매출은 월 {average / 1e4:,.0f}만원입니다.",
+              file=sys.stderr)
         return 2
 
     record = book.month(args.month) if args.month else book.latest_closed()

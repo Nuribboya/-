@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -64,6 +65,33 @@ class SalesBook:
     def month(self, ym: str) -> MonthRecord | None:
         return next((m for m in self.months if m.ym == ym), None)
 
+    def apply_target(self, monthly: int, overwrite: bool = False) -> int:
+        """목표가 비어 있는 달에 월 목표를 채운다. 채운 달 수를 돌려준다.
+
+        손으로 쓰는 장부에는 목표 칸이 없는 경우가 많다. 그렇다고 목표 없이
+        두면 '얼마나 모자라는지'를 셀 수 없어 부족분 채우기가 동작하지 않는다.
+        """
+        if monthly <= 0:
+            return 0
+        filled = 0
+        for m in self.months:
+            if overwrite or not m.target:
+                m.target = monthly
+                filled += 1
+        return filled
+
+    @property
+    def has_targets(self) -> bool:
+        return any(m.target for m in self.months)
+
+    def average_revenue(self, months_back: int = 6, today: date | None = None) -> int:
+        """최근 몇 달 평균 매출. 목표를 정할 때 기준으로 삼기 좋다."""
+        today = today or date.today()
+        current = f"{today.year:04d}-{today.month:02d}"
+        closed = [m for m in self.sorted_months() if m.ym < current and m.revenue]
+        recent = closed[-months_back:]
+        return int(sum(m.revenue for m in recent) / len(recent)) if recent else 0
+
     def recent_gap(self, months_back: int = 3, today: date | None = None) -> int:
         """최근 몇 달의 부족분 합계. 한 달만 보면 들쑥날쑥해서 오판하기 쉽다."""
         today = today or date.today()
@@ -73,12 +101,156 @@ class SalesBook:
 
 
 def load_sales(path: str | Path) -> SalesBook:
-    """매출 앱의 JSON 스냅샷 또는 CSV 를 읽는다."""
+    """매출 앱의 JSON 스냅샷, 엑셀 장부(.xlsx), 또는 CSV 를 읽는다."""
     path = Path(path)
+    if path.suffix.lower() in (".xlsx", ".xlsm"):
+        return _from_xlsx(path)
     text = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".json" or text.lstrip().startswith("{"):
         return _from_snapshot(json.loads(text), source=str(path))
     return _from_csv(text, source=str(path))
+
+
+# --- 엑셀 장부 읽기 -------------------------------------------------------------
+#
+# 손으로 만든 장부는 표가 반듯하지 않다. 실제 파일에서 본 것들:
+#   · 한 행에 블록이 좌우로 둘 (왼쪽은 우리 매출, 오른쪽은 거래처 마감)
+#   · 합계가 '10월' 자리에 들어앉아 있다 (1~9월 합계가 10월 칸에)
+#   · 연도는 칸이 아니라 제목 글자 안에 있다 ("2026년 월매출원장리스트")
+# 그래서 '월 이름 옆의 숫자'를 블록별로 모으고, 앞선 값들의 합과 같은 칸은
+# 합계로 보고 버린다. 합계를 매출로 잘못 읽으면 목표 대비 계산이 통째로 어긋난다.
+
+_MONTH_LABEL = re.compile(r"^\s*(1[0-2]|[1-9])\s*월\s*$")
+_YM_LABEL = re.compile(r"^\s*(20\d{2})\s*[-./년]\s*(1[0-2]|0?[1-9])\s*월?\s*$")
+_YEAR_IN_TEXT = re.compile(r"(20\d{2})\s*년")
+
+#: 월 이름에서 오른쪽으로 이만큼 안에 있는 숫자를 그 달의 금액으로 본다.
+_AMOUNT_SEARCH_WIDTH = 4
+#: 이 글자가 머리글에 있으면 '우리 매출' 블록으로 본다.
+_REVENUE_HINTS = ("매출", "수입", "판매")
+_TARGET_HINTS = ("목표", "계획")
+
+
+def _from_xlsx(path: Path) -> SalesBook:
+    from prime_contractor.xlsx import col_index, read_sheets
+
+    sheets = read_sheets(path)
+    best: tuple[int, list[MonthRecord]] = (-1, [])
+    for name, grid in sheets.items():
+        blocks = _month_blocks(grid, col_index)
+        if not blocks:
+            continue
+        year = _guess_year(grid, name, path)
+        for block in blocks:
+            months = _block_to_months(block, year)
+            if not months:
+                continue
+            rank = _block_rank(name, block, len(months))
+            if rank > best[0]:
+                best = (rank, months)
+
+    if not best[1]:
+        raise ValueError("엑셀에서 월별 매출을 찾지 못했습니다. "
+                         "'1월' 같은 월 이름과 그 옆 칸에 금액이 있어야 합니다.")
+    return SalesBook(months=best[1], source=str(path))
+
+
+def _month_blocks(grid, col_index) -> list[dict]:
+    """월 이름 + 오른쪽 금액을 찾아, 금액이 놓인 열 기준으로 묶는다.
+
+    같은 행에 블록이 여럿이어도 열이 다르므로 자연히 나뉜다.
+    """
+    blocks: dict[str, dict] = {}
+    for (row, col), value in grid.items():
+        if not isinstance(value, str):
+            continue
+        month = _month_of(value)
+        if month is None:
+            continue
+        found = _amount_right_of(grid, row, col, col_index)
+        if found is None:
+            continue
+        amount_col, amount = found
+        block = blocks.setdefault(amount_col, {"col": amount_col, "rows": {}})
+        block["rows"][row] = (month, amount)
+    return list(blocks.values())
+
+
+def _month_of(text: str) -> int | None:
+    ym = _YM_LABEL.match(text)
+    if ym:
+        return int(ym.group(2))
+    plain = _MONTH_LABEL.match(text)
+    return int(plain.group(1)) if plain else None
+
+
+def _amount_right_of(grid, row: int, col: str, col_index):
+    """월 이름 오른쪽에서 가장 가까운 숫자 칸."""
+    start = col_index(col)
+    for (r, c), v in grid.items():
+        if r != row or not isinstance(v, (int, float)):
+            continue
+        gap = col_index(c) - start
+        if 0 < gap <= _AMOUNT_SEARCH_WIDTH:
+            return c, float(v)
+    return None
+
+
+#: 합계로 보려면 앞에 최소 이만큼의 달이 있어야 한다.
+_MIN_MONTHS_BEFORE_TOTAL = 2
+
+
+def _block_to_months(block: dict, year: int) -> list[MonthRecord]:
+    """행 순서대로 읽고, 맨 끝에 붙은 합계 칸만 걷어낸다.
+
+    '앞선 값들의 합과 같으면 합계'라는 규칙을 아무 칸에나 적용하면 안 된다.
+    3월 매출이 우연히 1·2월 합과 같으면 3월이 통째로 사라진다. 합계는 표
+    맨 아래에 붙으므로 **마지막 값만** 검사한다.
+    """
+    entries: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    for row in sorted(block["rows"]):
+        month, amount = block["rows"][row]
+        if amount <= 0:
+            continue
+        ym = f"{year:04d}-{month:02d}"
+        if ym in seen:                   # 같은 달이 또 나오면 앞엣것만 쓴다
+            continue
+        seen.add(ym)
+        entries.append((ym, amount))
+
+    # 딱 한 번만 걷어낸다. 합계를 뗀 뒤 남은 마지막 달이 또 우연히 나머지의
+    # 합과 같을 수 있는데, 거기까지 지우면 멀쩡한 달을 잃는다.
+    if len(entries) > _MIN_MONTHS_BEFORE_TOTAL:
+        head_sum = sum(a for _, a in entries[:-1])
+        if abs(entries[-1][1] - head_sum) < 1.0:
+            entries.pop()
+
+    return [MonthRecord(ym=ym, revenue=int(a)) for ym, a in entries]
+
+
+def _block_rank(sheet_name: str, block: dict, month_count: int) -> int:
+    """어느 블록이 '우리 월매출'인지 고른다. 머리글 글자를 우선으로 본다."""
+    score = month_count
+    if any(h in sheet_name for h in _REVENUE_HINTS):
+        score += 20
+    if "거래처" in sheet_name or "부가" in sheet_name:
+        score -= 15
+    return score
+
+
+def _guess_year(grid, sheet_name: str, path: Path) -> int:
+    """연도는 칸이 아니라 제목이나 파일 이름에 있는 경우가 많다."""
+    for source in (sheet_name, path.name):
+        found = _YEAR_IN_TEXT.search(source) or re.search(r"(20\d{2})", source)
+        if found:
+            return int(found.group(1))
+    for value in grid.values():
+        if isinstance(value, str):
+            found = _YEAR_IN_TEXT.search(value)
+            if found:
+                return int(found.group(1))
+    return date.today().year
 
 
 def _from_snapshot(payload: dict, source: str = "") -> SalesBook:
