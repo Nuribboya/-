@@ -1704,15 +1704,36 @@ def test_default_keywords_shrink_without_losing_coverage():
 
 
 def test_rate_limiter_spaces_requests_across_threads():
-    import threading, time
-    limiter = g2b.RateLimiter(0.02)
-    stamps = []
+    """여러 스레드가 한꺼번에 몰려도 시작 시각은 min_interval 씩 벌어져야 한다.
+
+    실제 시간으로 재면 윈도우 타이머 눈금(0.0156초) 때문에 0.016 이 0.015 로
+    찍혀 떨어진다(CI 에서 실제로 그랬다). 멈춘 시계를 끼워 정확히 본다.
+    """
+    import threading
+    frozen = [100.0]
+    slept = []
+    limiter = g2b.RateLimiter(0.02, clock=lambda: frozen[0], sleep=slept.append)
+    starts = []
+    lock = threading.Lock()
+
     def hit():
-        limiter.wait()
-        stamps.append(time.monotonic())
+        start = limiter.wait()
+        with lock:
+            starts.append(start)
+
     threads = [threading.Thread(target=hit) for _ in range(6)]
     for t in threads: t.start()
     for t in threads: t.join()
-    stamps.sort()
-    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
-    assert min(gaps) >= 0.015                    # 여러 스레드가 동시에 몰려도 간격은 지킨다
+    starts.sort()
+    assert starts == pytest.approx([100.0 + 0.02 * i for i in range(6)])
+    assert sorted(slept) == pytest.approx([0.02 * i for i in range(1, 6)])
+
+
+def test_rate_limiter_does_not_wait_once_time_has_passed():
+    clock = [0.0]
+    slept = []
+    limiter = g2b.RateLimiter(0.05, clock=lambda: clock[0], sleep=slept.append)
+    limiter.wait()
+    clock[0] = 1.0                                # 한참 뒤의 요청
+    limiter.wait()
+    assert slept == []

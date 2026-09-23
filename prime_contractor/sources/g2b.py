@@ -116,21 +116,27 @@ def dedupe_keywords(keywords) -> tuple[str, ...]:
 class RateLimiter:
     """여러 스레드가 함께 써도 요청 시작 간격이 min_interval 초 이상 벌어지게 한다."""
 
-    def __init__(self, min_interval: float) -> None:
+    def __init__(self, min_interval: float, clock=time.monotonic, sleep=time.sleep) -> None:
+        # clock·sleep 을 바꿔 끼울 수 있게 둔다. 실제 시간으로 간격을 재는 시험은
+        # 윈도우 타이머 눈금(약 0.0156초) 때문에 흔들린다 — 실제로 한 번 떨어졌다.
         self.min_interval = max(0.0, min_interval)
+        self._clock = clock
+        self._sleep = sleep
         self._lock = threading.Lock()
         self._next = 0.0
 
-    def wait(self) -> None:
+    def wait(self) -> float:
+        """차례가 올 때까지 기다린다. 이 요청이 시작하기로 잡힌 시각을 돌려준다."""
         if self.min_interval <= 0:
-            return
+            return self._clock()
         with self._lock:
-            now = time.monotonic()
+            now = self._clock()
             start = max(now, self._next)
             self._next = start + self.min_interval
         delay = start - now
         if delay > 0:
-            time.sleep(delay)
+            self._sleep(delay)
+        return start
 
 
 class ResponseCache:
