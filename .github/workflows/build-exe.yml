@@ -79,20 +79,33 @@ jobs:
           retention-days: 30
 
       - name: Release 만들기
-        # gh release create 는 태그가 없으면 이 커밋에 태그까지 만들어 준다.
+        # 릴리스를 먼저 만들고(파일 없이), 파일은 따로 올린 뒤 실제로 붙었는지
+        # 확인한다. 한 번에 만들면서 올리는 방식은 파일이 조용히 빠진 채 '성공'
+        # 으로 끝난 적이 있다(v1.3.0·v1.4.0). 파일 없는 릴리스는 받는 사람에게
+        # 빈 페이지일 뿐이라, 확인이 안 되면 여기서 빌드를 실패시킨다.
         if: steps.ver.outputs.release != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: finder-v${{ steps.ver.outputs.release }}
         run: |
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "$TAG 릴리스가 이미 있어 파일만 덮어씁니다."
-            gh release upload "$TAG" dist/PrimeFinder.exe --clobber
-          else
-            gh release create "$TAG" dist/PrimeFinder.exe \
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" \
               --target "$GITHUB_SHA" \
               --title "원청 찾기 $TAG" \
               --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
           fi
+
+          for attempt in 1 2 3; do
+            gh release upload "$TAG" dist/PrimeFinder.exe --clobber && break
+            echo "업로드 재시도 $attempt..."; sleep $((attempt * 5))
+          done
+
+          size=$(gh release view "$TAG" --json assets \
+                   --jq '.assets[] | select(.name=="PrimeFinder.exe") | .size')
+          if [ -z "$size" ] || [ "$size" -lt 1000000 ]; then
+            echo "::error::$TAG 에 PrimeFinder.exe 가 붙지 않았습니다 (크기: ${size:-없음})."
+            exit 1
+          fi
+          echo "확인: PrimeFinder.exe ${size} bytes 첨부됨"
           echo "받는 곳: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
