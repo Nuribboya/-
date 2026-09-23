@@ -1206,3 +1206,91 @@ def test_average_revenue_ignores_the_running_month():
     from datetime import date
     book = _book([("2026-06", 60000000), ("2026-07", 80000000), ("2026-09", 1000000)])
     assert book.average_revenue(6, date(2026, 9, 15)) == 70000000
+
+
+# --- 손익분기 ------------------------------------------------------------------
+
+def test_breakeven_arithmetic():
+    from prime_contractor.breakeven import CostModel
+    m = CostModel(monthly_fixed=30_000_000, variable_ratio=0.6, monthly_profit=5_000_000)
+    assert m.margin_ratio == pytest.approx(0.4)
+    assert m.breakeven == 75_000_000            # 3천만 ÷ 0.4
+    assert m.target == 87_500_000               # (3천만+5백만) ÷ 0.4
+    assert m.profit_at(75_000_000) == 0         # 손익분기에서 딱 0
+    assert m.profit_at(73_287_092) < 0          # 그 밑이면 적자
+
+
+def test_without_profit_target_the_breakeven_is_the_target():
+    from prime_contractor.breakeven import CostModel
+    m = CostModel(monthly_fixed=20_000_000, variable_ratio=0.5)
+    assert m.target == m.breakeven == 40_000_000
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1.2, -0.1])
+def test_impossible_cost_ratio_is_rejected(ratio):
+    """재료비가 매출과 같거나 크면 팔수록 손해라 손익분기가 없다."""
+    from prime_contractor.breakeven import CostModel
+    with pytest.raises(ValueError):
+        CostModel(monthly_fixed=10_000_000, variable_ratio=ratio)
+
+
+@pytest.mark.parametrize("text,expected", [("60", 0.6), ("60%", 0.6), ("0.6", 0.6), ("55.5", 0.555)])
+def test_ratio_accepts_percent_or_fraction(text, expected):
+    from prime_contractor.breakeven import parse_ratio
+    assert parse_ratio(text) == pytest.approx(expected)
+
+
+def test_cost_model_from_income_statement():
+    from prime_contractor.breakeven import from_financials
+    m = from_financials(annual_revenue=1_200_000_000, cost_of_sales=720_000_000,
+                        sga=240_000_000)
+    assert m.variable_ratio == pytest.approx(0.6)
+    assert m.monthly_fixed == 20_000_000        # 판관비 2.4억 ÷ 12
+
+
+def test_treating_all_cost_of_sales_as_variable_understates_breakeven():
+    """흑자 회사에서 매출원가를 전부 변동비로 보면 손익분기가 실제보다 낮게 나온다.
+
+    '안전하다'고 잘못 알려주는 쪽으로 틀리므로, 안내문에서 이 방향을 경고해야 한다.
+    """
+    from prime_contractor.breakeven import from_financials
+    naive = from_financials(1_200_000_000, 720_000_000, 240_000_000)
+    adjusted = from_financials(1_200_000_000, 720_000_000, 240_000_000,
+                               fixed_share_of_cost_of_sales=0.25)
+    assert adjusted.variable_ratio < naive.variable_ratio
+    assert adjusted.monthly_fixed > naive.monthly_fixed
+    assert naive.breakeven < adjusted.breakeven        # 50,000,000 < 약 63,636,364
+    assert naive.breakeven == 50_000_000
+
+
+def test_breakeven_report_counts_loss_months_and_skips_running_month():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.report import render_breakeven
+    book = _book([("2026-06", 73_287_092), ("2026-07", 118_740_500), ("2026-08", 82_142_000),
+                  ("2026-09", 52_236_400)])
+    text = render_breakeven(book, CostModel(30_000_000, 0.6), today=date(2026, 9, 23))
+    assert "끝난 3개월 중 적자 1개월" in text      # 6월만 적자, 9월은 진행 중이라 안 센다
+    assert "진행중" in text
+    assert "7,500만원" in text
+
+
+def test_gap_uses_breakeven_target_when_costs_given(tmp_path, capsys):
+    from prime_contractor import cli
+    path = tmp_path / "매출.csv"
+    path.write_text("연월,매출\n2026-06,73287092\n2026-07,118740500\n", encoding="utf-8")
+    code = cli.main(["gap", "--sales", str(path), "--month", "2026-06",
+                     "--fixed-cost", "30000000", "--variable-ratio", "60", "--offline"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "손익분기 매출  월 7,500만원" in out
+    assert "171만원 모자랍니다" in out           # 7,500만 − 7,329만
+
+
+def test_gap_needs_both_cost_numbers(tmp_path, capsys):
+    from prime_contractor import cli
+    path = tmp_path / "매출.csv"
+    path.write_text("연월,매출\n2026-06,73287092\n", encoding="utf-8")
+    code = cli.main(["gap", "--sales", str(path), "--fixed-cost", "30000000", "--offline"])
+    assert code == 2
+    assert "둘 다" in capsys.readouterr().err

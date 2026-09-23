@@ -67,6 +67,17 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--month", default=None, help="볼 연월 (예: 2026-09). 기본은 마지막 마감월")
     g.add_argument("--target", type=int, default=None,
                    help="월 목표 금액(원). 매출 파일에 목표가 없을 때 쓴다")
+    cost = g.add_argument_group("손익분기로 목표 잡기 (--target 대신)")
+    cost.add_argument("--fixed-cost", type=int, default=None,
+                      help="월 고정비(원) — 인건비·임차료·경비·이자")
+    cost.add_argument("--variable-ratio", default=None,
+                      help="재료·외주비 비율 (60 또는 0.6)")
+    cost.add_argument("--target-profit", type=int, default=0,
+                      help="월 목표이익(원). 없으면 손익분기가 곧 목표")
+    cost.add_argument("--annual-revenue", type=int, default=None,
+                      help="재무제표 연 매출액(원) — 아래 두 개와 같이 쓰면 고정비·비율을 계산")
+    cost.add_argument("--cost-of-sales", type=int, default=None, help="재무제표 매출원가(원)")
+    cost.add_argument("--sga", type=int, default=None, help="재무제표 판매비와관리비(원)")
     g.add_argument("--months-back", type=int, default=1,
                    help="부족분을 몇 달치로 볼지 (기본 1). 한 달만 보면 들쑥날쑥하다")
     g.add_argument("--offline", action="store_true", help="샘플 후보로 시험 실행")
@@ -115,6 +126,27 @@ def _within(args) -> float | None:
     return args.within
 
 
+def _cost_model(args):
+    """명령줄에서 비용 구조를 만든다. 아무것도 안 주면 None."""
+    from prime_contractor.breakeven import CostModel, from_financials, parse_ratio
+    financial = (args.annual_revenue, args.cost_of_sales, args.sga)
+    if any(v is not None for v in financial):
+        if not all(v is not None for v in financial):
+            raise ValueError("재무제표로 계산하려면 --annual-revenue, --cost-of-sales, "
+                             "--sga 세 개를 모두 넣어주세요.")
+        model = from_financials(*financial)
+        model.monthly_profit = args.target_profit or 0
+        return model
+    if args.fixed_cost is None and args.variable_ratio is None:
+        return None
+    if args.fixed_cost is None or args.variable_ratio is None:
+        raise ValueError("손익분기를 계산하려면 --fixed-cost 와 --variable-ratio 가 "
+                         "둘 다 필요합니다.")
+    return CostModel(monthly_fixed=args.fixed_cost,
+                     variable_ratio=parse_ratio(args.variable_ratio),
+                     monthly_profit=args.target_profit or 0)
+
+
 def _cmd_gap(args) -> int:
     from prime_contractor.sales import load_sales, plan_to_close_gap
     from prime_contractor.report import render_gap
@@ -128,7 +160,15 @@ def _cmd_gap(args) -> int:
         print("[오류] 매출 기록이 비어 있습니다.", file=sys.stderr)
         return 2
 
-    if args.target:
+    try:
+        model = _cost_model(args)
+    except ValueError as exc:
+        print(f"[오류] {exc}", file=sys.stderr)
+        return 2
+
+    if model is not None:
+        book.apply_target(model.target, overwrite=True)
+    elif args.target:
         book.apply_target(args.target)
     elif not book.has_targets:
         average = book.average_revenue()
@@ -177,6 +217,10 @@ def _cmd_gap(args) -> int:
 
     plan = plan_to_close_gap(gap, result.passed, lookback_days=cfg.lookback_days,
                              max_rows=args.max_rows)
+    if model is not None:
+        from prime_contractor.report import render_breakeven
+        print(render_breakeven(book, model))
+        print()
     print(render_gap(book, record, plan))
     if args.out:
         print(f"\nCSV 저장: {write_csv(result, args.out)}")

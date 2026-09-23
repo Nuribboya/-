@@ -31,8 +31,8 @@ from prime_contractor import __version__
 
 COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
            ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
-SALES_COLUMNS = (("연월", 90), ("실제 매출", 115), ("목표", 115),
-                 ("달성률", 70), ("모자란 돈", 115))
+SALES_COLUMNS = (("연월", 85), ("실제 매출", 110), ("목표", 110),
+                 ("달성률", 65), ("모자란 돈", 105), ("예상 손익", 110))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
 
@@ -214,6 +214,35 @@ class App:
                   foreground="#666").pack(side=LEFT, padx=6)
         ttk.Button(target_row, text="적용", command=self.on_apply_target).pack(side=LEFT)
 
+        cost = ttk.LabelFrame(root, text="손익분기로 목표 잡기 — 이 밑으로 가면 적자인 선",
+                              padding=10)
+        cost.pack(fill=X, padx=10, pady=5)
+        self.fixed_cost = StringVar(value=str(saved.get("fixed_cost", "")))
+        self.variable_ratio = StringVar(value=str(saved.get("variable_ratio", "")))
+        self.target_profit = StringVar(value=str(saved.get("target_profit", "")))
+
+        ttk.Label(cost, text="월 고정비").grid(row=0, column=0, sticky=W)
+        ttk.Entry(cost, textvariable=self.fixed_cost, width=14).grid(row=0, column=1, sticky=W)
+        ttk.Label(cost, text="원  (인건비·임차료·경비·이자)", foreground="#666").grid(
+            row=0, column=2, sticky=W, padx=(4, 16))
+        ttk.Label(cost, text="재료·외주비").grid(row=0, column=3, sticky=W)
+        ttk.Entry(cost, textvariable=self.variable_ratio, width=6).grid(row=0, column=4, sticky=W)
+        ttk.Label(cost, text="%  (매출 대비)", foreground="#666").grid(
+            row=0, column=5, sticky=W, padx=(4, 0))
+
+        ttk.Label(cost, text="월 목표이익").grid(row=1, column=0, sticky=W, pady=(6, 0))
+        ttk.Entry(cost, textvariable=self.target_profit, width=14).grid(
+            row=1, column=1, sticky=W, pady=(6, 0))
+        ttk.Label(cost, text="원  (비워두면 손익분기가 곧 목표)", foreground="#666").grid(
+            row=1, column=2, sticky=W, padx=(4, 16), pady=(6, 0))
+        buttons = ttk.Frame(cost)
+        buttons.grid(row=1, column=3, columnspan=3, sticky=W, pady=(6, 0))
+        ttk.Button(buttons, text="손익분기로 목표 잡기",
+                   command=self.on_apply_breakeven).pack(side=LEFT)
+        ttk.Button(buttons, text="재무제표로 채우기",
+                   command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
+        self.cost_model = None
+
         mid = ttk.LabelFrame(root, text="달마다 얼마 벌었나", padding=6)
         mid.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.sales_tree = ttk.Treeview(mid, columns=[c for c, _ in SALES_COLUMNS],
@@ -274,6 +303,85 @@ class App:
             self.sales_path.set(path)
             self.on_load_sales()
 
+    # --- 손익분기 -------------------------------------------------------------
+
+    def _read_cost_model(self, quiet: bool = False):
+        """입력 칸에서 비용 구조를 만든다. 문제가 있으면 안내하고 None.
+
+        quiet=True 면 안내창 없이 None 만 돌려준다 (파일 불러올 때 자동 적용용).
+        """
+        from prime_contractor.breakeven import CostModel, parse_ratio
+        fixed = int(re.sub(r"[^\d]", "", self.fixed_cost.get() or "") or 0)
+        ratio_text = self.variable_ratio.get().strip()
+        profit = int(re.sub(r"[^\d]", "", self.target_profit.get() or "") or 0)
+        if not fixed or not ratio_text:
+            if quiet:
+                return None
+            messagebox.showwarning(
+                "숫자가 필요합니다",
+                "'월 고정비'와 '재료·외주비' 비율을 둘 다 적어주세요.\n\n"
+                "모르시면 [재무제표로 채우기]로 손익계산서 숫자 세 개만 넣으셔도 됩니다.")
+            return None
+        try:
+            return CostModel(monthly_fixed=fixed, variable_ratio=parse_ratio(ratio_text),
+                             monthly_profit=profit)
+        except ValueError as exc:
+            if not quiet:
+                messagebox.showwarning("숫자를 확인해 주세요", str(exc))
+            return None
+
+    def on_apply_breakeven(self) -> None:
+        if not self.book:
+            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
+            return
+        model = self._read_cost_model()
+        if model is None:
+            return
+        self.cost_model = model
+        self.book.apply_target(model.target, overwrite=True)
+        self.monthly_target.set(str(model.target))
+        self._render_sales()
+        self.say(f"손익분기 매출은 월 {model.breakeven / 1e4:,.0f}만원입니다. "
+                 f"이 밑이면 적자입니다.")
+        if model.monthly_profit:
+            self.say(f"이익 {model.monthly_profit / 1e4:,.0f}만원까지 보면 "
+                     f"목표는 월 {model.target / 1e4:,.0f}만원입니다.")
+
+    def on_fill_from_financials(self) -> None:
+        """손익계산서 숫자 세 개로 고정비와 비율을 채운다."""
+        from tkinter import simpledialog
+        from prime_contractor.breakeven import from_financials
+
+        asks = [("연 매출액", "손익계산서의 '매출액' (원)"),
+                ("매출원가", "손익계산서의 '매출원가' (원)"),
+                ("판매비와관리비", "손익계산서의 '판매비와관리비' (원)")]
+        values = []
+        for title, prompt in asks:
+            text = simpledialog.askstring(title, prompt + "\n숫자만 적어주세요.", parent=self.root)
+            if text is None:
+                return
+            number = int(re.sub(r"[^\d]", "", text) or 0)
+            if number <= 0 and title == "연 매출액":
+                messagebox.showwarning("확인", "연 매출액은 0보다 커야 합니다.")
+                return
+            values.append(number)
+        try:
+            model = from_financials(*values)
+        except ValueError as exc:
+            messagebox.showwarning("숫자를 확인해 주세요", str(exc))
+            return
+        self.fixed_cost.set(str(model.monthly_fixed))
+        self.variable_ratio.set(f"{model.variable_ratio * 100:.0f}")
+        messagebox.showinfo(
+            "채웠습니다",
+            f"월 고정비 약 {model.monthly_fixed / 1e4:,.0f}만원, "
+            f"재료·외주비 약 {model.variable_ratio * 100:.0f}% 로 잡았습니다.\n\n"
+            "⚠ 제조업은 매출원가 안에 공장 인건비 같은 고정비가 섞여 있어서,\n"
+            "이 계산은 손익분기를 실제보다 낮게 — 즉 더 안전해 보이게 — 잡습니다.\n"
+            "공장 인건비·감가상각을 아시면 '월 고정비'에 더하고,\n"
+            "'재료·외주비' 비율은 그만큼 낮춰서 고쳐 주세요.\n\n"
+            "[손익분기로 목표 잡기]를 누르면 반영됩니다.")
+
     def on_apply_target(self) -> None:
         if not self.book:
             messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
@@ -305,6 +413,15 @@ class App:
             return
 
         self.book = book
+        # 저장해 둔 고정비·비율이 있으면 손익분기 목표를 바로 적용한다.
+        saved_model = self._read_cost_model(quiet=True)
+        if saved_model is not None:
+            self.cost_model = saved_model
+            book.apply_target(saved_model.target, overwrite=True)
+            self.say(f"저장해 둔 비용 숫자로 손익분기(월 {saved_model.breakeven / 1e4:,.0f}만원)를 "
+                     f"적용했습니다.")
+            self._render_sales()
+            return
         # 장부에 목표가 없으면 최근 평균을 제안해 둔다. 그대로 쓰든 고치든 사장님 몫.
         if not book.has_targets and not self.monthly_target.get().strip():
             average = book.average_revenue()
@@ -316,15 +433,23 @@ class App:
 
     def _render_sales(self) -> None:
         book = self.book
+        model = self.cost_model
         self.sales_tree.delete(*self.sales_tree.get_children())
         for m in book.sorted_months():
             rate = f"{m.rate * 100:.0f}%" if m.rate is not None else "-"
+            profit = model.profit_at(m.revenue) if model else None
+            if profit is None:
+                profit_text = "-"
+            else:
+                profit_text = f"{profit / 1e4:+,.0f}만원" + (" 적자" if profit < 0 else "")
+            tag = "loss" if profit is not None and profit < 0 else ("miss" if m.gap else "")
             self.sales_tree.insert("", END, values=(
                 m.ym, f"{m.revenue / 1e4:,.0f}만원",
                 f"{m.target / 1e4:,.0f}만원" if m.target else "-",
-                rate, f"{m.gap / 1e4:,.0f}만원" if m.gap else "-"),
-                tags=("miss",) if m.gap else ())
-        self.sales_tree.tag_configure("miss", background="#fdecea")
+                rate, f"{m.gap / 1e4:,.0f}만원" if m.gap else "-", profit_text),
+                tags=(tag,) if tag else ())
+        self.sales_tree.tag_configure("miss", background="#fff4e5")    # 목표 미달
+        self.sales_tree.tag_configure("loss", background="#fdecea")    # 실제 적자
         self._refresh_gap()
 
     def _refresh_gap(self) -> None:
@@ -343,8 +468,11 @@ class App:
         if gap:
             rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "-"
             span = f"최근 {months_back}개월" if months_back > 1 else record.ym
+            loss = ""
+            if self.cost_model and self.cost_model.profit_at(record.revenue) < 0:
+                loss = f"  · {record.ym} 은 적자입니다"
             self.gap_label.configure(
-                text=f"{span}  {gap / 1e4:,.0f}만원 부족  (최근 마감 {record.ym} 달성률 {rate})")
+                text=f"{span}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate}){loss}")
             self.gap_button.configure(state="normal")
         else:
             self.gap_label.configure(text=f"{record.ym} 목표 달성 — 부족분 없음")
@@ -390,6 +518,9 @@ class App:
             "include_demand_orgs": self.include_orgs.get(),
             "sales_path": self.sales_path.get(),
             "monthly_target": self.monthly_target.get(),
+            "fixed_cost": self.fixed_cost.get(),
+            "variable_ratio": self.variable_ratio.get(),
+            "target_profit": self.target_profit.get(),
             "months_back": self.months_back.get(),
         }
 

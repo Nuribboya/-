@@ -162,3 +162,43 @@ def render_gap(book, record, plan) -> str:
                  "× 연락했을 때 일이 올 확률 (A 35% · B 25% · C 15% · D 8%)")
     lines.append("전부 어림짐작입니다. 어디에 먼저 연락할지 정하는 데만 쓰세요.")
     return "\n".join(lines)
+
+
+def render_breakeven(book, model, today=None) -> str:
+    """달마다 손익분기선 위인지 아래인지, 그래서 얼마 남았는지/잃었는지."""
+    from datetime import date
+    today = today or date.today()
+    current = f"{today.year:04d}-{today.month:02d}"
+
+    lines = ["■ 손익분기 기준",
+             f"  월 고정비 {model.monthly_fixed / 1e4:,.0f}만원 · "
+             f"재료·외주비 {model.variable_ratio * 100:.0f}% "
+             f"→ 매출 1만원 중 {model.margin_ratio * 1e4:,.0f}원이 고정비를 갚습니다",
+             f"  손익분기 매출  월 {model.breakeven / 1e4:,.0f}만원   ← 이 밑이면 적자"]
+    if model.monthly_profit:
+        lines.append(f"  목표 매출      월 {model.target / 1e4:,.0f}만원   "
+                     f"← 이익 {model.monthly_profit / 1e4:,.0f}만원까지")
+    lines.append("")
+
+    cols = [("연월", 9), ("매출", 11), ("손익분기 대비", 14), ("예상 손익", 12), ("", 6)]
+    header = " ".join(_pad(n, w) for n, w in cols)
+    lines += [header, "-" * _width(header)]
+    losing = total = 0
+    for m in book.sorted_months():
+        running = m.ym >= current
+        profit = model.profit_at(m.revenue)
+        diff = m.revenue - model.breakeven
+        if not running:
+            total += profit
+            losing += profit < 0
+        mark = "진행중" if running else ("적자" if profit < 0 else "")
+        row = [m.ym, f"{m.revenue / 1e4:,.0f}만", f"{diff / 1e4:+,.0f}만",
+               f"{profit / 1e4:+,.0f}만", mark]
+        lines.append(" ".join(_pad(v, w) for v, (_, w) in zip(row, cols)))
+
+    closed = sum(1 for m in book.months if m.ym < current)
+    lines.append("")
+    lines.append(f"  끝난 {closed}개월 중 적자 {losing}개월 · 누적 손익 {total / 1e4:+,.0f}만원")
+    lines.append("  고정비·비율을 대략으로 넣으셨다면 손익도 대략입니다. "
+                 "적자/흑자 방향을 보는 데 쓰세요.")
+    return "\n".join(lines)
