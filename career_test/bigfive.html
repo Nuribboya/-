@@ -1,0 +1,380 @@
+<title>나의 성격 5요인</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;600;800&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --ground: #F2F5F5;
+    --surface: #FFFFFF;
+    --ink: #172122;
+    --muted: #5A6769;
+    --line: #D7DFE0;
+    --accent: #0F7C80;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #DDF0F0;
+    --O: #8A4FC2; --C: #2F6FB0; --E: #D0662F; --A: #2E9A63; --N: #C43D68;
+    --display: "Gothic A1", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground: #101617; --surface: #192122; --ink: #E7EEEE; --muted: #98A7A9;
+      --line: #2B3739; --accent: #4CC2C4; --accent-ink: #0B2223; --accent-soft: #1D3638;
+      --O: #BB8AE6; --C: #6FA6E0; --E: #EE9564; --A: #5CC890; --N: #EC7399;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #101617; --surface: #192122; --ink: #E7EEEE; --muted: #98A7A9;
+    --line: #2B3739; --accent: #4CC2C4; --accent-ink: #0B2223; --accent-soft: #1D3638;
+    --O: #BB8AE6; --C: #6FA6E0; --E: #EE9564; --A: #5CC890; --N: #EC7399;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--body); font-size: 16px; line-height: 1.6;
+    padding-inline: 16px; padding-block: 32px 64px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 28px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(28px, 6vw, 40px); font-weight: 800; line-height: 1.2; }
+  h2 { font-size: 22px; font-weight: 800; }
+  h3 { font-size: 17px; font-weight: 600; }
+  p, ul { margin: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .lede { color: var(--muted); max-width: 60ch; }
+  .meta { color: var(--muted); font-size: 14px; }
+
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 18px; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  .factors { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  @media (max-width: 640px) { .factors { grid-template-columns: repeat(2, 1fr); } }
+  .factor-chip { border-top: 2px solid var(--c); padding-top: 10px; display: grid; gap: 2px; }
+  .factor-chip b { font-family: var(--mono); font-size: 18px; color: var(--c); }
+  .factor-chip span { font-weight: 600; }
+  .factor-chip small { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+  .quiz { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: clamp(20px, 5vw, 36px); display: grid; gap: 24px; }
+  .progress { display: grid; gap: 8px; }
+  .progress-top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s ease; }
+  .question { font-family: var(--display); font-size: clamp(20px, 4.4vw, 26px); font-weight: 600; line-height: 1.45; min-height: 3em; text-wrap: balance; }
+  .scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .scale button {
+    border: 1px solid var(--line); background: var(--ground); border-radius: 12px;
+    padding: 14px 6px; display: grid; gap: 4px; justify-items: center; font-size: 13px; color: var(--muted);
+    transition: border-color .15s, background .15s;
+  }
+  .scale button b { font-family: var(--mono); font-size: 18px; color: var(--ink); }
+  .scale button:hover { border-color: var(--accent); }
+  .scale button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+  @media (max-width: 520px) {
+    .scale { grid-template-columns: 1fr; }
+    .scale button { grid-template-columns: 28px 1fr; justify-items: start; text-align: left; padding: 12px 14px; font-size: 15px; color: var(--ink); }
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  /* 결과 */
+  .profile { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; gap: 16px; }
+  .trait { display: grid; grid-template-columns: 116px 1fr 64px; gap: 12px; align-items: center; }
+  @media (max-width: 480px) { .trait { grid-template-columns: 92px 1fr 56px; gap: 8px; } }
+  .trait .name { font-weight: 600; font-size: 14px; line-height: 1.3; }
+  .trait .name b { font-family: var(--mono); color: var(--c); margin-right: 4px; }
+  .track { position: relative; height: 12px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); border-radius: 99px; }
+  .track::before, .track::after { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--surface); }
+  .track::before { left: 35%; } .track::after { left: 65%; }
+  .trait .num { text-align: right; font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .trait .num small { display: block; font-family: var(--body); font-size: 12px; color: var(--muted); }
+  .scale-legend { display: grid; grid-template-columns: 116px 1fr 64px; gap: 12px; font-size: 12px; color: var(--muted); }
+  @media (max-width: 480px) { .scale-legend { grid-template-columns: 92px 1fr 56px; gap: 8px; } }
+  .scale-legend div { display: grid; grid-template-columns: 35fr 30fr 35fr; text-align: center; }
+
+  .cards { display: grid; gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: grid; gap: 10px; }
+  .card header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .card .letter { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--c); line-height: 1; }
+  .level { font-size: 13px; padding: 1px 10px; border-radius: 99px; border: 1px solid var(--c); color: var(--ink); }
+  .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 20px; }
+  @media (max-width: 560px) { .cols { grid-template-columns: 1fr; } }
+  .cols h4 { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .cols ul { padding-left: 1.1em; font-size: 15px; display: grid; gap: 2px; }
+
+  .links { background: var(--accent-soft); border-radius: 14px; padding: 20px; display: grid; gap: 10px; }
+  .links table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .links th, .links td { text-align: left; padding: 8px 8px 8px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .links th { font-weight: 600; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+
+  .disclaimer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+  .toast { font-size: 13px; color: var(--muted); }
+  textarea { font: inherit; font-size: 14px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <section id="intro" class="wrap" style="gap:24px">
+    <div style="display:grid;gap:12px">
+      <p class="eyebrow">Big Five 성격 5요인 검사</p>
+      <h1>유형 말고, 나를 5개의 눈금으로 보기</h1>
+      <p class="lede">MBTI처럼 16칸 중 하나로 나누는 대신, 5가지 성격 특성이 각각 어느 정도인지 연속된 점수로 보여 줘요. 심리학 연구에서 가장 널리 쓰는 성격 모델이에요. 50개 문장에 얼마나 공감하는지 골라 주세요.</p>
+    </div>
+    <div class="factors" id="factorLegend"></div>
+    <div class="row">
+      <button class="btn primary" id="startBtn" type="button">검사 시작하기</button>
+      <button class="btn" id="resumeBtn" type="button" hidden>이어서 하기</button>
+      <span class="meta">약 7분 · 정답 없음 · ‘되고 싶은 나’ 말고 ‘지금의 나’로</span>
+    </div>
+  </section>
+
+  <section id="quiz" class="quiz" hidden aria-live="polite">
+    <div class="progress">
+      <div class="progress-top"><span id="progText">1 / 50</span><span id="progPct">0%</span></div>
+      <div class="bar"><i id="progBar"></i></div>
+    </div>
+    <p class="question" id="qText"></p>
+    <div class="scale" id="scale" role="group" aria-label="응답 선택"></div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="prevBtn" type="button">← 이전</button>
+      <span class="hint">키보드 1–5로도 선택할 수 있어요</span>
+    </div>
+  </section>
+
+  <section id="result" class="wrap" hidden></section>
+</div>
+
+<script>
+(function () {
+  const ORDER = ["O", "C", "E", "A", "N"];
+  const F = {
+    O: { name: "개방성", en: "Openness", q: "새로운 생각과 경험에 얼마나 열려 있나",
+      hi: { t: "생각이 넓고 새로움에 끌려요", d: "추상적인 개념, 예술, 낯선 아이디어를 즐기고 ‘왜?’와 ‘만약에?’를 자주 떠올려요.",
+            good: ["아이디어와 상상력이 풍부하다", "복잡하고 새로운 문제를 즐긴다"], watch: ["현실적인 반복 업무에 쉽게 지루해진다", "관심사가 자주 옮겨 다닐 수 있다"] },
+      mid: { t: "새로움과 익숙함 사이에서 균형을 잡아요", d: "관심 있는 분야에선 깊이 파고들지만, 검증된 방식의 편안함도 알아요.",
+            good: ["상황에 따라 실용과 창의를 오간다", "새 아이디어를 현실적으로 걸러 낸다"], watch: ["확실한 취향이 없다고 느낄 수 있다"] },
+      lo: { t: "현실적이고 검증된 것을 믿어요", d: "추상적인 이야기보다 구체적이고 실제로 쓸모 있는 것에 집중해요.",
+            good: ["실용적이고 현실 감각이 좋다", "꾸준하고 일관적이다"], watch: ["급격한 변화에 적응이 느릴 수 있다"] } },
+    C: { name: "성실성", en: "Conscientiousness", q: "계획하고 끝까지 해내는 힘",
+      hi: { t: "계획하고, 정리하고, 끝까지 해내요", d: "목표를 세우면 체계적으로 밀고 나가요. 믿고 맡길 수 있는 사람이라는 평을 들어요.",
+            good: ["마감과 약속을 잘 지킨다", "장기 목표를 꾸준히 해낸다"], watch: ["완벽주의로 스스로 지칠 수 있다", "계획이 틀어지면 스트레스가 크다"] },
+      mid: { t: "필요할 땐 집중하고, 아닐 땐 느슨해요", d: "중요한 일은 챙기지만 모든 걸 빈틈없이 관리하진 않아요. 관심도에 따라 편차가 있어요.",
+            good: ["유연하게 우선순위를 조정한다"], watch: ["흥미 없는 일은 미루기 쉽다", "시작한 일의 마무리가 들쭉날쭉할 수 있다"] },
+      lo: { t: "즉흥적이고 자유로워요", d: "정해진 틀보다 그때그때의 흐름을 따르는 걸 편하게 느껴요.",
+            good: ["변화와 즉흥 상황에 강하다", "규칙에 얽매이지 않는다"], watch: ["마감, 정리, 반복 업무에서 어려움을 겪기 쉽다", "외부 구조(알림, 파트너)의 도움이 크게 효과 있다"] } },
+    E: { name: "외향성", en: "Extraversion", q: "사람과 자극에서 에너지를 얻는 정도",
+      hi: { t: "사람과 활동에서 에너지를 얻어요", d: "대화와 모임을 즐기고, 주목받는 자리도 크게 부담스럽지 않아요.",
+            good: ["사교적이고 에너지가 넘친다", "앞에 나서서 분위기를 만든다"], watch: ["혼자 하는 긴 작업이 힘들 수 있다"] },
+      mid: { t: "상황에 따라 켜고 끌 수 있어요 (양향성)", d: "필요할 땐 사교적으로 움직이지만, 그 뒤엔 혼자만의 회복 시간이 필요해요.",
+            good: ["사람과 혼자 일하는 환경 모두에 적응한다", "듣기와 말하기의 균형이 좋다"], watch: ["사람을 만난 뒤 예상보다 크게 지칠 수 있다"] },
+      lo: { t: "조용한 곳에서 에너지를 모아요", d: "넓은 관계보다 깊은 관계를, 떠들썩함보다 집중할 수 있는 환경을 선호해요.",
+            good: ["혼자 깊이 몰입한다", "신중하게 듣고 말한다"], watch: ["자기 PR이 필요한 자리에서 손해를 볼 수 있다"] } },
+    A: { name: "우호성", en: "Agreeableness", q: "타인을 배려하고 협력하는 경향",
+      hi: { t: "배려심 깊고 협력적이에요", d: "다른 사람의 감정을 잘 느끼고, 갈등보다 조화를 먼저 생각해요.",
+            good: ["공감하고 도와주는 능력이 뛰어나다", "팀을 부드럽게 만든다"], watch: ["거절을 못 해 혼자 떠안기 쉽다", "자기 주장을 삼킬 때가 많다"] },
+      mid: { t: "배려하되 할 말은 해요", d: "사람을 챙기지만, 필요할 땐 자기 입장을 분명히 밝혀요.",
+            good: ["협력과 주장 사이의 균형이 좋다"], watch: ["상황에 따라 너무 무르거나 날카롭게 보일 수 있다"] },
+      lo: { t: "솔직하고 독립적이에요", d: "분위기보다 사실과 결과를 중시하고, 필요하면 쓴소리도 해요.",
+            good: ["협상과 비판적 판단에 강하다", "남의 시선에 덜 흔들린다"], watch: ["의도와 달리 차갑게 보일 수 있다"] } },
+    N: { name: "신경성", en: "Neuroticism", q: "불안·걱정·기분 변화를 느끼는 정도",
+      hi: { t: "감정 레이더가 예민해요", d: "걱정과 스트레스를 쉽게, 크게 느끼는 편이에요. 위험을 미리 알아채는 민감함이기도 해요.",
+            good: ["위험과 문제를 미리 감지한다", "감정의 결을 섬세하게 느낀다"], watch: ["스트레스가 쌓이면 지치기 쉽다", "결정 전후로 고민을 곱씹는다"] },
+      mid: { t: "보통 수준으로 감정이 오르내려요", d: "스트레스를 느끼긴 하지만 대체로 회복하는 편이에요.",
+            good: ["적당한 긴장감을 동력으로 쓴다"], watch: ["압박이 겹치면 갑자기 크게 흔들릴 수 있다"] },
+      lo: { t: "감정적으로 안정적이에요", d: "압박 속에서도 침착하고, 기분 변화가 크지 않아요.",
+            good: ["위기에 침착하다", "스트레스 회복이 빠르다"], watch: ["위험 신호를 가볍게 넘길 수 있다"] } }
+  };
+
+  // IPIP Big-Five Factor Markers(50문항, 공공 도메인)를 한국어로 옮김. k: +1 정방향, -1 역방향
+  const RAW = {
+    E: [["모임에서 분위기를 띄우는 편이다.", 1], ["별로 말이 많지 않다.", -1], ["사람들과 함께 있으면 편안하다.", 1], ["주로 뒤에 조용히 있는 편이다.", -1],
+        ["먼저 대화를 시작한다.", 1], ["딱히 할 말이 별로 없다.", -1], ["모임에서 여러 사람과 두루 이야기한다.", 1], ["주목받는 걸 좋아하지 않는다.", -1],
+        ["관심의 중심이 되어도 괜찮다.", 1], ["낯선 사람들 앞에서는 조용해진다.", -1]],
+    A: [["다른 사람들의 걱정거리에 별로 관심이 없다.", -1], ["사람들에게 관심이 많다.", 1], ["남에게 상처 주는 말을 하곤 한다.", -1], ["다른 사람의 감정에 공감한다.", 1],
+        ["다른 사람들의 문제에 그다지 신경 쓰지 않는다.", -1], ["마음이 여린 편이다.", 1], ["사실 다른 사람들에게 별 관심이 없다.", -1], ["다른 사람을 위해 시간을 낸다.", 1],
+        ["다른 사람의 감정을 함께 느낀다.", 1], ["사람들을 편안하게 해 준다.", 1]],
+    C: [["항상 미리 준비해 둔다.", 1], ["물건을 여기저기 늘어놓는다.", -1], ["세부 사항에 주의를 기울인다.", 1], ["일을 엉망으로 만들곤 한다.", -1],
+        ["해야 할 일을 바로 처리한다.", 1], ["물건을 제자리에 두는 걸 자주 잊는다.", -1], ["정돈된 상태를 좋아한다.", 1], ["해야 할 일을 슬쩍 피한다.", -1],
+        ["일정표대로 움직인다.", 1], ["일을 할 때 꼼꼼하고 엄격하다.", 1]],
+    N: [["쉽게 스트레스를 받는다.", 1], ["대부분의 시간에 마음이 편안하다.", -1], ["이런저런 걱정을 많이 한다.", 1], ["우울한 기분이 드는 일은 드물다.", -1],
+        ["작은 일에도 쉽게 동요한다.", 1], ["쉽게 속상해진다.", 1], ["기분이 자주 바뀐다.", 1], ["감정 기복이 심한 편이다.", 1],
+        ["쉽게 짜증이 난다.", 1], ["자주 울적해진다.", 1]],
+    O: [["어휘력이 풍부한 편이다.", 1], ["추상적인 개념을 이해하기 어렵다.", -1], ["상상력이 생생하다.", 1], ["추상적인 생각에는 관심이 없다.", -1],
+        ["좋은 아이디어를 자주 떠올린다.", 1], ["상상력이 풍부한 편은 아니다.", -1], ["무언가를 빨리 이해한다.", 1], ["어려운 단어나 표현을 쓰는 편이다.", 1],
+        ["이것저것 곰곰이 생각하는 데 시간을 쓴다.", 1], ["머릿속이 아이디어로 가득하다.", 1]]
+  };
+  // 한 요인이 몰리지 않도록 E A C N O 순서로 번갈아 배치
+  const QUESTIONS = [];
+  for (let i = 0; i < 10; i++) ["E", "A", "C", "N", "O"].forEach(f => QUESTIONS.push({ f, text: RAW[f][i][0], k: RAW[f][i][1] }));
+
+  const SCALE = ["전혀 아니다", "아니다", "보통이다", "그렇다", "매우 그렇다"];
+  const STORE_KEY = "bigfive-answers-v1";
+  const $ = id => document.getElementById(id);
+  let answers = new Array(QUESTIONS.length).fill(null);
+  let idx = 0;
+
+  function load() {
+    try { const a = JSON.parse(localStorage.getItem(STORE_KEY)); if (Array.isArray(a) && a.length === QUESTIONS.length) return a; } catch (e) {}
+    return null;
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(answers)); } catch (e) {} }
+  function clearSave() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
+
+  $("factorLegend").innerHTML = ORDER.map(k =>
+    `<div class="factor-chip" style="--c:var(--${k})"><b>${k}</b><span>${F[k].name}</span><small>${F[k].q}</small></div>`).join("");
+
+  const saved = load();
+  if (saved && saved.some(v => v !== null)) {
+    const done = saved.filter(v => v !== null).length;
+    $("resumeBtn").hidden = false;
+    $("resumeBtn").textContent = done === QUESTIONS.length ? "지난 결과 보기" : `이어서 하기 (${done}/${QUESTIONS.length})`;
+  }
+
+  $("scale").innerHTML = SCALE.map((s, i) =>
+    `<button type="button" data-v="${i}" aria-pressed="false"><b>${i + 1}</b>${s}</button>`).join("");
+  $("scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) choose(+b.dataset.v); });
+
+  function show(section) {
+    ["intro", "quiz", "result"].forEach(s => $(s).hidden = s !== section);
+    window.scrollTo({ top: 0 });
+  }
+  function renderQ() {
+    const done = answers.filter(v => v !== null).length;
+    $("qText").textContent = QUESTIONS[idx].text;
+    $("progText").textContent = `${idx + 1} / ${QUESTIONS.length}`;
+    $("progPct").textContent = Math.round(done / QUESTIONS.length * 100) + "%";
+    $("progBar").style.width = (done / QUESTIONS.length * 100) + "%";
+    $("scale").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === answers[idx])));
+    $("prevBtn").disabled = idx === 0;
+  }
+  let locked = false;
+  function choose(v) {
+    if (locked) return;
+    answers[idx] = v; save(); renderQ();
+    locked = true;
+    setTimeout(() => {
+      locked = false;
+      const next = answers.findIndex((a, i) => a === null && i > idx);
+      const any = answers.indexOf(null);
+      if (next !== -1) idx = next;
+      else if (any !== -1) idx = any;
+      else { showResult(); return; }
+      renderQ();
+    }, 180);
+  }
+  function restart() { answers = new Array(QUESTIONS.length).fill(null); idx = 0; clearSave(); show("quiz"); renderQ(); }
+
+  $("startBtn").addEventListener("click", restart);
+  $("resumeBtn").addEventListener("click", () => {
+    answers = load() || answers;
+    const any = answers.indexOf(null);
+    if (any === -1) { showResult(); return; }
+    idx = any; show("quiz"); renderQ();
+  });
+  $("prevBtn").addEventListener("click", () => { if (idx > 0) { idx--; renderQ(); } });
+  document.addEventListener("keydown", e => {
+    if ($("quiz").hidden) return;
+    if (e.key >= "1" && e.key <= "5") choose(+e.key - 1);
+    else if (e.key === "ArrowLeft" && idx > 0) { idx--; renderQ(); }
+  });
+
+  // 요인 점수: 역문항 뒤집어서 0~4로 합산(10문항 → 0~40), 0~100으로 환산
+  function scores() {
+    const s = Object.fromEntries(ORDER.map(k => [k, 0]));
+    QUESTIONS.forEach((q, i) => { const v = answers[i] ?? 2; s[q.f] += q.k === 1 ? v : 4 - v; });
+    return Object.fromEntries(ORDER.map(k => [k, Math.round(s[k] / 40 * 100)]));
+  }
+  const levelOf = v => v >= 65 ? "hi" : v <= 35 ? "lo" : "mid";
+  const LEVEL_KO = { hi: "높음", mid: "중간", lo: "낮음" };
+
+  function showResult() {
+    const sc = scores();
+    const lv = Object.fromEntries(ORDER.map(k => [k, levelOf(sc[k])]));
+
+    const bars = ORDER.map(k => `
+      <div class="trait" style="--c:var(--${k})">
+        <span class="name"><b>${k}</b>${F[k].name}</span>
+        <span class="track"><i style="width:${Math.max(sc[k], 2)}%"></i></span>
+        <span class="num">${sc[k]}<small>${LEVEL_KO[lv[k]]}</small></span>
+      </div>`).join("");
+
+    const cards = ORDER.map(k => {
+      const d = F[k][lv[k]];
+      return `<article class="card" style="--c:var(--${k})">
+        <header><span class="letter">${k}</span><h3>${F[k].name}</h3><span class="level">${LEVEL_KO[lv[k]]} · ${sc[k]}</span></header>
+        <p><b>${d.t}</b><br>${d.d}</p>
+        <div class="cols">
+          <div><h4>이런 점이 강해요</h4><ul>${d.good.map(x => `<li>${x}</li>`).join("")}</ul></div>
+          <div><h4>이런 점은 챙겨 주세요</h4><ul>${d.watch.map(x => `<li>${x}</li>`).join("")}</ul></div>
+        </div>
+      </article>`;
+    }).join("");
+
+    // 가장 두드러진 두 특성(중간값 50에서 가장 먼 것)으로 한 줄 요약
+    const salient = [...ORDER].sort((a, b) => Math.abs(sc[b] - 50) - Math.abs(sc[a] - 50)).slice(0, 2);
+    const headline = salient.map(k => `${F[k].name} ${LEVEL_KO[lv[k]]}`).join(" · ");
+
+    const summary = `나의 Big Five 성격 5요인\n` + ORDER.map(k => `${k} ${F[k].name} ${sc[k]} (${LEVEL_KO[lv[k]]})`).join(" / ");
+
+    $("result").innerHTML = `
+      <div style="display:grid;gap:12px">
+        <p class="eyebrow">검사 결과</p>
+        <h1>가장 두드러진 특성: ${headline}</h1>
+        <p class="lede">${F[salient[0]][lv[salient[0]]].t}. 그리고 ${F[salient[1]][lv[salient[1]]].t}. 성격 5요인은 좋고 나쁨이 아니라 ‘어느 쪽으로 기울어 있는가’를 보여 줘요.</p>
+      </div>
+
+      <div class="profile">
+        <div class="scale-legend"><span></span><div><span>낮음</span><span>중간</span><span>높음</span></div><span></span></div>
+        ${bars}
+        <p class="meta">점수는 0–100 (35 이하 낮음 · 65 이상 높음). 다른 사람과 비교한 백분위가 아니라, 내 응답이 척도 안에서 어디쯤인지를 나타내요.</p>
+      </div>
+
+      <div style="display:grid;gap:14px">
+        <h2>특성별로 자세히 보기</h2>
+        <div class="cards">${cards}</div>
+      </div>
+
+      <div class="links">
+        <h2>다른 검사 결과와 이어 보기</h2>
+        <p class="meta">여러 검사에서 같은 방향이 반복되면 그게 ‘나’에 가까운 신호예요.</p>
+        <div class="table-wrap"><table>
+          <tr><th>Big Five</th><th>비슷한 방향의 다른 지표</th></tr>
+          <tr><td>개방성 (O)</td><td>MBTI 직관(N) · 홀랜드 탐구형·예술형 · TCI 자극추구 일부</td></tr>
+          <tr><td>성실성 (C)</td><td>MBTI 판단(J) · 홀랜드 관습형 · TCI 인내력·자율성</td></tr>
+          <tr><td>외향성 (E)</td><td>MBTI 외향(E) · 홀랜드 진취형·사회형 · TCI 자극추구 일부</td></tr>
+          <tr><td>우호성 (A)</td><td>MBTI 감정(F) · 홀랜드 사회형 · TCI 연대감·사회적 민감성</td></tr>
+          <tr><td>신경성 (N)</td><td>MBTI에는 없음 · TCI 위험회피</td></tr>
+        </table></div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="copyBtn" type="button">결과 복사하기</button>
+        <button class="btn" id="retryBtn" type="button">다시 검사하기</button>
+        <span class="toast" id="toast" role="status"></span>
+      </div>
+      <textarea id="copyText" readonly hidden style="width:100%;min-height:90px">${summary}</textarea>
+
+      <p class="disclaimer">문항은 공공 도메인 성격 문항 풀인 IPIP(International Personality Item Pool)의 Big-Five Factor Markers 50문항을 한국어로 옮겨 만들었어요. 한국인 표본으로 표준화된 검사가 아니라서 점수를 다른 사람과 비교하는 용도로는 맞지 않고, 나를 이해하는 참고 자료로 활용해 주세요.</p>
+    `;
+    show("result");
+
+    $("retryBtn").addEventListener("click", restart);
+    $("copyBtn").addEventListener("click", () => {
+      const ok = () => $("toast").textContent = "결과를 복사했어요.";
+      const fallback = () => { const t = $("copyText"); t.hidden = false; t.select(); $("toast").textContent = "아래 글을 직접 복사해 주세요."; };
+      try { navigator.clipboard.writeText(summary).then(ok, fallback); } catch (e) { fallback(); }
+    });
+  }
+})();
+</script>
