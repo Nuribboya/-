@@ -1,0 +1,436 @@
+<title>나의 성격 유형 코드</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;600;800&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --ground: #F4F3F7;
+    --surface: #FFFFFF;
+    --ink: #1C1A24;
+    --muted: #625E6E;
+    --line: #DDDAE4;
+    --accent: #5B3FD1;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #ECE7FB;
+    --EI: #D2593F; --SN: #2F7DB5; --TF: #2E9A6A; --JP: #C8860F;
+    --display: "Gothic A1", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground: #131218; --surface: #1C1B23; --ink: #ECEAF2; --muted: #A29EAE;
+      --line: #302E3A; --accent: #A08BFF; --accent-ink: #17112E; --accent-soft: #2A2445;
+      --EI: #EC8469; --SN: #6FAEE0; --TF: #5CC896; --JP: #EDB24A;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #131218; --surface: #1C1B23; --ink: #ECEAF2; --muted: #A29EAE;
+    --line: #302E3A; --accent: #A08BFF; --accent-ink: #17112E; --accent-soft: #2A2445;
+    --EI: #EC8469; --SN: #6FAEE0; --TF: #5CC896; --JP: #EDB24A;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--body); font-size: 16px; line-height: 1.6;
+    padding-inline: 16px; padding-block: 32px 64px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 28px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(28px, 6vw, 40px); font-weight: 800; line-height: 1.2; }
+  h2 { font-size: 22px; font-weight: 800; }
+  h3 { font-size: 16px; font-weight: 600; }
+  p, ul { margin: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .lede { color: var(--muted); max-width: 60ch; }
+  .meta { color: var(--muted); font-size: 14px; }
+
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 12px 18px; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  /* 인트로: 4가지 축 */
+  .axes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 20px; }
+  @media (max-width: 560px) { .axes { grid-template-columns: 1fr; } }
+  .axis-chip { border-top: 2px solid var(--c); padding-top: 10px; display: grid; gap: 2px; }
+  .axis-chip .pair { font-family: var(--mono); font-weight: 600; font-size: 18px; color: var(--c); }
+  .axis-chip small { color: var(--muted); font-size: 13px; }
+
+  /* 문항 */
+  .quiz { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: clamp(20px, 5vw, 36px); display: grid; gap: 24px; }
+  .progress { display: grid; gap: 8px; }
+  .progress-top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s ease; }
+  .question { font-family: var(--display); font-size: clamp(20px, 4.4vw, 26px); font-weight: 600; line-height: 1.45; min-height: 3em; text-wrap: balance; }
+  .scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .scale button {
+    border: 1px solid var(--line); background: var(--ground); border-radius: 12px;
+    padding: 14px 6px; display: grid; gap: 4px; justify-items: center; font-size: 13px; color: var(--muted);
+    transition: border-color .15s, background .15s;
+  }
+  .scale button b { font-family: var(--mono); font-size: 18px; color: var(--ink); }
+  .scale button:hover { border-color: var(--accent); }
+  .scale button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+  @media (max-width: 520px) {
+    .scale { grid-template-columns: 1fr; }
+    .scale button { grid-template-columns: 28px 1fr; justify-items: start; text-align: left; padding: 12px 14px; font-size: 15px; color: var(--ink); }
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  /* 결과 */
+  .code { font-family: var(--mono); font-weight: 600; font-size: clamp(56px, 16vw, 88px); line-height: 1; letter-spacing: 0.06em; display: flex; }
+  .code span:nth-child(1) { color: var(--EI); } .code span:nth-child(2) { color: var(--SN); }
+  .code span:nth-child(3) { color: var(--TF); } .code span:nth-child(4) { color: var(--JP); }
+
+  .dims { display: grid; gap: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .dim { display: grid; gap: 6px; }
+  .dim-labels { display: flex; justify-content: space-between; font-size: 14px; gap: 12px; }
+  .dim-labels span { color: var(--muted); }
+  .dim-labels span.on { color: var(--ink); font-weight: 600; }
+  .dim-labels b { font-family: var(--mono); color: var(--c); margin-right: 4px; }
+  .dim-labels span:last-child b { margin: 0 0 0 4px; }
+  .dim-track { position: relative; height: 12px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .dim-track i { position: absolute; top: 0; bottom: 0; background: var(--c); border-radius: 99px; }
+  .dim-track::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: var(--surface); }
+  .dim-foot { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dim-foot .edge { font-family: var(--body); font-size: 12px; padding: 0 8px; border-radius: 99px; background: var(--accent-soft); color: var(--ink); }
+
+  .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 560px) { .cols { grid-template-columns: 1fr; } }
+  .list-block { display: grid; gap: 8px; }
+  .list-block ul { padding-left: 1.1em; display: grid; gap: 4px; }
+  .jobs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .jobs span { font-size: 14px; padding: 6px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
+
+  .grid16 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  @media (max-width: 520px) { .grid16 { grid-template-columns: repeat(2, 1fr); } }
+  .grid16 button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; }
+  .grid16 button b { font-family: var(--mono); font-size: 16px; }
+  .grid16 button small { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .grid16 button.mine { border-color: var(--accent); background: var(--accent-soft); }
+  .grid16 button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .peek { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 8px; }
+
+  .disclaimer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+  .toast { font-size: 13px; color: var(--muted); }
+  textarea { font: inherit; font-size: 14px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <section id="intro" class="wrap" style="gap:24px">
+    <div style="display:grid;gap:12px">
+      <p class="eyebrow">MBTI 스타일 성격 유형 검사</p>
+      <h1>나는 어떤 사람일까?</h1>
+      <p class="lede">40개 문장에 얼마나 공감하는지 골라 주세요. 4가지 성향 축에서 어느 쪽에 더 가까운지 계산해서, 16가지 유형 중 나의 4글자 유형과 강점·약점, 어울리는 직업을 알려 드려요.</p>
+    </div>
+    <div class="axes" id="axisLegend"></div>
+    <div class="row">
+      <button class="btn primary" id="startBtn" type="button">검사 시작하기</button>
+      <button class="btn" id="resumeBtn" type="button" hidden>이어서 하기</button>
+      <span class="meta">약 6분 · 정답 없음 · ‘평소의 나’를 기준으로</span>
+    </div>
+  </section>
+
+  <section id="quiz" class="quiz" hidden aria-live="polite">
+    <div class="progress">
+      <div class="progress-top"><span id="progText">1 / 40</span><span id="progPct">0%</span></div>
+      <div class="bar"><i id="progBar"></i></div>
+    </div>
+    <p class="question" id="qText"></p>
+    <div class="scale" id="scale" role="group" aria-label="응답 선택"></div>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="prevBtn" type="button">← 이전</button>
+      <span class="hint">키보드 1–5로도 선택할 수 있어요</span>
+    </div>
+  </section>
+
+  <section id="result" class="wrap" hidden></section>
+</div>
+
+<script>
+(function () {
+  const AXES = [
+    { id: "EI", a: "E", b: "I", an: "외향", bn: "내향", q: "에너지를 어디서 얻나요?", as: "사람·활동에서 충전", bs: "혼자만의 시간에서 충전" },
+    { id: "SN", a: "S", b: "N", an: "감각", bn: "직관", q: "정보를 어떻게 받아들이나요?", as: "구체적 사실과 경험", bs: "가능성과 큰 그림" },
+    { id: "TF", a: "T", b: "F", an: "사고", bn: "감정", q: "어떻게 결정하나요?", as: "논리와 원칙", bs: "사람과 관계" },
+    { id: "JP", a: "J", b: "P", an: "판단", bn: "인식", q: "어떻게 생활하나요?", as: "계획하고 정리", bs: "유연하고 즉흥적" }
+  ];
+
+  // 축마다 양쪽 5문항씩. pole: +1 = 앞 글자(E/S/T/J), -1 = 뒤 글자(I/N/F/P)
+  const ITEMS = {
+    E: ["처음 보는 사람과도 금방 말을 튼다.",
+        "주말에 사람들과 약속이 있으면 오히려 에너지가 충전된다.",
+        "생각을 말로 꺼내면서 정리하는 편이다.",
+        "여러 사람 앞에서 이야기하는 게 크게 부담스럽지 않다.",
+        "조용한 곳보다 북적이는 분위기가 좋다."],
+    I: ["사람을 많이 만난 날은 혼자 쉬는 시간이 꼭 필요하다.",
+        "말하기 전에 속으로 충분히 생각해 보는 편이다.",
+        "넓은 인간관계보다 소수의 깊은 관계가 편하다.",
+        "단체 대화보다 1:1 대화가 훨씬 편하다.",
+        "혼자 보내는 취미 시간이 소중하다."],
+    S: ["설명서를 순서대로 따라 하는 게 편하다.",
+        "막연한 아이디어보다 구체적인 사실과 경험을 믿는다.",
+        "숫자, 날짜 같은 세부 사항을 잘 기억한다.",
+        "이미 검증된 방법을 쓰는 게 안전하다고 생각한다.",
+        "지금 당장 현실적으로 가능한 일에 집중한다."],
+    N: ["‘만약에 ~라면?’ 같은 상상을 자주 한다.",
+        "이야기를 들으면 숨은 의미나 가능성이 먼저 떠오른다.",
+        "같은 일을 반복하는 것보다 새로운 방식을 시도하는 게 즐겁다.",
+        "세부 사항보다 큰 그림과 방향이 먼저 눈에 들어온다.",
+        "비유나 은유로 설명하는 걸 좋아한다."],
+    T: ["결정을 내릴 때 감정보다 논리와 근거를 우선한다.",
+        "친구가 고민을 말하면 해결책부터 떠오른다.",
+        "공정하려면 누구에게나 같은 기준을 적용해야 한다.",
+        "비판을 들어도 맞는 말이면 크게 상처받지 않는다.",
+        "분위기를 지키는 것보다 옳은 결론을 내는 게 더 중요하다."],
+    F: ["결정할 때 그 결정이 사람들에게 어떤 영향을 줄지 먼저 생각한다.",
+        "친구가 고민을 말하면 먼저 공감해 주고 싶다.",
+        "상대 기분이 상할까 봐 할 말을 돌려 말할 때가 많다.",
+        "팀 분위기가 좋아야 일도 잘된다고 생각한다.",
+        "따뜻한 말 한마디에 큰 힘을 얻는다."],
+    J: ["여행 가기 전에 일정을 미리 짜 두는 게 편하다.",
+        "할 일은 마감보다 일찍 끝내 두는 편이다.",
+        "방이나 책상이 정리돼 있어야 마음이 편하다.",
+        "갑자기 계획이 바뀌면 스트레스를 받는다.",
+        "빨리 결정하고 다음 단계로 넘어가는 게 좋다."],
+    P: ["계획 없이 즉흥적으로 움직이는 게 더 재밌다.",
+        "마감 직전에 집중력이 가장 잘 나온다.",
+        "선택지를 열어 두고 상황을 보며 결정하는 게 좋다.",
+        "한 번에 여러 일을 벌여 두는 편이다.",
+        "규칙보다 상황에 맞게 유연하게 대처하는 게 중요하다."]
+  };
+  const QUESTIONS = [];
+  for (let i = 0; i < 5; i++) {
+    AXES.forEach(ax => QUESTIONS.push({ axis: ax.id, pole: 1, text: ITEMS[ax.a][i] }));
+    AXES.forEach(ax => QUESTIONS.push({ axis: ax.id, pole: -1, text: ITEMS[ax.b][i] }));
+  }
+
+  const TYPES = {
+    ISTJ: { nick: "원칙을 지키는 관리자", desc: "책임감이 강하고 한 번 맡은 일은 끝까지 해내는 타입이에요. 사실과 경험을 믿고, 체계적인 방식으로 꾸준히 성과를 쌓아요.",
+      good: ["약속과 마감을 철저히 지킨다", "꼼꼼하고 정확하다", "위기에도 침착하다"], bad: ["변화나 새로운 방식에 적응이 느릴 수 있다", "감정 표현이 서툴러 차갑게 보일 수 있다"],
+      jobs: ["회계사", "공무원", "품질관리", "법무·행정", "데이터 관리자"] },
+    ISFJ: { nick: "묵묵한 수호자", desc: "주변 사람을 세심하게 챙기고, 눈에 띄지 않아도 조용히 필요한 일을 해내는 타입이에요. 성실함과 배려가 가장 큰 강점이에요.",
+      good: ["사람의 필요를 잘 알아챈다", "성실하고 믿음직하다", "세부 사항을 잘 기억한다"], bad: ["거절을 잘 못 해서 혼자 떠안기 쉽다", "자기 공을 드러내지 않아 저평가될 수 있다"],
+      jobs: ["간호사", "초등교사", "사회복지사", "HR 담당자", "약사"] },
+    INFJ: { nick: "통찰력 있는 조언자", desc: "사람의 속마음과 흐름을 깊이 읽고, 의미 있는 방향으로 이끌고 싶어 하는 타입이에요. 조용하지만 확고한 신념이 있어요.",
+      good: ["사람과 상황을 깊이 이해한다", "장기적인 비전이 있다", "진정성 있게 사람을 돕는다"], bad: ["완벽주의로 지치기 쉽다", "속마음을 잘 드러내지 않아 오해받을 수 있다"],
+      jobs: ["상담사·심리치료사", "작가", "교육 기획자", "UX 리서처", "비영리단체 기획"] },
+    INTJ: { nick: "큰 그림을 그리는 전략가", desc: "복잡한 문제를 구조화하고 장기 계획을 세우는 데 탁월한 타입이에요. 독립적이고, 효율과 완성도를 중요하게 생각해요.",
+      good: ["전략적으로 생각한다", "스스로 배우는 힘이 강하다", "목표를 끝까지 밀어붙인다"], bad: ["다른 사람의 감정을 놓치기 쉽다", "기준이 높아 남에게도 엄격해질 수 있다"],
+      jobs: ["전략 컨설턴트", "소프트웨어 아키텍트", "연구원", "데이터 사이언티스트", "투자 분석가"] },
+    ISTP: { nick: "침착한 만능 해결사", desc: "문제가 생기면 직접 뜯어보고 원리를 파악해 해결하는 타입이에요. 말수는 적어도 손과 머리가 빠르고, 위기에 강해요.",
+      good: ["상황 판단이 빠르다", "도구·기계를 잘 다룬다", "위기에 침착하다"], bad: ["장기 계획이나 반복 업무에 쉽게 흥미를 잃는다", "감정을 말로 표현하는 걸 어려워한다"],
+      jobs: ["엔지니어", "정비사", "보안 전문가", "파일럿", "응급구조사"] },
+    ISFP: { nick: "감성 있는 예술가", desc: "지금 이 순간의 아름다움과 감정에 민감하고, 자기만의 방식으로 표현하는 걸 좋아하는 타입이에요. 따뜻하고 겸손해요.",
+      good: ["감각과 미적 센스가 좋다", "다른 사람을 있는 그대로 존중한다", "유연하게 적응한다"], bad: ["갈등을 피하려고 속마음을 숨긴다", "장기 계획 세우기를 어려워한다"],
+      jobs: ["디자이너", "사진작가", "플로리스트", "물리치료사", "셰프"] },
+    INFP: { nick: "따뜻한 이상주의자", desc: "자기만의 가치관이 뚜렷하고, 세상을 조금 더 좋게 만들고 싶어 하는 타입이에요. 상상력이 풍부하고 공감 능력이 깊어요.",
+      good: ["진정성과 공감 능력이 깊다", "상상력과 글 표현력이 좋다", "가치 있는 일에 몰입한다"], bad: ["현실적인 세부 처리에 약할 수 있다", "비판에 상처를 크게 받는다"],
+      jobs: ["작가·에디터", "상담사", "일러스트레이터", "콘텐츠 기획자", "NGO 활동가"] },
+    INTP: { nick: "호기심 많은 사색가", desc: "개념과 이론을 파고들며 ‘왜 그런지’를 끝까지 알아내려는 타입이에요. 독창적인 아이디어와 논리적 분석이 강점이에요.",
+      good: ["논리적이고 분석적이다", "새로운 아이디어가 많다", "복잡한 문제를 즐긴다"], bad: ["생각만 하고 실행이 늦어질 수 있다", "일상적인 일을 자주 놓친다"],
+      jobs: ["개발자", "연구원", "데이터 분석가", "대학교수", "게임 시스템 기획"] },
+    ESTP: { nick: "행동파 모험가", desc: "생각보다 몸이 먼저 움직이고, 현장에서 빠르게 판단해 기회를 잡는 타입이에요. 에너지 넘치고 협상에 강해요.",
+      good: ["순발력과 실행력이 좋다", "사람들과 금방 친해진다", "위기를 기회로 바꾼다"], bad: ["충동적으로 결정할 때가 있다", "장기적인 결과를 가볍게 볼 수 있다"],
+      jobs: ["영업·세일즈", "창업가", "스포츠 관련직", "경찰·소방관", "이벤트 기획"] },
+    ESFP: { nick: "분위기 메이커", desc: "어디서든 분위기를 밝게 만들고, 사람들과 즐거운 경험을 나누는 걸 좋아하는 타입이에요. 현실 감각과 센스가 좋아요.",
+      good: ["사람을 즐겁게 한다", "현장 적응력이 뛰어나다", "센스 있고 실용적이다"], bad: ["지루한 일은 미루기 쉽다", "장기 계획과 저축이 약할 수 있다"],
+      jobs: ["방송·엔터테인먼트", "승무원", "호텔·관광 서비스", "유치원 교사", "패션 MD"] },
+    ENFP: { nick: "열정적인 아이디어 뱅크", desc: "새로운 가능성과 사람에 대한 호기심이 넘치고, 주변에 에너지를 퍼뜨리는 타입이에요. 아이디어가 끊이지 않아요.",
+      good: ["아이디어와 열정이 넘친다", "사람의 잠재력을 잘 발견한다", "분위기를 살린다"], bad: ["시작은 많고 마무리가 약할 수 있다", "반복 업무에 금방 지친다"],
+      jobs: ["마케터", "콘텐츠 크리에이터", "광고 기획자", "교육 강사", "스타트업 기획"] },
+    ENTP: { nick: "도전적인 토론가", desc: "기존의 방식에 ‘왜?’를 던지고, 새로운 해법을 찾아내는 걸 즐기는 타입이에요. 말이 빠르고 아이디어가 기발해요.",
+      good: ["발상이 기발하다", "논쟁과 협상에 강하다", "변화에 빠르게 적응한다"], bad: ["세부 마무리를 소홀히 할 수 있다", "논쟁을 즐기다 상대를 지치게 할 수 있다"],
+      jobs: ["창업가", "변호사", "전략 기획", "벤처 투자", "프로덕트 매니저"] },
+    ESTJ: { nick: "추진력 있는 조직가", desc: "목표와 규칙을 명확히 세우고, 사람과 일을 체계적으로 굴러가게 만드는 타입이에요. 결단력과 실행력이 강해요.",
+      good: ["조직과 관리에 능하다", "결정이 빠르고 명확하다", "책임감이 강하다"], bad: ["융통성이 부족해 보일 수 있다", "다른 방식의 의견을 쉽게 넘길 수 있다"],
+      jobs: ["관리자·팀장", "공무원", "금융·은행", "군 장교", "생산·물류 관리"] },
+    ESFJ: { nick: "다정한 협력자", desc: "사람들이 편안하도록 챙기고, 모두가 함께 잘 지내는 환경을 만드는 타입이에요. 사교적이고 책임감이 강해요.",
+      good: ["배려와 친절이 몸에 배어 있다", "팀워크를 잘 만든다", "맡은 일을 성실하게 해낸다"], bad: ["남의 평가에 민감하다", "갈등 상황을 힘들어한다"],
+      jobs: ["교사", "간호사", "고객 관리(CS)", "HR 담당자", "행사 기획"] },
+    ENFJ: { nick: "사람을 이끄는 멘토", desc: "사람의 가능성을 믿고, 함께 성장하도록 이끄는 데서 보람을 느끼는 타입이에요. 말에 힘이 있고 공감 능력이 뛰어나요.",
+      good: ["사람을 동기부여한다", "소통과 발표에 강하다", "공동체를 잘 이끈다"], bad: ["남을 챙기다 자신을 소홀히 한다", "거절을 어려워한다"],
+      jobs: ["교사·교수", "HR·조직문화 담당", "코치·상담사", "홍보(PR)", "정치·공공 분야"] },
+    ENTJ: { nick: "결단력 있는 리더", desc: "큰 목표를 세우고 사람과 자원을 효율적으로 움직여 성과를 내는 타입이에요. 자신감 있고 추진력이 강해요.",
+      good: ["리더십과 결단력이 있다", "효율적인 구조를 만든다", "장기 목표를 향해 밀어붙인다"], bad: ["성급하고 강압적으로 보일 수 있다", "감정적인 부분을 간과하기 쉽다"],
+      jobs: ["경영자·CEO", "경영 컨설턴트", "변호사", "투자은행", "사업 개발"] }
+  };
+  const TYPE_ORDER = ["ISTJ","ISFJ","INFJ","INTJ","ISTP","ISFP","INFP","INTP","ESTP","ESFP","ENFP","ENTP","ESTJ","ESFJ","ENFJ","ENTJ"];
+
+  const SCALE = ["전혀 아니다", "아니다", "보통이다", "그렇다", "매우 그렇다"];
+  const STORE_KEY = "mbti-style-answers-v1";
+  const $ = id => document.getElementById(id);
+  let answers = new Array(QUESTIONS.length).fill(null);
+  let idx = 0;
+
+  function load() {
+    try { const a = JSON.parse(localStorage.getItem(STORE_KEY)); if (Array.isArray(a) && a.length === QUESTIONS.length) return a; } catch (e) {}
+    return null;
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(answers)); } catch (e) {} }
+  function clearSave() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
+
+  $("axisLegend").innerHTML = AXES.map(ax =>
+    `<div class="axis-chip" style="--c:var(--${ax.id})"><span class="pair">${ax.a} ${ax.an} · ${ax.b} ${ax.bn}</span><span>${ax.q}</span><small>${ax.as} ↔ ${ax.bs}</small></div>`).join("");
+
+  const saved = load();
+  if (saved && saved.some(v => v !== null)) {
+    const done = saved.filter(v => v !== null).length;
+    $("resumeBtn").hidden = false;
+    $("resumeBtn").textContent = done === QUESTIONS.length ? "지난 결과 보기" : `이어서 하기 (${done}/${QUESTIONS.length})`;
+  }
+
+  $("scale").innerHTML = SCALE.map((s, i) =>
+    `<button type="button" data-v="${i}" aria-pressed="false"><b>${i + 1}</b>${s}</button>`).join("");
+  $("scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) choose(+b.dataset.v); });
+
+  function show(section) {
+    ["intro", "quiz", "result"].forEach(s => $(s).hidden = s !== section);
+    window.scrollTo({ top: 0 });
+  }
+  function renderQ() {
+    const done = answers.filter(v => v !== null).length;
+    $("qText").textContent = QUESTIONS[idx].text;
+    $("progText").textContent = `${idx + 1} / ${QUESTIONS.length}`;
+    $("progPct").textContent = Math.round(done / QUESTIONS.length * 100) + "%";
+    $("progBar").style.width = (done / QUESTIONS.length * 100) + "%";
+    $("scale").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.v === answers[idx])));
+    $("prevBtn").disabled = idx === 0;
+  }
+  let locked = false;
+  function choose(v) {
+    if (locked) return;
+    answers[idx] = v; save(); renderQ();
+    locked = true;
+    setTimeout(() => {
+      locked = false;
+      const next = answers.findIndex((a, i) => a === null && i > idx);
+      const any = answers.indexOf(null);
+      if (next !== -1) idx = next;
+      else if (any !== -1) idx = any;
+      else { showResult(); return; }
+      renderQ();
+    }, 180);
+  }
+  function restart() { answers = new Array(QUESTIONS.length).fill(null); idx = 0; clearSave(); show("quiz"); renderQ(); }
+
+  $("startBtn").addEventListener("click", restart);
+  $("resumeBtn").addEventListener("click", () => {
+    answers = load() || answers;
+    const any = answers.indexOf(null);
+    if (any === -1) { showResult(); return; }
+    idx = any; show("quiz"); renderQ();
+  });
+  $("prevBtn").addEventListener("click", () => { if (idx > 0) { idx--; renderQ(); } });
+  document.addEventListener("keydown", e => {
+    if ($("quiz").hidden) return;
+    if (e.key >= "1" && e.key <= "5") choose(+e.key - 1);
+    else if (e.key === "ArrowLeft" && idx > 0) { idx--; renderQ(); }
+  });
+
+  // 축별 점수: 응답(0~4)에서 2를 빼서 -2~+2, 문항 방향(pole)을 곱해 합산 → -20~+20
+  function axisResults() {
+    return AXES.map(ax => {
+      let s = 0;
+      QUESTIONS.forEach((q, i) => { if (q.axis === ax.id) s += ((answers[i] ?? 2) - 2) * q.pole; });
+      const pctA = Math.round((s + 20) / 40 * 100);
+      const letter = s >= 0 ? ax.a : ax.b;
+      return { ax, pctA, letter, pct: letter === ax.a ? pctA : 100 - pctA, edge: Math.abs(pctA - 50) <= 10 };
+    });
+  }
+
+  function typeDetail(t) {
+    const d = TYPES[t];
+    return `
+      <div class="cols">
+        <div class="list-block"><h3>강점</h3><ul>${d.good.map(x => `<li>${x}</li>`).join("")}</ul></div>
+        <div class="list-block"><h3>주의할 점</h3><ul>${d.bad.map(x => `<li>${x}</li>`).join("")}</ul></div>
+      </div>
+      <div class="list-block"><h3>어울리는 직업</h3><div class="jobs">${d.jobs.map(j => `<span>${j}</span>`).join("")}</div></div>`;
+  }
+
+  function showResult() {
+    const res = axisResults();
+    const type = res.map(r => r.letter).join("");
+    const d = TYPES[type];
+    const edges = res.filter(r => r.edge);
+
+    const dimRows = res.map(r => {
+      const left = r.letter === r.ax.a;
+      const w = Math.abs(r.pctA - 50);
+      const style = left ? `right:50%;width:${w}%` : `left:50%;width:${w}%`;
+      return `<div class="dim" style="--c:var(--${r.ax.id})">
+        <div class="dim-labels"><span class="${left ? "on" : ""}"><b>${r.ax.a}</b>${r.ax.an}</span><span class="${left ? "" : "on"}">${r.ax.bn}<b>${r.ax.b}</b></span></div>
+        <div class="dim-track"><i style="${style}"></i></div>
+        <div class="dim-foot"><span>${r.pctA}%</span>${r.edge ? `<span class="edge">경계에 가까움</span>` : ""}<span>${100 - r.pctA}%</span></div>
+      </div>`;
+    }).join("");
+
+    const edgeNote = edges.length
+      ? `<p class="meta"><b>${edges.map(r => r.ax.a + "/" + r.ax.b).join(", ")}</b> 축은 양쪽 점수 차이가 크지 않아요. 상황에 따라 반대 성향도 자연스럽게 쓰는 편이라는 뜻이에요. 그 글자만 바꾼 유형(${edges.map(r => type.replace(r.letter, r.letter === r.ax.a ? r.ax.b : r.ax.a)).join(", ")})의 설명도 같이 읽어 보세요.</p>`
+      : "";
+
+    const summary = `나의 성격 유형: ${type} (${d.nick})\n` +
+      res.map(r => `${r.ax.a} ${r.pctA}% / ${r.ax.b} ${100 - r.pctA}%`).join(" · ") +
+      `\n어울리는 직업: ${d.jobs.join(", ")}`;
+
+    $("result").innerHTML = `
+      <div style="display:grid;gap:12px">
+        <p class="eyebrow">검사 결과</p>
+        <div class="code">${type.split("").map(c => `<span>${c}</span>`).join("")}</div>
+        <h1>${d.nick}</h1>
+        <p class="lede">${d.desc}</p>
+      </div>
+
+      <div class="dims">${dimRows}${edgeNote}</div>
+
+      <div style="display:grid;gap:16px">${typeDetail(type)}</div>
+
+      <div style="display:grid;gap:12px">
+        <h2>16가지 유형 둘러보기</h2>
+        <p class="meta">다른 유형을 눌러 보면 아래에 설명이 나와요. 친구 유형이랑 비교해 봐도 재밌어요.</p>
+        <div class="grid16" id="grid16">${TYPE_ORDER.map(t =>
+          `<button type="button" data-t="${t}" class="${t === type ? "mine" : ""}" aria-pressed="${t === type}"><b>${t}</b><small>${TYPES[t].nick}</small></button>`).join("")}</div>
+        <div class="peek" id="peek"></div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="copyBtn" type="button">결과 복사하기</button>
+        <button class="btn" id="retryBtn" type="button">다시 검사하기</button>
+        <span class="toast" id="toast" role="status"></span>
+      </div>
+      <textarea id="copyText" readonly hidden style="width:100%;min-height:90px">${summary}</textarea>
+
+      <p class="disclaimer">이 검사는 MBTI의 4가지 선호 지표(E/I, S/N, T/F, J/P)를 참고해서 만든 비공식 간이 검사예요. 공식 MBTI® 검사(The Myers-Briggs Company)와는 관련이 없고 결과가 다를 수 있어요. 성격에 좋고 나쁨은 없으니, 나를 이해하는 참고 자료로 가볍게 활용해 주세요.</p>
+    `;
+    show("result");
+
+    const peek = t => {
+      $("peek").innerHTML = `<h3><span style="font-family:var(--mono)">${t}</span> · ${TYPES[t].nick}${t === type ? " (나)" : ""}</h3><p>${TYPES[t].desc}</p>${typeDetail(t)}`;
+      $("grid16").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
+    };
+    // 처음엔 점수 차이가 가장 작은 축의 글자만 바꾼 '가장 가까운 유형'을 보여 준다
+    const closest = [...res].sort((x, y) => Math.abs(x.pctA - 50) - Math.abs(y.pctA - 50))[0];
+    peek(type.replace(closest.letter, closest.letter === closest.ax.a ? closest.ax.b : closest.ax.a));
+    $("grid16").addEventListener("click", e => { const b = e.target.closest("button"); if (b) peek(b.dataset.t); });
+
+    $("retryBtn").addEventListener("click", restart);
+    $("copyBtn").addEventListener("click", () => {
+      const ok = () => $("toast").textContent = "결과를 복사했어요.";
+      const fallback = () => { const t = $("copyText"); t.hidden = false; t.select(); $("toast").textContent = "아래 글을 직접 복사해 주세요."; };
+      try { navigator.clipboard.writeText(summary).then(ok, fallback); } catch (e) { fallback(); }
+    });
+  }
+})();
+</script>
