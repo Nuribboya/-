@@ -91,6 +91,34 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--config", default=None)
     g.add_argument("-v", "--verbose", action="store_true")
 
+    gl = sub.add_parser("goal", help="최우선 목표: 원청 한 곳 의존도를 낮추려면 몇 곳에 연락해야 하나")
+    gl.add_argument("--sales", default=None, help="매출 파일 (월평균 매출을 여기서 계산)")
+    gl.add_argument("--revenue", type=int, default=None, help="월매출(원) — 매출 파일 대신")
+    gl.add_argument("--target-dependency", default="70",
+                    help="목표: 가장 큰 원청 비중을 이 % 밑으로 (기본 70)")
+    gl.add_argument("--current-dependency", default="100",
+                    help="지금 가장 큰 원청 비중 % (원청 한 곳이면 100, 기본)")
+    gl.add_argument("--months", type=int, default=12, help="기한 개월 (기본 12)")
+    gl.add_argument("--per-client", type=int, default=10_000_000,
+                    help="새 원청 한 곳이 초기에 주는 월 발주(원), 기본 1천만")
+    gl.add_argument("--fixed-cost", type=int, default=None, help="월 고정비 — 위험 계산용")
+    gl.add_argument("--variable-ratio", default=None, help="재료·외주비 % — 위험 계산용")
+    gl.add_argument("--cash", type=int, default=0, help="지금 쓸 수 있는 현금 — 몇 달 버티나")
+
+    ld = sub.add_parser("leads", help="영업 진행 기록 (연락 → 미팅 → 등록 → 첫 수주)")
+    ld_sub = ld.add_subparsers(dest="leads_cmd", required=True)
+    ld_sub.add_parser("list", help="기록 보기")
+    la = ld_sub.add_parser("add", help="회사 추가")
+    la.add_argument("name")
+    la.add_argument("--bizno", default="")
+    lm = ld_sub.add_parser("move", help="단계 옮기기")
+    lm.add_argument("name")
+    lm.add_argument("stage", help="후보 / 연락함 / 미팅 / 서류제출 / 등록완료 / 견적요청 / 첫수주 / 보류")
+    lm.add_argument("--next", default="", help="다음 할 일")
+    lm.add_argument("--date", default="", help="다음 할 일 날짜 YYYY-MM-DD (비우면 1주 뒤)")
+    lm.add_argument("--terms", default="", help="결제조건 메모")
+    lm.add_argument("--monthly", type=int, default=0, help="첫 수주 뒤 월 발주(원)")
+
     i = sub.add_parser("industry-screen",
                        help="낙찰 이력과 무관하게 DART 상장사를 업종코드로 훑는다 "
                             "(민간 발주 원청을 찾을 때)")
@@ -224,6 +252,85 @@ def _cmd_gap(args) -> int:
     print(render_gap(book, record, plan))
     if args.out:
         print(f"\nCSV 저장: {write_csv(result, args.out)}")
+    return 0
+
+
+def _pct(text) -> float:
+    from prime_contractor.breakeven import parse_ratio
+    return parse_ratio(str(text))
+
+
+def _cmd_goal(args) -> int:
+    from prime_contractor.goal import GoalInputs, build_plan
+    from prime_contractor.leads import LeadBook, progress_lines
+
+    revenue = args.revenue
+    if revenue is None and args.sales:
+        from prime_contractor.sales import load_sales
+        try:
+            revenue = load_sales(args.sales).average_revenue()
+        except (OSError, ValueError) as exc:
+            print(f"[오류] 매출 파일을 읽지 못했습니다: {exc}", file=sys.stderr)
+            return 2
+    if not revenue:
+        print("[오류] --sales 로 매출 파일을 주거나 --revenue 로 월매출을 넣어주세요.",
+              file=sys.stderr)
+        return 2
+
+    margin = fixed = 0
+    if args.fixed_cost and args.variable_ratio:
+        fixed = args.fixed_cost
+        margin = 1 - _pct(args.variable_ratio)
+    try:
+        inputs = GoalInputs(
+            monthly_revenue=revenue, target_dependency=_pct(args.target_dependency),
+            current_dependency=_pct(args.current_dependency), months=args.months,
+            revenue_per_new_client=args.per_client, monthly_fixed=fixed,
+            margin_ratio=margin, cash_on_hand=args.cash)
+    except ValueError as exc:
+        print(f"[오류] {exc}", file=sys.stderr)
+        return 2
+
+    plan = build_plan(inputs)
+    print(f"■ 최우선 목표  (지금 월매출 {revenue / 1e4:,.0f}만원 기준)")
+    print("\n".join("  " + l if l else "" for l in plan.summary()))
+    print()
+    print("\n".join("  " + l if l else "" for l in progress_lines(LeadBook.load(), plan)))
+    print("\n  전환율·'한 곳당 월 발주'는 어림값입니다. 영업 기록이 쌓이면 실제 숫자가 나옵니다.")
+    return 0
+
+
+def _cmd_leads(args) -> int:
+    from prime_contractor.leads import STAGES, Lead, LeadBook
+    book = LeadBook.load()
+    if args.leads_cmd == "add":
+        lead, created = book.add(Lead(name=args.name, bizno=args.bizno))
+        book.save()
+        print(("추가했습니다: " if created else "이미 있습니다: ") + lead.name)
+        return 0
+    if args.leads_cmd == "move":
+        try:
+            lead = book.move(args.name, args.stage, next_action=args.next, next_date=args.date)
+        except (KeyError, ValueError) as exc:
+            print(f"[오류] {exc}", file=sys.stderr)
+            return 2
+        if args.terms:
+            lead.payment_terms = args.terms
+        if args.monthly:
+            lead.monthly_revenue = args.monthly
+        book.save()
+        print(f"{lead.name}: {lead.stage}  (다음 할 일 {lead.next_date})")
+        return 0
+
+    if not book.leads:
+        print("아직 기록이 없습니다.  예) python -m prime_contractor.cli leads add \"○○전기\"")
+        return 0
+    order = {s: i for i, s in enumerate(STAGES)}
+    for lead in sorted(book.leads, key=lambda l: (-order.get(l.stage, -1), l.name)):
+        late = "  ⚠ 미룸" if lead.is_overdue() else ""
+        terms = f"  [{lead.payment_terms}]" if lead.payment_terms else ""
+        print(f"{lead.stage:<6} {lead.name}{terms}  — {lead.next_action or '-'} "
+              f"({lead.next_date or '날짜 없음'}){late}")
     return 0
 
 
@@ -396,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         "probe": _cmd_probe,
         "industry-screen": _cmd_industry_screen,
         "gap": _cmd_gap,
+        "goal": _cmd_goal,
+        "leads": _cmd_leads,
         "dart-lookup": _cmd_dart_lookup,
         "show-config": _cmd_show_config,
     }[args.command](args)

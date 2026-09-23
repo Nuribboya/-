@@ -1294,3 +1294,183 @@ def test_gap_needs_both_cost_numbers(tmp_path, capsys):
     code = cli.main(["gap", "--sales", str(path), "--fixed-cost", "30000000", "--offline"])
     assert code == 2
     assert "둘 다" in capsys.readouterr().err
+
+
+# --- 최우선 목표 (의존도 낮추기) ---------------------------------------------------
+
+def test_goal_back_calculates_contacts_per_week():
+    from prime_contractor.goal import GoalInputs, build_plan
+    plan = build_plan(GoalInputs(monthly_revenue=100_000_000, target_dependency=0.7,
+                                 months=12, revenue_per_new_client=10_000_000))
+    # 1억 ÷ 0.7 = 1억 4,286만 → 새로 4,286만 → 1천만씩 5곳
+    assert plan.new_revenue_needed == 42_857_143
+    assert plan.clients_needed == 5
+    # 전환율 30% × 40% × 50% = 6% → 5 ÷ 0.06 = 84곳 (올림)
+    assert plan.contacts_needed == 84
+    assert plan.registrations_needed == 10          # 5 ÷ 0.5
+    assert plan.weeks == 52
+    assert plan.contacts_per_week == pytest.approx(84 / 52)
+
+
+def test_goal_counts_revenue_already_coming_from_others():
+    """이미 다른 곳에서 조금 들어오고 있으면 그만큼 덜 벌어도 된다."""
+    from prime_contractor.goal import GoalInputs, build_plan
+    alone = build_plan(GoalInputs(monthly_revenue=100_000_000, current_dependency=1.0))
+    some = build_plan(GoalInputs(monthly_revenue=100_000_000, current_dependency=0.9))
+    assert some.new_revenue_needed < alone.new_revenue_needed
+
+
+def test_goal_already_met_needs_nothing():
+    from prime_contractor.goal import GoalInputs, build_plan
+    plan = build_plan(GoalInputs(monthly_revenue=100_000_000, current_dependency=0.6,
+                                 target_dependency=0.7))
+    assert plan.already_there
+    assert plan.clients_needed == plan.contacts_needed == 0
+    assert "이미" in plan.summary()[0]
+
+
+def test_goal_risk_if_the_only_client_stops():
+    """원청이 멈추면 남는 매출로 고정비를 못 덮는 만큼이 매달 적자다."""
+    from prime_contractor.goal import GoalInputs, build_plan
+    plan = build_plan(GoalInputs(monthly_revenue=100_000_000, current_dependency=1.0,
+                                 monthly_fixed=30_000_000, margin_ratio=0.4,
+                                 cash_on_hand=90_000_000))
+    assert plan.loss_if_anchor_stops == 30_000_000   # 남는 매출 0 → 고정비 전부
+    assert plan.months_of_runway == pytest.approx(3.0)
+    assert any("적자" in l for l in plan.summary())
+
+
+def test_goal_rejects_nonsense():
+    from prime_contractor.goal import GoalInputs
+    for bad in ({"target_dependency": 1.2}, {"target_dependency": 0},
+                {"months": 0}, {"revenue_per_new_client": 0},
+                {"funnel": {"연락 → 미팅": 0}}):
+        with pytest.raises(ValueError):
+            GoalInputs(monthly_revenue=100_000_000, **bad)
+
+
+# --- 영업 진행 기록 ---------------------------------------------------------------
+
+def test_lead_moves_through_stages_and_remembers_history(tmp_path):
+    from datetime import date
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    book.add(Lead(name="갑전기"), date(2026, 9, 1))
+    book.move("갑전기", "연락함", date(2026, 9, 2))
+    lead = book.move("갑전기", "미팅", date(2026, 9, 9), next_action="서류 준비")
+    assert [s for s, _ in lead.history] == ["후보", "연락함", "미팅"]
+    assert lead.next_date == "2026-09-16"          # 날짜 안 주면 1주 뒤
+    assert lead.reached("연락함") and not lead.reached("등록완료")
+
+
+def test_paused_lead_still_counts_what_it_passed(tmp_path):
+    """보류로 돌려도 이미 미팅까지 간 건 전환율 계산에 남아야 한다."""
+    from datetime import date
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    book.add(Lead(name="을전기"), date(2026, 9, 1))
+    book.move("을전기", "미팅", date(2026, 9, 3))
+    book.move("을전기", "보류", date(2026, 9, 10))
+    assert book.funnel()["미팅"] == 1
+
+
+def test_leads_survive_save_and_load(tmp_path):
+    from datetime import date
+    from prime_contractor.leads import Lead, LeadBook
+    path = tmp_path / "leads.json"
+    book = LeadBook(path=path)
+    book.add(Lead(name="갑전기", bizno="1234567890", grade="A"), date(2026, 9, 1))
+    book.move("갑전기", "등록완료", date(2026, 9, 20))
+    book.find("갑전기").payment_terms = "현금 30일"
+    book.save()
+    again = LeadBook.load(path)
+    lead = again.find("1234567890")
+    assert lead.stage == "등록완료" and lead.payment_terms == "현금 30일"
+    assert lead.history[-1] == ("등록완료", "2026-09-20")
+
+
+def test_broken_leads_file_does_not_stop_the_app(tmp_path):
+    from prime_contractor.leads import LeadBook
+    path = tmp_path / "leads.json"
+    path.write_text("{망가진", encoding="utf-8")
+    book = LeadBook.load(path)
+    assert book.leads == []
+    assert (tmp_path / "leads.broken.json").exists()   # 지우지 않고 옆에 남긴다
+
+
+def test_adding_the_same_company_twice_keeps_one(tmp_path):
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    _, first = book.add(Lead(name="갑전기", bizno="111"))
+    _, second = book.add(Lead(name="갑전기", bizno="111"))
+    assert first and not second and len(book.leads) == 1
+
+
+def test_unknown_stage_is_rejected(tmp_path):
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    book.add(Lead(name="갑전기"))
+    with pytest.raises(ValueError):
+        book.move("갑전기", "계약서명")
+
+
+def test_overdue_and_weekly_contacts(tmp_path):
+    from datetime import date
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    for name in ("갑", "을", "병"):
+        book.add(Lead(name=name), date(2026, 9, 1))
+    book.move("갑", "연락함", date(2026, 9, 22))        # 이번 주 월요일
+    book.move("을", "연락함", date(2026, 9, 10))        # 지난 주 이전
+    book.find("을").next_date = "2026-09-17"
+    assert book.contacts_in_week(date(2026, 9, 23)) == 1
+    assert [l.name for l in book.overdue(date(2026, 9, 23))] == ["을"]
+
+
+def test_actual_rates_wait_for_enough_records(tmp_path):
+    """두세 곳 기록으로 '전환율 50%' 라고 하면 오해를 산다."""
+    from prime_contractor.leads import Lead, LeadBook
+    book = LeadBook(path=tmp_path / "leads.json")
+    for i in range(3):
+        book.add(Lead(name=f"업체{i}"))
+        book.move(f"업체{i}", "연락함")
+    book.move("업체0", "미팅")
+    assert book.actual_rates()["연락 → 미팅"] is None
+    for i in range(3, 6):
+        book.add(Lead(name=f"업체{i}"))
+        book.move(f"업체{i}", "연락함")
+    assert book.actual_rates()["연락 → 미팅"] == pytest.approx(1 / 6)
+
+
+def test_progress_shows_this_weeks_target(tmp_path):
+    from datetime import date
+    from prime_contractor.goal import GoalInputs, build_plan
+    from prime_contractor.leads import Lead, LeadBook, progress_lines
+    book = LeadBook(path=tmp_path / "leads.json")
+    book.add(Lead(name="갑"), date(2026, 9, 21))
+    book.move("갑", "연락함", date(2026, 9, 22))
+    plan = build_plan(GoalInputs(monthly_revenue=100_000_000))
+    text = "\n".join(progress_lines(book, plan, today=date(2026, 9, 23)))
+    assert "이번 주 연락 1 / 2곳" in text
+    assert "새 원청    0 / 5곳" in text
+
+
+def test_goal_cli_reads_the_ledger(tmp_path, capsys, monkeypatch):
+    from prime_contractor import cli
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    path = tmp_path / "매출.csv"
+    path.write_text("연월,매출\n2026-06,100000000\n2026-07,100000000\n", encoding="utf-8")
+    assert cli.main(["goal", "--sales", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "이번 주 목표" in out and "새 원청 5곳" in out
+
+
+def test_release_without_the_exe_is_not_offered_as_an_update():
+    """파일 업로드가 깨진 릴리스(v1.3.0·v1.4.0)가 실제로 있었다. 빈 페이지로 안내하면 안 된다."""
+    from prime_contractor.updater import pick_latest
+    picked = pick_latest([
+        {"tag_name": "finder-v1.4.0", "assets": []},
+        {"tag_name": "finder-v1.3.0", "assets": [{"name": "PrimeFinder.exe", "state": "starter"}]},
+        {"tag_name": "finder-v1.2.0", "assets": [{"name": "PrimeFinder.exe", "state": "uploaded"}]},
+    ])
+    assert picked["tag_name"] == "finder-v1.2.0"

@@ -84,15 +84,19 @@ class App:
         find_tab = ttk.Frame(self.tabs)
         sales_tab = ttk.Frame(self.tabs)
         help_tab = ttk.Frame(self.tabs)
+        goal_tab = ttk.Frame(self.tabs)
+        self.tabs.add(goal_tab, text="  ★ 최우선 목표  ")
         self.tabs.add(find_tab, text="  ① 일감 줄 회사 찾기  ")
         self.tabs.add(sales_tab, text="  ② 매출 보고 채우기  ")
         self.tabs.add(help_tab, text="  도움말  ")
 
+        self.find_tab, self.sales_tab, self.goal_tab = find_tab, sales_tab, goal_tab
         self._build_inputs(find_tab, saved)
         self._build_table(find_tab)
         self._build_log(find_tab)
         self._build_sales(sales_tab, saved)
         self._build_help(help_tab)
+        self._build_goal(goal_tab, saved)
         self._pump_messages()
         threading.Thread(target=self._check_update, daemon=True).start()
 
@@ -165,6 +169,8 @@ class App:
                                       command=self.on_save, state="disabled")
         self.save_button.pack(side=LEFT, padx=6)
         ttk.Button(buttons, text="입력 내용 저장", command=self.on_remember).pack(side=LEFT)
+        ttk.Button(buttons, text="고른 회사를 영업 목록에 넣기",
+                   command=self.on_add_to_leads).pack(side=LEFT, padx=6)
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -484,7 +490,7 @@ class App:
         if not gap:
             return
         self.gap_target = gap
-        self.tabs.select(0)           # 진행 상황이 보이도록 탐색 탭으로
+        self.tabs.select(self.find_tab)   # 진행 상황이 보이도록 탐색 탭으로
         self.on_run()
 
     # --- 동작 ---------------------------------------------------------------
@@ -522,6 +528,11 @@ class App:
             "variable_ratio": self.variable_ratio.get(),
             "target_profit": self.target_profit.get(),
             "months_back": self.months_back.get(),
+            "goal_target": self.goal_target.get(),
+            "goal_current": self.goal_current.get(),
+            "goal_months": self.goal_months.get(),
+            "goal_per_client": self.goal_per_client.get(),
+            "goal_cash": self.goal_cash.get(),
         }
 
     def on_remember(self) -> None:
@@ -640,6 +651,216 @@ class App:
                                 "  · '업종 고르기' 를 '업종 안 가림' 으로 두기")
         self._finish()
 
+    # --- 최우선 목표 탭 ---------------------------------------------------------
+
+    def _build_goal(self, root, saved: dict) -> None:
+        from prime_contractor.leads import ALL_STAGES, LeadBook
+        self.lead_book = LeadBook.load()
+        self.goal_plan = None
+
+        box = ttk.LabelFrame(root, text="목표 — 원청 한 곳에 기대는 비중을 낮추기", padding=10)
+        box.pack(fill=X, padx=10, pady=(10, 5))
+        self.goal_target = StringVar(value=str(saved.get("goal_target", "70")))
+        self.goal_current = StringVar(value=str(saved.get("goal_current", "100")))
+        self.goal_months = StringVar(value=str(saved.get("goal_months", "12")))
+        self.goal_per_client = StringVar(value=str(saved.get("goal_per_client", "10000000")))
+        self.goal_cash = StringVar(value=str(saved.get("goal_cash", "")))
+        fields = [
+            ("지금 가장 큰 원청 비중", self.goal_current, "%  (원청 한 곳이면 100)"),
+            ("목표 비중", self.goal_target, "%  밑으로"),
+            ("기한", self.goal_months, "개월 안에"),
+            ("새 원청 한 곳당 월 발주", self.goal_per_client, "원  (처음엔 작게 시작 — 어림값)"),
+            ("쓸 수 있는 현금", self.goal_cash, "원  (없어도 됨 — 몇 달 버티나 계산)"),
+        ]
+        for row, (label, var, hint) in enumerate(fields):
+            ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, pady=2)
+            ttk.Entry(box, textvariable=var, width=14).grid(row=row, column=1, sticky=W, pady=2)
+            ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=2, sticky=W, padx=6)
+        ttk.Button(box, text="  계산하기  ", command=self.on_goal).grid(
+            row=0, column=3, rowspan=2, padx=(20, 0))
+        ttk.Label(box, text="월매출은 ② 탭에서 불러온 장부로,\n위험은 ② 탭의 고정비로 계산합니다.",
+                  foreground="#666").grid(row=2, column=3, rowspan=3, padx=(20, 0), sticky=W)
+
+        self.goal_text = scrolledtext.ScrolledText(root, height=12, wrap="word",
+                                                   font=("", 10), relief="flat")
+        self.goal_text.pack(fill=X, padx=10, pady=5)
+        self.goal_text.insert(END, "② 탭에서 매출 장부를 불러온 뒤 [계산하기]를 누르세요.\n"
+                                   "이번 주에 몇 곳에 연락해야 하는지 거꾸로 계산해 드립니다.")
+        self.goal_text.configure(state="disabled")
+
+        leads_box = ttk.LabelFrame(root, text="영업 진행 — ① 탭에서 회사를 골라 넣으세요",
+                                   padding=6)
+        leads_box.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        cols = (("회사", 200), ("등급", 45), ("단계", 75), ("다음 할 일", 230),
+                ("날짜", 90), ("결제조건", 150))
+        self.lead_tree = ttk.Treeview(leads_box, columns=[c for c, _ in cols],
+                                      show="headings", height=8)
+        for name, width in cols:
+            self.lead_tree.heading(name, text=name)
+            self.lead_tree.column(name, width=width, anchor=W)
+        self.lead_tree.tag_configure("late", background="#fdecea")
+        self.lead_tree.tag_configure("won", background="#e8f5e9")
+        self.lead_tree.pack(fill=BOTH, expand=True)
+
+        act = ttk.Frame(leads_box)
+        act.pack(fill=X, pady=(6, 0))
+        self.lead_stage = StringVar(value="연락함")
+        ttk.Label(act, text="고른 회사를").pack(side=LEFT)
+        ttk.Combobox(act, textvariable=self.lead_stage, values=list(ALL_STAGES),
+                     state="readonly", width=8).pack(side=LEFT, padx=4)
+        ttk.Button(act, text="단계로 옮기기", command=self.on_lead_move).pack(side=LEFT)
+        ttk.Button(act, text="다음 할 일·결제조건 적기",
+                   command=self.on_lead_edit).pack(side=LEFT, padx=6)
+        ttk.Button(act, text="빼기", command=self.on_lead_remove).pack(side=LEFT)
+        ttk.Label(act, text="빨간 줄 = 할 일 날짜가 지남 · 초록 줄 = 첫 수주",
+                  foreground="#666").pack(side=RIGHT)
+        self._render_leads()
+
+    def _goal_inputs(self):
+        from prime_contractor.breakeven import parse_ratio
+        from prime_contractor.goal import GoalInputs
+
+        def number(var) -> int:
+            return int(re.sub(r"[^\d]", "", var.get() or "") or 0)
+
+        revenue = self.book.average_revenue() if self.book else 0
+        if not revenue:
+            messagebox.showwarning("매출 장부가 필요합니다",
+                                   "② 탭에서 매출 장부를 먼저 불러와 주세요.\n"
+                                   "지금 월매출을 알아야 얼마를 새로 벌어야 하는지 계산됩니다.")
+            return None
+        model = self.cost_model
+        try:
+            return GoalInputs(
+                monthly_revenue=revenue,
+                target_dependency=parse_ratio(self.goal_target.get() or "70"),
+                current_dependency=parse_ratio(self.goal_current.get() or "100"),
+                months=number(self.goal_months) or 12,
+                revenue_per_new_client=number(self.goal_per_client) or 10_000_000,
+                monthly_fixed=model.monthly_fixed if model else 0,
+                margin_ratio=model.margin_ratio if model else 0.0,
+                cash_on_hand=number(self.goal_cash))
+        except ValueError as exc:
+            messagebox.showwarning("숫자를 확인해 주세요", str(exc))
+            return None
+
+    def on_goal(self) -> None:
+        from prime_contractor.goal import build_plan
+        inputs = self._goal_inputs()
+        if inputs is None:
+            return
+        self.goal_plan = build_plan(inputs)
+        self._render_goal_text()
+
+    def _render_goal_text(self) -> None:
+        from prime_contractor.leads import progress_lines
+        lines = [f"지금 월매출 {self.goal_plan.inputs.monthly_revenue / 1e4:,.0f}만원 (최근 평균) 기준", ""]
+        lines += self.goal_plan.summary()
+        if not self.cost_model:
+            lines += ["", "(② 탭에서 고정비를 넣으시면, 원청이 멈췄을 때 매달 얼마씩 "
+                          "적자인지도 보여 드립니다.)"]
+        lines += [""] + progress_lines(self.lead_book, self.goal_plan)
+        lines += ["", "전환율과 '한 곳당 월 발주'는 어림값입니다. 영업 기록이 쌓이면 "
+                      "실제 전환율이 위에 나타납니다."]
+        self.goal_text.configure(state="normal")
+        self.goal_text.delete("1.0", END)
+        self.goal_text.insert(END, "\n".join(lines))
+        self.goal_text.configure(state="disabled")
+
+    def _render_leads(self) -> None:
+        from prime_contractor.leads import STAGES
+        order = {s: i for i, s in enumerate(STAGES)}
+        self.lead_tree.delete(*self.lead_tree.get_children())
+        for lead in sorted(self.lead_book.leads,
+                           key=lambda l: (-order.get(l.stage, -1), l.name)):
+            tag = "won" if lead.stage == "첫수주" else ("late" if lead.is_overdue() else "")
+            self.lead_tree.insert("", END, iid=lead.key, values=(
+                lead.name, lead.grade or "-", lead.stage, lead.next_action or "-",
+                lead.next_date or "-", lead.payment_terms or "-"),
+                tags=(tag,) if tag else ())
+        if self.goal_plan is not None:
+            self._render_goal_text()
+
+    def _selected_lead(self):
+        key = self.lead_tree.focus()
+        if not key:
+            messagebox.showinfo("회사를 고르세요", "아래 표에서 회사를 한 번 클릭해 고른 뒤 눌러주세요.")
+            return None
+        return self.lead_book.find(key)
+
+    def _save_leads(self) -> None:
+        try:
+            self.lead_book.save()
+        except OSError as exc:
+            messagebox.showerror("저장하지 못했습니다", str(exc))
+        self._render_leads()
+
+    def on_add_to_leads(self) -> None:
+        if not self.result:
+            messagebox.showinfo("먼저 찾아 주세요", "[후보 찾기]로 회사를 찾은 뒤 표에서 골라 주세요.")
+            return
+        picked = self.tree.selection() or ((self.tree.focus(),) if self.tree.focus() else ())
+        if not picked:
+            messagebox.showinfo("회사를 고르세요",
+                                "표에서 회사를 클릭해 고르세요.\n"
+                                "Ctrl 을 누른 채 클릭하면 여러 곳을 한 번에 고를 수 있습니다.")
+            return
+        added = 0
+        for item in picked:
+            try:
+                cand = self.result.passed[int(self.tree.item(item, "values")[0]) - 1]
+            except (ValueError, IndexError):
+                continue
+            _, created = self.lead_book.add_candidate(cand)
+            added += created
+        self._save_leads()
+        self.say(f"영업 목록에 {added}곳 넣었습니다. ★ 최우선 목표 탭에서 진행을 기록하세요.")
+
+    def on_lead_move(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        stage = self.lead_stage.get()
+        if stage == "첫수주" and not lead.monthly_revenue:
+            from tkinter import simpledialog
+            text = simpledialog.askstring(
+                "축하합니다", f"{lead.name} 에서 한 달에 대략 얼마 정도 발주가 나올까요? (원)\n"
+                              "모르면 비워 두세요.", parent=self.root)
+            if text:
+                lead.monthly_revenue = int(re.sub(r"[^\d]", "", text) or 0)
+        self.lead_book.move(lead.key, stage)
+        self._save_leads()
+
+    def on_lead_edit(self) -> None:
+        from tkinter import simpledialog
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        action = simpledialog.askstring("다음 할 일", f"{lead.name} — 다음에 할 일은?",
+                                        initialvalue=lead.next_action, parent=self.root)
+        if action is None:
+            return
+        when = simpledialog.askstring("날짜", "언제까지? (예: 2026-10-05)  비우면 1주 뒤",
+                                      initialvalue=lead.next_date, parent=self.root)
+        terms = simpledialog.askstring("결제조건", "결제조건을 아시면 적어 두세요 "
+                                       "(예: 현금 30일 / 어음 4개월)",
+                                       initialvalue=lead.payment_terms, parent=self.root)
+        lead.next_action = action.strip()
+        if when:
+            lead.next_date = when.strip()
+        elif not lead.next_date:
+            from datetime import date, timedelta
+            lead.next_date = (date.today() + timedelta(days=7)).isoformat()
+        if terms is not None:
+            lead.payment_terms = terms.strip()
+        self._save_leads()
+
+    def on_lead_remove(self) -> None:
+        lead = self._selected_lead()
+        if lead and messagebox.askyesno("빼기", f"{lead.name} 을(를) 영업 목록에서 뺄까요?"):
+            self.lead_book.remove(lead.key)
+            self._save_leads()
+
     def _show_detail(self, _event=None) -> None:
         """줄을 더블클릭하면 그 후보의 점수 내역을 띄운다."""
         selected = self.tree.focus()
@@ -676,7 +897,7 @@ class App:
                  " 잡고, 연락했을 때 실제로 일이 올 확률(A 35% · B 25% · C 15% · D 8%)을"
                  " 곱한 값입니다. 모두 어림짐작이니 연락할 순서를 정하는 데만 쓰세요.")
         self.gap_target = 0
-        self.tabs.select(1)
+        self.tabs.select(self.sales_tab)
         self.say(f"모자란 만큼 채우려면: {plan.note}")
 
     def _failed(self, exc: Exception) -> None:

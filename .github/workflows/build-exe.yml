@@ -89,6 +89,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: finder-v${{ steps.ver.outputs.release }}
         run: |
+          exe_size() {
+            gh release view "$TAG" --json assets \
+              --jq '.assets[] | select(.name=="PrimeFinder.exe") | .size' 2>/dev/null || true
+          }
+
+          # 업로드가 중간에 깨지면 목록에는 안 보이는 반쪽짜리 파일 기록이 남아
+          # 이름을 차지한다. 그러면 다시 올려도 'already exists' 로 거절된다
+          # (v1.3.0·v1.4.0). 파일 없는 릴리스는 지우고 새로 만든다.
+          if gh release view "$TAG" > /dev/null 2>&1 && [ -z "$(exe_size)" ]; then
+            echo "$TAG 에 파일이 없어 릴리스를 지우고 다시 만듭니다."
+            gh release delete "$TAG" --yes --cleanup-tag
+            sleep 5
+          fi
+
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" \
               --target "$GITHUB_SHA" \
@@ -101,8 +115,7 @@ jobs:
             echo "업로드 재시도 $attempt..."; sleep $((attempt * 5))
           done
 
-          size=$(gh release view "$TAG" --json assets \
-                   --jq '.assets[] | select(.name=="PrimeFinder.exe") | .size')
+          size=$(exe_size)
           if [ -z "$size" ] || [ "$size" -lt 1000000 ]; then
             echo "::error::$TAG 에 PrimeFinder.exe 가 붙지 않았습니다 (크기: ${size:-없음})."
             exit 1

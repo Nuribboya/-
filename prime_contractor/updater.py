@@ -57,11 +57,24 @@ def is_newer(latest: str, current: str) -> bool:
     return a + (0,) * (width - len(a)) > b + (0,) * (width - len(b))
 
 
+ASSET_NAME = "PrimeFinder.exe"
+
+
+def _has_exe(release: dict) -> bool:
+    """받을 파일이 실제로 붙어 있나. 없으면 알려 봐야 빈 페이지로 안내하게 된다."""
+    assets = release.get("assets")
+    if assets is None:              # 목록에 assets 칸 자체가 없으면 판단하지 않는다
+        return True
+    return any(a.get("name") == ASSET_NAME and a.get("state", "uploaded") == "uploaded"
+               for a in assets)
+
+
 def pick_latest(releases: list[dict], prefix: str = TAG_PREFIX) -> dict | None:
     """이 앱의 릴리스 중 버전이 가장 높은 것. 날짜가 아니라 버전으로 고른다."""
     mine = [r for r in releases
             if str(r.get("tag_name", "")).startswith(prefix)
-            and not r.get("draft") and not r.get("prerelease")]
+            and not r.get("draft") and not r.get("prerelease")
+            and _has_exe(r)]
     if not mine:
         return None
     return max(mine, key=lambda r: parse_version(str(r["tag_name"])[len(prefix):]))
