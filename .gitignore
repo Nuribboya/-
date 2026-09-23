@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+# 빌드할 때 만들어지는 빌드 정보
+prime_contractor/_build.py
+build/
+dist/

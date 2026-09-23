@@ -1485,3 +1485,52 @@ def test_release_with_an_unfinished_upload_is_skipped():
         {"tag_name": "finder-v1.5.0", "assets": [{"name": "PrimeFinder.exe", "state": "uploaded"}]},
     ])
     assert picked["tag_name"] == "finder-v1.5.0"
+
+
+# --- 베타 ----------------------------------------------------------------------
+
+def test_beta_build_is_labelled_by_date_and_commit(monkeypatch):
+    from prime_contractor import build_info
+    monkeypatch.setattr(build_info, "IS_BETA", True)
+    monkeypatch.setattr(build_info, "BUILD", "09-23 17:40 a1b2c3d")
+    assert build_info.label() == "베타 · 09-23 17:40 a1b2c3d"
+
+
+def test_beta_from_source_says_so(monkeypatch):
+    from prime_contractor import build_info
+    monkeypatch.setattr(build_info, "IS_BETA", True)
+    monkeypatch.setattr(build_info, "BUILD", "")
+    assert build_info.label() == "베타 · 개발용"
+
+
+def test_beta_does_not_nag_about_updates(monkeypatch):
+    """계속 고치는 중이라 켤 때마다 '새 버전' 띠가 뜨면 방해만 된다."""
+    from prime_contractor import build_info
+    monkeypatch.setattr(build_info, "IS_BETA", True)
+    assert build_info.should_check_updates() is False
+    monkeypatch.setattr(build_info, "IS_BETA", False)
+    assert build_info.should_check_updates() is True
+
+
+def test_stable_label_uses_version_number(monkeypatch):
+    from prime_contractor import __version__, build_info
+    monkeypatch.setattr(build_info, "IS_BETA", False)
+    assert build_info.label() == f"v{__version__}"
+
+
+def test_package_is_beta_until_released():
+    import prime_contractor
+    assert prime_contractor.CHANNEL in ("beta", "stable")
+
+
+def test_readme_still_documents_every_feature():
+    """README 의 한 부분을 갈아 끼우다 다른 절이 통째로 날아간 적이 있다.
+
+    그 뒤로 문서에 넣었다고 생각한 절들이 끼울 자리를 못 찾아 조용히 빠졌다.
+    기능마다 설명이 남아 있는지 확인한다.
+    """
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
+    for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
+                 "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값"):
+        assert must in text, must

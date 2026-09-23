@@ -1,16 +1,14 @@
 name: build-exe
 
-# 윈도우 실행 파일은 윈도우에서만 만들 수 있다. 빌드 환경을 따로 갖추는 대신
-# GitHub 의 윈도우 러너에서 만든다.
-#   - 브랜치에 push   → 아티팩트로 올린다 (30일 보관, 확인용)
-#   - finder-v* 태그  → Release 를 만들어 exe 를 첨부한다 (만료 없음)
-#     이 저장소에는 앱이 여럿이라 태그에 앱 이름을 붙여 서로 섞이지 않게 한다.
-#   - 수동 실행 + 버전 → 태그까지 여기서 만든다. 태그를 직접 밀 수 없는
-#                        환경에서도 배포할 수 있고, Actions 탭에서 버튼으로 낸다.
+# 윈도우 실행 파일은 윈도우에서만 만들 수 있어 GitHub 의 윈도우 러너에서 만든다.
+#
+#   베타 (기본)  코드를 올릴 때마다 만들어 'finder-beta' 한 곳에 덮어쓴다.
+#                받는 주소가 늘 같다. 써 보면서 계속 고치는 동안은 이것만 쓴다.
+#   정식         Actions 탭에서 수동 실행하고 버전(예: 1.0.0)을 넣을 때만.
+#                prime_contractor/__init__.py 의 CHANNEL 이 "stable" 이어야 한다.
 on:
   push:
     branches: ['**']
-    tags: ['finder-v*']
     paths:
       - 'prime_contractor/**'
       - 'prime_finder.spec'
@@ -18,12 +16,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '배포할 버전 (예: 1.0.0). 비워 두면 빌드만 하고 Release 는 안 만듭니다.'
+        description: '정식 버전 (예: 1.0.0). 비워 두면 베타로 다시 만듭니다.'
         required: false
         default: ''
 
 permissions:
-  contents: write          # Release 를 만들려면 필요하다
+  contents: write
+
+concurrency:
+  # 베타를 연달아 올리면 나중 것만 남기면 된다. 앞선 빌드는 취소.
+  group: build-exe-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows-exe:
@@ -43,54 +46,61 @@ jobs:
       - name: 테스트
         run: python -m pytest tests/test_prime_contractor.py -q
 
-      - name: 배포 버전 결정
-        # 배포 번호와 코드의 __version__ 이 어긋나면 앱이 자기가 구버전인 줄
-        # 알고 업데이트 알림을 계속 띄운다. 어긋나면 여기서 멈춘다.
+      - name: 무엇을 낼지 정하기
         id: ver
         shell: bash
         run: |
-          code=$(python -c "import prime_contractor; print(prime_contractor.__version__)")
-          want=""
-          if [[ "$GITHUB_REF" == refs/tags/finder-v* ]]; then
-            want="${GITHUB_REF_NAME#finder-v}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            want="${{ inputs.version }}"
-            want="${want#v}"
+          channel=$(python -c "import prime_contractor as p; print(p.CHANNEL)")
+          code=$(python -c "import prime_contractor as p; print(p.__version__)")
+          want="${{ inputs.version }}"; want="${want#v}"
+          if [ -n "$want" ]; then
+            if [ "$channel" != "stable" ]; then
+              echo "::error::정식 버전을 내려면 prime_contractor/__init__.py 의 CHANNEL 을 \"stable\" 로 바꿔 주세요. 지금은 $channel 입니다."
+              exit 1
+            fi
+            if [ "$code" != "$want" ]; then
+              echo "::error::__version__($code) 과 요청한 버전($want) 이 다릅니다."
+              exit 1
+            fi
+            echo "kind=stable" >> "$GITHUB_OUTPUT"
+            echo "tag=finder-v$want" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=beta" >> "$GITHUB_OUTPUT"
+            echo "tag=finder-beta" >> "$GITHUB_OUTPUT"
           fi
-          echo "코드 $code / 배포 요청 ${want:-(없음)}"
-          if [ -n "$want" ] && [ "$code" != "$want" ]; then
-            echo "::error::__version__($code) 과 배포 버전($want) 이 다릅니다. \
-            prime_contractor/__init__.py 를 먼저 맞춰 주세요."
-            exit 1
-          fi
-          echo "release=$want" >> "$GITHUB_OUTPUT"
+
+      - name: 빌드 정보 새기기
+        # 베타는 번호가 없어 '언제, 어느 코드로 만든 건지'를 앱 제목줄에 보인다.
+        shell: bash
+        run: |
+          stamp=$(TZ=Asia/Seoul date +'%m-%d %H:%M')
+          echo "BUILD = \"${stamp} ${GITHUB_SHA::7}\"" > prime_contractor/_build.py
+          cat prime_contractor/_build.py
 
       - name: exe 빌드
         run: python -m PyInstaller --noconfirm --clean prime_finder.spec
 
       - name: 실행 확인
-        # GUI 는 CI 에서 띄울 수 없으니, 묶인 코드가 임포트되는지까지만 본다.
-        run: python -c "import prime_contractor.gui; print('import ok')"
+        # GUI 는 CI 에서 띄울 수 없으니 묶인 코드가 임포트되는지까지만 본다.
+        run: python -c "import prime_contractor.gui; from prime_contractor.build_info import label; print(label())"
 
       - uses: actions/upload-artifact@v4
         with:
           name: PrimeFinder-windows
           path: dist/PrimeFinder.exe
-          retention-days: 30
+          retention-days: 14
 
-      - name: Release 만들기
+      - name: 올리기
         # 파일이 붙었는지는 '실제로 받아지나'로 확인한다. 릴리스의 파일 목록(API)은
-        # 늦게 갱신되거나 비어 보일 때가 있어서, 목록만 믿으면 멀쩡한 릴리스를
-        # 망가진 걸로 오판한다(v1.3~1.5 에서 실제로 그랬다 — 받기는 됐다).
-        if: steps.ver.outputs.release != ''
+        # 늦게 갱신되거나 비어 보일 때가 있어 목록만 믿으면 오판한다.
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: finder-v${{ steps.ver.outputs.release }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          KIND: ${{ steps.ver.outputs.kind }}
         run: |
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/PrimeFinder.exe"
           downloadable() {
-            # 1MB 넘게 실제로 받아지면 된 것. 올린 직후엔 늦게 보일 수 있어 몇 번 기다린다.
             for wait in 0 5 10 20; do
               sleep "$wait"
               got=$(curl -sL -r 0-1048575 -o /dev/null -w '%{size_download}' "$url" || echo 0)
@@ -99,21 +109,27 @@ jobs:
             return 1
           }
 
-          if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" \
+          if [ "$KIND" = "beta" ]; then
+            # 베타는 늘 최신 한 벌만 둔다. 지우고 이 커밋으로 새로 만든다.
+            gh release delete "$TAG" --yes --cleanup-tag > /dev/null 2>&1 || true
+            sleep 3
+            gh release create "$TAG" dist/PrimeFinder.exe \
+              --prerelease \
               --target "$GITHUB_SHA" \
-              --title "원청 찾기 $TAG" \
-              --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
-          fi
-
-          # 같은 버전을 다시 돌리면 이미 올라간 파일과 이름이 겹쳐 거절될 수 있다.
-          # 그때는 이미 받아지는지 보고, 받아지면 그대로 둔다.
-          if ! gh release upload "$TAG" dist/PrimeFinder.exe --clobber; then
-            echo "업로드가 거절됐습니다. 이미 올라가 있는지 확인합니다."
+              --title "원청 찾기 — 베타 (계속 바뀝니다)" \
+              --notes "시험용 베타입니다. 코드를 고칠 때마다 이 자리에 새로 덮어씁니다. 앱 제목줄의 날짜·코드로 어느 빌드인지 확인하세요. (${GITHUB_SHA::7})"
+          else
+            if ! gh release view "$TAG" > /dev/null 2>&1; then
+              gh release create "$TAG" --target "$GITHUB_SHA" \
+                --title "원청 찾기 $TAG" \
+                --notes "받아서 쓰시던 PrimeFinder.exe 에 덮어쓰면 됩니다. 파이썬 설치는 필요 없습니다."
+            fi
+            gh release upload "$TAG" dist/PrimeFinder.exe --clobber \
+              || echo "업로드가 거절됐습니다. 이미 올라가 있는지 확인합니다."
           fi
 
           if ! downloadable; then
             echo "::error::$TAG 의 PrimeFinder.exe 를 받을 수 없습니다: $url"
             exit 1
           fi
-          echo "확인: $url 에서 받아집니다"
+          echo "받는 곳: $url"

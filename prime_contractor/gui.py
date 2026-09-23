@@ -28,6 +28,7 @@ from prime_contractor.report import write_csv
 from prime_contractor.sales import load_sales, plan_to_close_gap
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
+from prime_contractor.build_info import label, should_check_updates
 
 COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
            ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
@@ -61,7 +62,7 @@ class App:
         self.running = False
         saved = load_settings()
 
-        root.title(f"원청 찾기 — 자동제어 판넬  v{__version__}")
+        root.title(f"원청 찾기 — 자동제어 판넬  ({label()})")
         root.geometry("1060x740")
         root.minsize(920, 620)
 
@@ -98,7 +99,8 @@ class App:
         self._build_help(help_tab)
         self._build_goal(goal_tab, saved)
         self._pump_messages()
-        threading.Thread(target=self._check_update, daemon=True).start()
+        if should_check_updates():
+            threading.Thread(target=self._check_update, daemon=True).start()
 
     # --- 화면 구성 -----------------------------------------------------------
 
