@@ -20,6 +20,8 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"          # 윈도우 러너 콘솔(cp1252)에서 한글 출력으로 죽지 않게
     steps:
       - uses: actions/checkout@v4
 
