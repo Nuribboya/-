@@ -47,6 +47,31 @@ sympy의 `checkodesol` 로 원래 방정식에 대입해 만족하는지 직접 
 > 공식, 판별식, 코팩터 전개, RREF 등)와 중간 결과를 보여주지만, 산술식처럼 모든
 > 사칙연산을 한 줄씩 풀어 쓰지는 않습니다.
 
+## 전공 적성검사
+
+홀랜드(RIASEC) 진로적성 이론을 기반으로 한 전공 추천 검사도 같은 웹 앱에
+포함되어 있습니다. 실재형(R)·탐구형(I)·예술형(A)·사회형(S)·진취형(E)·
+관습형(C) 6개 유형을 유형별 6문항씩 총 36문항(1~5점 리커트 척도)으로
+측정하고, 점수가 가장 높은 두 유형을 조합한 홀랜드 코드를 계산해 이에
+가까운 전공 30여 개를 적합도 순으로 추천합니다. 각 문항은 특정 유형이
+연달아 드러나지 않도록 유형을 섞어서 배치했습니다.
+
+- `/aptitude` — 검사 응시 및 결과(유형별 점수 막대그래프, 추천 전공/관련
+  직업)를 보여주는 웹 페이지
+- `/api/aptitude` — `{"answers": {"R1": 5, "I1": 3, ...}}` 형태로 36개
+  문항 응답을 보내면 `trait_scores`, `holland_code`, `top_recommendations`
+  를 JSON으로 반환하는 API
+
+```bash
+curl -X POST http://localhost:8000/api/aptitude \
+  -H "Content-Type: application/json" \
+  -d '{"answers": {"R1": 5, "R2": 4, ...}}'
+```
+
+로직은 `aptitude/` 패키지에 있으며, 문항(`questions.py`)·전공 데이터베이스
+(`majors.py`)·채점(`scorer.py`)이 분리되어 있어 문항이나 전공 목록을 쉽게
+추가/수정할 수 있습니다.
+
 ## 설치
 
 ```bash
@@ -102,4 +127,8 @@ pytest
   화이트리스트 ast 평가기 (산술식 단계별 계산, 행렬 리터럴 파싱에서 공유)
 - `mathgrader/parsing.py` — 수식/답안 문자열 파싱, 답안 비교
 - `mathgrader/grader.py` — 분류 → 풀이 → 채점을 총괄하는 진입점
-- `web/` — FastAPI 기반 웹 UI 및 API
+- `aptitude/traits.py` — 홀랜드(RIASEC) 6개 유형 정의
+- `aptitude/questions.py` — 유형별 6문항씩 총 36개 검사 문항
+- `aptitude/majors.py` — 홀랜드 코드(1·2순위 유형) 기반 전공 추천 데이터베이스
+- `aptitude/scorer.py` — 응답 → 유형별 점수/홀랜드 코드/추천 전공 계산
+- `web/` — FastAPI 기반 웹 UI 및 API (수학 채점 `/`, 전공 적성검사 `/aptitude`)
