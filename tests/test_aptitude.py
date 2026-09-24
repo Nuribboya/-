@@ -11,11 +11,11 @@ def _answers(default=3, **overrides):
 
 
 def test_question_bank_covers_every_trait_evenly():
-    assert len(QUESTIONS) == 36
+    assert len(QUESTIONS) == 60
     counts = {code: 0 for code in TRAIT_ORDER}
     for q in QUESTIONS:
         counts[q.trait] += 1
-    assert all(count == 6 for count in counts.values())
+    assert all(count == 10 for count in counts.values())
     assert len(QUESTIONS) == len({q.id for q in QUESTIONS})
 
 
