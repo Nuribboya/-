@@ -5,6 +5,7 @@ name: yt-monitor-exe
 
 on:
   push:
+    branches: ["**"]           # tags만 적으면 브랜치 push에는 실행되지 않으므로 함께 명시
     paths:
       - "yt_monitor/**"
       - "tests/test_yt_monitor*.py"
