@@ -1,0 +1,779 @@
+"""tkinter GUI: 채널 현황 · 지금 체크 · 주제/대본 생성 · 자동 체크 토글 · 설정.
+
+스레드 규칙: 오래 걸리는 작업(YouTube 수집, Ollama 생성, 스케줄러 작업)은 백그라운드 스레드에서
+돌리고, 화면 갱신은 self.ui(...)로 큐에 넣어 Tk 메인 스레드에서만 실행한다.
+
+단독 실행: python -m yt_monitor.gui [config.yaml 경로]
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import queue
+import re
+import sys
+import threading
+import tkinter as tk
+from datetime import timedelta
+from pathlib import Path
+from tkinter import filedialog, font as tkfont, messagebox, scrolledtext, ttk
+from typing import Callable
+from zoneinfo import ZoneInfo
+
+from .analyzer import ChannelAnalysis, analyze_channel, value_at
+from .config import Config, ConfigError, load_config, read_raw, save_config
+from .db import Database, from_iso, utcnow
+from .report import fduration, fnum, fpct, pattern_lines, status_text
+
+log = logging.getLogger(__name__)
+
+APP_TITLE = "YouTube 채널 성과 모니터"
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+# ---- 화면에 쓰는 순수 함수 (테스트 가능) -------------------------------------------------
+
+def sparkline(values: list[float]) -> str:
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return ""
+    lo, hi = min(vals), max(vals)
+    if hi == lo:
+        return SPARK[3] * len(vals)
+    return "".join(SPARK[int((v - lo) / (hi - lo) * (len(SPARK) - 1))] for v in vals)
+
+
+def daily_view_gains(db: Database, channel_id: str, days: int = 14) -> list[float]:
+    """채널 총 조회수 시계열 → 최근 days일의 하루 증가량 (데이터가 있는 날만)."""
+    rows = db.get_channel_stats(channel_id)
+    points = [(from_iso(r["collected_at"]), r["view_count"]) for r in rows]
+    if len(points) < 2:
+        return []
+    end = points[-1][0]
+    gains = []
+    for d in range(days, 0, -1):
+        a = value_at(points, end - timedelta(days=d))
+        b = value_at(points, end - timedelta(days=d - 1))
+        if a is not None and b is not None:
+            gains.append(b - a)
+    return gains
+
+
+def summary_text(a: ChannelAnalysis, tz: ZoneInfo, gains: list[float]) -> str:
+    """'조회수 추이' 탭에 보여줄 요약."""
+    s = a.settings
+    lines = [
+        f"{a.channel_title}   {status_text(a)}",
+        f"분석 기준: {a.analyzed_at.astimezone(tz):%Y-%m-%d %H:%M}",
+        "",
+        f"구독자             {fnum(a.subscribers)}",
+        f"최근 {len(a.recent)}개 영상 평균   {fnum(a.recent_avg, 1)}  (일평균 조회수 기준)",
+        f"이전 {len(a.baseline)}개 영상 평균   {fnum(a.baseline_avg, 1)}",
+        f"변화율             {fpct(a.change_pct)}   (둔화 기준 -{s['drop_threshold_pct']:g}%)",
+        f"최근 7일 조회수     {fnum(a.weekly_views)}"
+        + (f"  (전주 대비 {fpct(a.weekly_change_pct)})" if a.weekly_change_pct is not None else ""),
+    ]
+    if gains:
+        lines.append(f"일별 조회수 증가    {sparkline(gains)}  (최근 {len(gains)}일, "
+                     f"최소 {fnum(min(gains))} / 최대 {fnum(max(gains))})")
+    if a.insufficient:
+        lines += ["", f"⏳ {a.insufficient}"]
+    for r in a.reasons:
+        lines.append(f"🚨 {r}")
+
+    lines += ["", "── 최근 영상 ──"]
+    recent_ids = {p.video.video_id for p in a.recent}
+    for p in a.videos[:10]:
+        mark = "●" if p.video.video_id in recent_ids else " "
+        lines.append(f"{mark} {p.video.published_at.astimezone(tz):%m-%d}  조회 {fnum(p.views):>9}  "
+                     f"일평균 {fnum(p.views_per_day):>7}  7일 +{fnum(p.gain_7d):>7}  {p.video.title}")
+    lines += ["", f"── 상위 성과 Top {len(a.top)} ──"]
+    for i, p in enumerate(a.top, 1):
+        lines.append(f"{i}. {p.video.title}  [{p.video.category_name or '미분류'} · "
+                     f"{fduration(p.video.duration_seconds)}]  {fnum(p.metric)}")
+    lines += ["", "── 상위 영상 패턴 ──"] + [f"· {x}" for x in pattern_lines(a)]
+    return "\n".join(lines)
+
+
+_URL_HANDLE = re.compile(r"youtube\.com/(@[\w.\-가-힣]+)")
+_URL_ID = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
+
+
+def parse_channel_lines(text: str) -> list[dict]:
+    """설정 창의 채널 입력 → config 채널 목록.
+
+    한 줄에 하나: '@핸들', 'UC채널ID', 채널 주소 모두 가능. '| 표시이름' 을 붙이면 이름 지정.
+    """
+    out = []
+    for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        key, _, name = (x.strip() for x in raw.partition("|"))
+        if m := _URL_ID.search(key):
+            key = m.group(1)
+        elif m := _URL_HANDLE.search(key):
+            key = m.group(1)
+        item = {"id": key} if re.fullmatch(r"UC[\w-]{22}", key) else {
+            "handle": key if key.startswith("@") else "@" + key}
+        if name:
+            item["name"] = name
+        out.append(item)
+    return out
+
+
+def channel_lines(channels: list) -> str:
+    lines = []
+    for c in channels or []:
+        if isinstance(c, str):
+            lines.append(c)
+            continue
+        key = c.get("id") or c.get("handle") or ""
+        lines.append(f"{key} | {c['name']}" if c.get("name") else key)
+    return "\n".join(lines)
+
+
+# ---- 설정 창 ----------------------------------------------------------------------
+
+class SetupDialog(tk.Toplevel):
+    """첫 실행/설정 변경 창. 저장하면 config.yaml을 쓰고 self.saved=True."""
+
+    def __init__(self, master, config_path: Path, first_run: bool = False):
+        super().__init__(master)
+        self.config_path = Path(config_path)
+        self.raw = read_raw(self.config_path)
+        self.saved = False
+        self.title("처음 설정" if first_run else "설정")
+        self.resizable(False, False)
+        self.transient(master)
+
+        frm = ttk.Frame(self, padding=14)
+        frm.grid(sticky="nsew")
+        if first_run:
+            ttk.Label(frm, text="처음 실행입니다. 아래 정보를 입력하면 config.yaml이 만들어집니다.",
+                      foreground="#555").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        r = self.raw
+        self.vars: dict[str, tk.Variable] = {
+            "api_key": tk.StringVar(value=r["youtube"].get("api_key") or ""),
+            "bot_token": tk.StringVar(value=r["telegram"].get("bot_token") or ""),
+            "chat_id": tk.StringVar(value=str(r["telegram"].get("chat_id") or "")),
+            "interval": tk.StringVar(value=str(r["schedule"].get("interval_hours") or 6)),
+            "model": tk.StringVar(value=r["ollama"]["model"]),
+            "host": tk.StringVar(value=r["ollama"]["host"]),
+            "threshold": tk.StringVar(value=f"{r['analysis']['drop_threshold_pct']:g}"),
+            "auto_gen": tk.BooleanVar(value=bool(r["ollama"].get("auto_generate_on_slowdown", True))),
+        }
+        row = 1
+
+        def field(label, key, width=48, hint=None, show=None):
+            nonlocal row
+            ttk.Label(frm, text=label).grid(row=row, column=0, sticky="w", pady=3)
+            e = ttk.Entry(frm, textvariable=self.vars[key], width=width, show=show or "")
+            e.grid(row=row, column=1, sticky="w", pady=3)
+            if hint:
+                ttk.Label(frm, text=hint, foreground="#777").grid(row=row, column=2, sticky="w", padx=6)
+            row += 1
+            return e
+
+        field("YouTube API 키 *", "api_key")
+        ttk.Label(frm, text="채널 목록 *").grid(row=row, column=0, sticky="nw", pady=3)
+        self.channels_text = tk.Text(frm, width=48, height=5)
+        self.channels_text.insert("1.0", channel_lines(r.get("channels")))
+        self.channels_text.grid(row=row, column=1, sticky="w", pady=3)
+        ttk.Label(frm, text="한 줄에 하나\n@핸들 · UC채널ID · 채널 주소\n'| 이름'으로 표시 이름 지정",
+                  foreground="#777", justify="left").grid(row=row, column=2, sticky="nw", padx=6)
+        row += 1
+        field("텔레그램 봇 토큰", "bot_token", hint="@BotFather 에서 발급")
+        field("텔레그램 chat_id", "chat_id", width=20)
+        ttk.Button(frm, text="chat_id 찾기", command=self._find_chat_id).grid(
+            row=row - 1, column=1, sticky="e")
+        field("체크 주기(시간)", "interval", width=8)
+        field("하락 임계값(%)", "threshold", width=8, hint="최근 영상이 이전보다 이만큼 떨어지면 알림")
+        field("Ollama 모델", "model", width=24, hint="기본 qwen2.5:7b")
+        field("Ollama 주소", "host", width=32)
+        ttk.Checkbutton(frm, text="하락 감지 시 주제/대본 자동 생성", variable=self.vars["auto_gen"]).grid(
+            row=row, column=1, sticky="w", pady=(6, 0))
+        row += 1
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=row, column=0, columnspan=3, sticky="e", pady=(12, 0))
+        ttk.Button(btns, text="저장", command=self._save).pack(side="right", padx=4)
+        ttk.Button(btns, text="취소", command=self.destroy).pack(side="right")
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.grab_set()
+
+    def _find_chat_id(self):
+        token = self.vars["bot_token"].get().strip()
+        if not token:
+            messagebox.showinfo("chat_id 찾기", "봇 토큰을 먼저 입력하세요.", parent=self)
+            return
+        try:
+            from .notifier import fetch_chat_ids
+
+            chats = fetch_chat_ids(token)
+        except Exception as exc:
+            messagebox.showerror("chat_id 찾기", f"조회 실패: {exc}", parent=self)
+            return
+        if not chats:
+            messagebox.showinfo("chat_id 찾기", "텔레그램에서 봇에게 아무 메시지(예: /start)를 "
+                                "보낸 뒤 다시 눌러주세요.", parent=self)
+            return
+        self.vars["chat_id"].set(chats[-1][0])
+        if len(chats) > 1:
+            messagebox.showinfo("chat_id 찾기", "여러 대화가 있습니다:\n" +
+                                "\n".join(f"{cid}  {name}" for cid, name in chats), parent=self)
+
+    def _save(self):
+        v = {k: var.get() for k, var in self.vars.items()}
+        channels = parse_channel_lines(self.channels_text.get("1.0", "end"))
+        errors = []
+        if not str(v["api_key"]).strip():
+            errors.append("YouTube API 키를 입력하세요.")
+        if not channels:
+            errors.append("채널을 최소 1개 입력하세요.")
+        try:
+            interval = float(v["interval"])
+            threshold = float(v["threshold"])
+            if interval <= 0 or not 0 < threshold < 100:
+                raise ValueError
+        except ValueError:
+            errors.append("체크 주기는 0보다 큰 숫자, 임계값은 0~100 사이 숫자여야 합니다.")
+        if errors:
+            messagebox.showerror("입력 확인", "\n".join(errors), parent=self)
+            return
+
+        # 기존 채널별 세부 설정(analysis 덮어쓰기 등)은 유지
+        old = {(c.get("id") or c.get("handle")): c for c in self.raw.get("channels") or []
+               if isinstance(c, dict)}
+        merged = []
+        for c in channels:
+            prev = dict(old.get(c.get("id") or c.get("handle"), {}))
+            prev.pop("name", None)
+            prev.update(c)
+            merged.append(prev)
+
+        r = self.raw
+        r["channels"] = merged
+        r["youtube"]["api_key"] = v["api_key"].strip()
+        r["telegram"]["bot_token"] = v["bot_token"].strip()
+        r["telegram"]["chat_id"] = v["chat_id"].strip()
+        r["schedule"]["interval_hours"] = interval
+        r["analysis"]["drop_threshold_pct"] = threshold
+        r["ollama"]["model"] = v["model"].strip() or "qwen2.5:7b"
+        r["ollama"]["host"] = v["host"].strip() or "http://localhost:11434"
+        r["ollama"]["auto_generate_on_slowdown"] = bool(v["auto_gen"])
+        save_config(r, self.config_path)
+        self.saved = True
+        self.destroy()
+
+
+# ---- 메인 창 ------------------------------------------------------------------------
+
+class App:
+    COLUMNS = (("status", "상태", 110), ("subs", "구독자", 80), ("change", "최근/이전", 80),
+               ("weekly", "최근 7일 조회수", 110), ("trend", "14일 추이", 130), ("checked", "마지막 체크", 110))
+
+    def __init__(self, root: tk.Tk, config_path: Path, *, check_ollama_on_start: bool = True):
+        self.root = root
+        self.config_path = Path(config_path)
+        self.cfg: Config | None = None
+        self.tz = ZoneInfo("Asia/Seoul")
+        self._queue: queue.Queue[Callable[[], None]] = queue.Queue()
+        self.busy = False
+        self.check_lock = threading.Lock()
+        self.cancel_event: threading.Event | None = None
+        self.scheduler = None
+        self.generation = None
+        self.analyses: dict[str, ChannelAnalysis] = {}
+        self.channel_ids: dict[str, str | None] = {}   # 트리 아이템 → channel_id
+        self.ollama_ok = False
+        self.closed = False
+        self._gains: dict[str, list[float]] = {}
+
+        root.title(APP_TITLE)
+        root.geometry("1000x700")
+        root.minsize(820, 560)
+        self._fonts()
+        self._build()
+        root.protocol("WM_DELETE_WINDOW", self.close)
+        root.after(100, self._drain)
+        if self._load_or_setup():
+            self.refresh_channels()
+            self._apply_auto_check(self.cfg.raw.get("gui", {}).get("auto_check", False))
+            if check_ollama_on_start:
+                self.check_ollama(startup=True)
+
+    # ---- 기본 틀 ---------------------------------------------------------------
+
+    def _fonts(self):
+        families = set(tkfont.families(self.root))
+        family = next((f for f in ("Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo",
+                                   "Noto Sans CJK KR", "NanumGothic") if f in families), None)
+        if family:
+            for name in ("TkDefaultFont", "TkTextFont", "TkHeadingFont", "TkMenuFont"):
+                tkfont.nametofont(name).configure(family=family, size=10)
+        self.text_font = (family or "TkFixedFont", 10)
+
+    def _build(self):
+        top = ttk.Frame(self.root, padding=(10, 8))
+        top.pack(fill="x")
+        self.btn_check = ttk.Button(top, text="▶ 지금 체크하기", command=self.check_now)
+        self.btn_check.pack(side="left")
+        self.btn_generate = ttk.Button(top, text="✨ 새 주제/대본 생성", command=self.generate_now)
+        self.btn_generate.pack(side="left", padx=6)
+        self.auto_var = tk.BooleanVar(value=False)
+        self.auto_chk = ttk.Checkbutton(top, text="자동 체크", variable=self.auto_var,
+                                        command=lambda: self._apply_auto_check(self.auto_var.get(), save=True))
+        self.auto_chk.pack(side="left", padx=(12, 0))
+        ttk.Button(top, text="⚙ 설정", command=self.open_settings).pack(side="right")
+        ttk.Button(top, text="📂 출력 폴더", command=self.open_outputs).pack(side="right", padx=6)
+        self.ollama_label = ttk.Label(top, text="Ollama 확인 중…", foreground="#777")
+        self.ollama_label.pack(side="right", padx=10)
+
+        # 상태 표시줄은 먼저 아래에 붙여야 창이 작아져도 가려지지 않는다
+        status = ttk.Frame(self.root, padding=(10, 4))
+        status.pack(side="bottom", fill="x")
+        self.progress = ttk.Progressbar(status, mode="indeterminate", length=140)
+        self.progress.pack(side="left")
+        self.status_var = tk.StringVar(value="준비")
+        ttk.Label(status, textvariable=self.status_var).pack(side="left", padx=8)
+
+        paned = ttk.PanedWindow(self.root, orient="vertical")
+        paned.pack(fill="both", expand=True, padx=10)
+
+        tree_frame = ttk.Frame(paned)
+        self.tree = ttk.Treeview(tree_frame, columns=[c[0] for c in self.COLUMNS], height=5)
+        self.tree.heading("#0", text="채널")
+        self.tree.column("#0", width=180)
+        for key, label, width in self.COLUMNS:
+            self.tree.heading(key, text=label)
+            self.tree.column(key, width=width, anchor="center")
+        self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._show_selected_summary())
+        paned.add(tree_frame, weight=1)
+
+        self.nb = ttk.Notebook(paned)
+        self.summary_box = scrolledtext.ScrolledText(self.nb, wrap="none", font=self.text_font)
+        self.summary_box.configure(state="disabled")
+        self.nb.add(self.summary_box, text="조회수 추이")
+
+        gen_tab = ttk.Frame(self.nb)
+        bar = ttk.Frame(gen_tab, padding=(0, 6))
+        bar.pack(fill="x")
+        ttk.Label(bar, text="주제:").pack(side="left")
+        self.topic_combo = ttk.Combobox(bar, state="readonly", width=48)
+        self.topic_combo.pack(side="left", padx=4)
+        self.btn_rescript = ttk.Button(bar, text="선택한 주제로 대본 생성", command=self.rewrite_script)
+        self.btn_rescript.pack(side="left")
+        self.btn_cancel = ttk.Button(bar, text="취소", command=self.cancel, state="disabled")
+        self.btn_cancel.pack(side="left", padx=4)
+        ttk.Button(bar, text="💾 파일로 저장", command=self.save_result).pack(side="right")
+        self.result_box = scrolledtext.ScrolledText(gen_tab, wrap="word", font=self.text_font, undo=True)
+        self.result_box.pack(fill="both", expand=True)
+        self.nb.add(gen_tab, text="주제/대본")
+        paned.add(self.nb, weight=3)
+
+
+    # ---- 스레드 도우미 ------------------------------------------------------------
+
+    def ui(self, fn: Callable[[], None]) -> None:
+        """다른 스레드에서 화면을 바꿀 때 사용 (Tk는 메인 스레드에서만 조작 가능)."""
+        self._queue.put(fn)
+
+    def _drain(self):
+        try:
+            while True:
+                self._queue.get_nowait()()
+        except queue.Empty:
+            pass
+        except Exception:
+            log.exception("화면 갱신 실패")
+        if not self.closed:
+            self.root.after(100, self._drain)
+
+    def set_status(self, text: str) -> None:
+        self.ui(lambda: self.status_var.set(text))
+
+    def _set_busy(self, busy: bool, text: str | None = None, cancellable: bool = False):
+        self.busy = busy
+        state = "disabled" if busy else "normal"
+        for b in (self.btn_check, self.btn_generate, self.btn_rescript):
+            b.configure(state=state)
+        self.btn_cancel.configure(state="normal" if busy and cancellable else "disabled")
+        if busy:
+            self.progress.start(12)
+        else:
+            self.progress.stop()
+        if text:
+            self.status_var.set(text)
+
+    def run_bg(self, text: str, work: Callable[[], object], done: Callable[[object], None] | None = None,
+               cancellable: bool = False) -> threading.Thread | None:
+        if self.busy:
+            messagebox.showinfo(APP_TITLE, "다른 작업이 진행 중입니다. 끝난 뒤 다시 시도하세요.")
+            return None
+        self._set_busy(True, text, cancellable)
+
+        def target():
+            try:
+                result = work()
+            except Exception as exc:
+                from .ollama_client import GenerationCancelled
+
+                if isinstance(exc, GenerationCancelled):
+                    self.ui(lambda: self._set_busy(False, "생성을 취소했습니다."))
+                    return
+                log.exception("작업 실패: %s", text)
+                msg = f"{type(exc).__name__}: {exc}" if not str(exc).startswith(("Ollama", "모델")) else str(exc)
+                self.ui(lambda: (self._set_busy(False, "오류"), messagebox.showerror(APP_TITLE, msg)))
+                return
+            self.ui(lambda: (self._set_busy(False), done(result) if done else None))
+
+        t = threading.Thread(target=target, daemon=True)
+        t.start()
+        return t
+
+    # ---- 설정 ----------------------------------------------------------------
+
+    def _load_or_setup(self) -> bool:
+        first = not self.config_path.exists()
+        while True:
+            if not first:
+                try:
+                    self.cfg = load_config(self.config_path)
+                    self.tz = ZoneInfo(self.cfg.schedule["timezone"])
+                    self._ensure_prompts()
+                    return True
+                except ConfigError as exc:
+                    messagebox.showwarning(APP_TITLE, f"설정을 확인해주세요.\n\n{exc}")
+            dlg = SetupDialog(self.root, self.config_path, first_run=first)
+            self.root.wait_window(dlg)
+            if not dlg.saved:
+                if self.cfg is None:
+                    self.closed = True
+                    self.root.after(0, self.root.destroy)
+                    return False
+                return True
+            first = False
+
+    def _ensure_prompts(self):
+        from .generator import ensure_prompts
+
+        ensure_prompts(self.cfg)
+
+    def open_settings(self):
+        dlg = SetupDialog(self.root, self.config_path)
+        self.root.wait_window(dlg)
+        if dlg.saved:
+            self.cfg = load_config(self.config_path)
+            self._apply_auto_check(self.auto_var.get())   # 주기가 바뀌었을 수 있음
+            self.refresh_channels()
+            self.check_ollama()
+
+    # ---- Ollama -----------------------------------------------------------------
+
+    def check_ollama(self, startup: bool = False):
+        from .ollama_client import OllamaClient
+
+        o = self.cfg.ollama
+
+        def work():
+            st = OllamaClient(o["host"], o["model"]).status()
+            self.ui(lambda: self._on_ollama_status(st, startup))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_ollama_status(self, st, startup: bool):
+        self.ollama_ok = st.ok
+        if st.ok:
+            self.ollama_label.configure(text=f"● Ollama 준비됨 ({st.model})", foreground="#1a7f37")
+        elif st.server_up:
+            self.ollama_label.configure(text=f"● 모델 없음 ({st.model})", foreground="#c62828")
+            messagebox.showerror(APP_TITLE, st.message + "\n\n모델을 받은 뒤 프로그램을 다시 실행하세요.")
+            if startup:
+                self.close()
+        else:
+            self.ollama_label.configure(text="● Ollama 꺼짐", foreground="#c62828")
+            if startup:
+                messagebox.showwarning(APP_TITLE, st.message + "\n\n조회수 체크는 계속 사용할 수 있고, "
+                                       "주제/대본 생성은 Ollama를 켠 뒤 사용할 수 있습니다.")
+
+    # ---- 채널 현황 ------------------------------------------------------------------
+
+    def refresh_channels(self):
+        """DB 데이터로 채널 현황을 다시 계산 (API 호출 없음)."""
+        cfg = self.cfg
+
+        def work():
+            rows = []
+            now = utcnow()
+            with Database(cfg.db_path) as db:
+                for ch in cfg.channels:
+                    cid = ch.id
+                    if not cid:
+                        row = db.find_channel_by_handle(ch.handle)
+                        cid = row["channel_id"] if row else None
+                    a = gains = checked = None
+                    if cid and db.get_channel(cid):
+                        a = analyze_channel(db, cid, ch.analysis, now, self.tz,
+                                            max_videos=cfg.youtube["max_videos_per_channel"])
+                        gains = daily_view_gains(db, cid)
+                        stats = db.get_channel_stats(cid)
+                        checked = from_iso(stats[-1]["collected_at"]) if stats else None
+                    rows.append((ch, cid, a, gains, checked))
+            self.ui(lambda: self._fill_tree(rows))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _fill_tree(self, rows):
+        selected = self.tree.selection()
+        self.tree.delete(*self.tree.get_children())
+        self.analyses.clear()
+        self.channel_ids.clear()
+        self._gains = {}
+        for i, (ch, cid, a, gains, checked) in enumerate(rows):
+            iid = f"ch{i}"
+            self.channel_ids[iid] = cid
+            if a is None:
+                values = ("아직 수집 전", "-", "-", "-", "", "-")
+                label = ch.label
+            else:
+                self.analyses[iid] = a
+                self._gains[iid] = gains or []
+                values = (status_text(a), fnum(a.subscribers), fpct(a.change_pct),
+                          fnum(a.weekly_views), sparkline(gains or []),
+                          checked.astimezone(self.tz).strftime("%m-%d %H:%M") if checked else "-")
+                label = ch.name or a.channel_title
+            self.tree.insert("", "end", iid=iid, text=label, values=values)
+        keep = [s for s in selected if self.tree.exists(s)]
+        if keep or self.tree.get_children():
+            self.tree.selection_set(keep or self.tree.get_children()[0])
+        self._show_selected_summary()
+
+    def _selected_iid(self) -> str | None:
+        sel = self.tree.selection()
+        return sel[0] if sel else None
+
+    def _show_selected_summary(self):
+        iid = self._selected_iid()
+        a = self.analyses.get(iid) if iid else None
+        if a is not None:
+            text = summary_text(a, self.tz, self._gains.get(iid, []))
+        else:
+            text = "아직 수집된 데이터가 없습니다. [▶ 지금 체크하기]를 눌러 수집하세요."
+        self.summary_box.configure(state="normal")
+        self.summary_box.delete("1.0", "end")
+        self.summary_box.insert("1.0", text)
+        self.summary_box.configure(state="disabled")
+
+    # ---- 지금 체크 / 자동 체크 ----------------------------------------------------------
+
+    def _do_check(self, trigger: str):
+        from .pipeline import run_check
+
+        with self.check_lock:
+            self.set_status("YouTube에서 조회수를 가져오는 중…" if trigger == "manual"
+                            else "자동 체크 실행 중…")
+            return run_check(self.cfg)
+
+    def check_now(self):
+        self.run_bg("YouTube에서 조회수를 가져오는 중…", lambda: self._do_check("manual"),
+                    self._on_check_done)
+
+    def _on_check_done(self, results):
+        errors = [r for r in results if r.error]
+        slow = [r for r in results if r.analysis and r.analysis.slowdown]
+        gens = [r.generation for r in results if r.generation]
+        msg = f"체크 완료 {utcnow().astimezone(self.tz):%H:%M} — {len(results)}개 채널"
+        if slow:
+            msg += f", 🚨 둔화 {len(slow)}개"
+        if gens:
+            msg += f", ✨ 주제/대본 {len(gens)}건 자동 생성"
+        self.status_var.set(msg)
+        self.refresh_channels()
+        if gens:
+            self.show_generation(gens[-1])
+        if errors:
+            messagebox.showwarning(APP_TITLE, "일부 채널 처리 실패:\n\n" +
+                                   "\n".join(f"· {r.channel.label}: {r.error}" for r in errors))
+
+    def _scheduled_job(self):
+        if not self.check_lock.acquire(blocking=False):
+            self.set_status("다른 작업이 진행 중이라 이번 자동 체크는 건너뜁니다.")
+            return
+        self.check_lock.release()
+        try:
+            results = self._do_check("auto")
+            self.ui(lambda: self._on_check_done(results))
+        except Exception as exc:
+            log.exception("자동 체크 실패")
+            self.set_status(f"자동 체크 실패: {exc}")
+
+    def _apply_auto_check(self, on: bool, save: bool = False):
+        from .scheduler import build_scheduler, describe_schedule
+
+        if self.scheduler is not None:
+            self.scheduler.shutdown(wait=False)
+            self.scheduler = None
+        self.auto_var.set(on)
+        desc = describe_schedule(self.cfg)
+        self.auto_chk.configure(text=f"자동 체크 ({desc})")
+        if on:
+            self.scheduler, _ = build_scheduler(self.cfg, blocking=False, job=self._scheduled_job)
+            self.scheduler.start()
+            job = self.scheduler.get_jobs()[0]
+            nxt = job.next_run_time.astimezone(self.tz).strftime("%m-%d %H:%M") if job.next_run_time else "-"
+            self.status_var.set(f"자동 체크 켜짐 — 다음 체크 {nxt}")
+        elif save:
+            self.status_var.set("자동 체크 꺼짐")
+        if save:
+            raw = read_raw(self.config_path)
+            raw.setdefault("gui", {})["auto_check"] = bool(on)
+            save_config(raw, self.config_path)
+
+    # ---- 주제/대본 생성 ---------------------------------------------------------------
+
+    def _stream_start(self, header: str):
+        self.nb.select(1)
+        self.result_box.delete("1.0", "end")
+        self.result_box.insert("end", header + "\n\n")
+
+    def _on_token(self, token: str):
+        def append():
+            self.result_box.insert("end", token)
+            self.result_box.see("end")
+        self.ui(append)
+
+    def _on_gen_status(self, msg: str):
+        self.set_status(msg)
+        self.ui(lambda: (self.result_box.insert("end", f"\n\n▶ {msg}\n"), self.result_box.see("end")))
+
+    def generate_now(self):
+        iid = self._selected_iid()
+        cid = self.channel_ids.get(iid) if iid else None
+        if not cid:
+            messagebox.showinfo(APP_TITLE, "채널을 선택하세요. 수집 전인 채널은 먼저 [지금 체크하기]를 실행하세요.")
+            return
+        from .generator import generate_for_channel
+        from .ollama_client import OllamaClient
+
+        o = self.cfg.ollama
+        client = OllamaClient(o["host"], o["model"], timeout=o["timeout_sec"])
+        st = client.status()
+        if not st.ok:
+            self._on_ollama_status(st, startup=False)
+            if not st.server_up:
+                messagebox.showerror(APP_TITLE, st.message)
+            return
+        self.cancel_event = threading.Event()
+        cancel = self.cancel_event
+        self._stream_start(f"[{self.tree.item(iid, 'text')}] {o['model']}로 생성 중… "
+                           "(PC 사양에 따라 수 분 걸릴 수 있습니다)")
+        self.run_bg("주제/대본 생성 중…",
+                    lambda: generate_for_channel(self.cfg, cid, trigger="manual",
+                                                 on_status=self._on_gen_status,
+                                                 on_token=self._on_token, cancel=cancel),
+                    self.show_generation, cancellable=True)
+
+    def rewrite_script(self):
+        g = self.generation
+        idx = self.topic_combo.current()
+        if g is None or idx < 0:
+            messagebox.showinfo(APP_TITLE, "먼저 [새 주제/대본 생성]으로 주제 후보를 만드세요.")
+            return
+        from .db import Database
+        from .generator import ScriptGenerator, record_generation, save_generation
+
+        gen = ScriptGenerator.from_config(self.cfg)
+        self.cancel_event = threading.Event()
+        cancel = self.cancel_event
+        self._stream_start(f"주제 {idx + 1}로 대본 다시 쓰는 중…")
+
+        def work():
+            gen.write_script(g, idx, on_status=self._on_gen_status, on_token=self._on_token, cancel=cancel)
+            g.output_path = g.script_path = None
+            save_generation(g, self.cfg.outputs_dir, self.tz)
+            with Database(self.cfg.db_path) as db:
+                record_generation(db, g)
+            return g
+
+        self.run_bg("대본 생성 중…", work, self.show_generation, cancellable=True)
+
+    def cancel(self):
+        if self.cancel_event is not None:
+            self.cancel_event.set()
+            self.status_var.set("취소 요청됨 — 현재 응답을 정리하는 중…")
+
+    def show_generation(self, g):
+        from .generator import render_generation_md
+
+        self.generation = g
+        self.nb.select(1)
+        self.result_box.delete("1.0", "end")
+        self.result_box.insert("1.0", render_generation_md(g, self.tz))
+        self.result_box.see("1.0")
+        self.topic_combo.configure(values=[f"{i + 1}. {t['topic']}" for i, t in enumerate(g.topics)])
+        if g.selected is not None:
+            self.topic_combo.current(g.selected)
+        self.status_var.set(f"생성 완료 — 저장됨: {g.output_path}")
+
+    def save_result(self):
+        text = self.result_box.get("1.0", "end-1c")
+        if not text.strip():
+            messagebox.showinfo(APP_TITLE, "저장할 내용이 없습니다.")
+            return
+        g = self.generation
+        initial = g.output_path if g and g.output_path else None
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="파일로 저장", defaultextension=".md",
+            initialdir=str(initial.parent if initial else self.cfg.outputs_dir),
+            initialfile=initial.name if initial else "기획안.md",
+            filetypes=[("Markdown", "*.md"), ("텍스트", "*.txt"), ("모든 파일", "*.*")])
+        if path:
+            Path(path).write_text(text, encoding="utf-8")
+            self.status_var.set(f"저장됨: {path}")
+
+    def open_outputs(self):
+        out = self.cfg.outputs_dir
+        out.mkdir(parents=True, exist_ok=True)
+        if hasattr(os, "startfile"):
+            os.startfile(out)  # type: ignore[attr-defined]
+        else:
+            messagebox.showinfo(APP_TITLE, f"출력 폴더: {out}")
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.scheduler is not None:
+            self.scheduler.shutdown(wait=False)
+        if self.cancel_event is not None:
+            self.cancel_event.set()
+        self.root.destroy()
+
+
+def run_gui(config_path: Path | str | None = None) -> int:
+    from .paths import default_config_path
+
+    if sys.platform == "win32":
+        try:  # 고해상도 모니터에서 글자가 흐릿하지 않게
+            import ctypes
+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
+    root = tk.Tk()
+    try:
+        ttk.Style(root).theme_use("vista" if sys.platform == "win32" else "clam")
+    except tk.TclError:
+        pass
+    App(root, Path(config_path) if config_path else default_config_path())
+    root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    raise SystemExit(run_gui(sys.argv[1] if len(sys.argv) > 1 else None))

@@ -1,8 +1,12 @@
-# YouTube 채널 성과 모니터 설정
-# ⚠️ 비밀값(API 키, 봇 토큰, 챗 ID)은 여기에 쓰지 마세요.
-#    여기에는 "어떤 환경변수에서 읽을지"만 적고, 실제 값은 .env 에 넣습니다.
+# YouTube 채널 성과 모니터 설정 (소스 실행용 예시)
+# 비밀값(API 키, 봇 토큰, chat_id)은 두 가지 방법 중 하나로 넣습니다.
+#   1) .env 파일 (권장, git에 올라가지 않음) — .env.example 참고
+#   2) 이 파일의 api_key / bot_token / chat_id 에 직접 (exe의 설정 창이 이렇게 저장)
+#      → 이 방법을 쓰면 이 파일을 git에 커밋하거나 공유하지 마세요.
+# 둘 다 있으면 환경변수(.env)가 우선합니다.
 
 youtube:
+  api_key: ""
   api_key_env: YOUTUBE_API_KEY
   max_videos_per_channel: 30      # 채널별로 추적할 최근 영상 수 (50개당 약 1 unit)
 
@@ -34,17 +38,34 @@ analysis:
 
 telegram:
   enabled: true
+  bot_token: ""
+  chat_id: ""
   bot_token_env: TELEGRAM_BOT_TOKEN
   chat_id_env: TELEGRAM_CHAT_ID
   send_report_file: true          # 알림에 마크다운 리포트 파일 첨부
   notify_on_every_check: false    # true면 둔화가 없어도 매 점검마다 한 줄 요약 전송
 
+ollama:                           # 로컬 LLM (https://ollama.com) — API 비용 없음
+  enabled: true
+  host: http://localhost:11434
+  model: qwen2.5:7b               # 먼저: ollama pull qwen2.5:7b
+  auto_generate_on_slowdown: true # 둔화 감지 시 주제/제목/대본 자동 생성
+  num_topics: 5                   # 주제 후보 수 (3~5)
+  num_titles: 3                   # 주제별 제목 후보 수 (2~3)
+  script_minutes: 3               # 대본 목표 길이(분)
+  temperature: 0.7
+  num_ctx: 8192
+  timeout_sec: 900                # CPU만 있는 PC는 대본 생성에 수 분 걸릴 수 있음
+
 storage:
   db_path: data/yt_monitor.db     # 이 파일 기준 상대 경로
-  reports_dir: reports
+  reports_dir: reports            # 수집할 때마다 저장하는 채널 리포트
+  outputs_dir: outputs            # 생성한 주제/대본 (outputs/날짜/채널명.md)
+  prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt)
 
 schedule:
-  cron: "0 */6 * * *"             # 기본: 6시간마다 정각 (분 시 일 월 요일)
+  interval_hours: null            # 숫자를 넣으면 N시간 간격 (설정 창의 '체크 주기')
+  cron: "0 */6 * * *"             # interval_hours가 없을 때 사용. 기본: 6시간마다 정각
   timezone: Asia/Seoul
   run_on_start: true              # --schedule 시작 직후 1회 실행
 

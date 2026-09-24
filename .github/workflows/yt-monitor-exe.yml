@@ -1,0 +1,65 @@
+# YouTube 모니터 Windows exe 빌드
+# - yt_monitor/ 가 바뀌어 push되면 자동 빌드 → Actions 실행 페이지의 Artifacts에서 exe 다운로드
+# - yt-monitor-v* 태그를 push하면 GitHub Releases에도 exe를 올린다
+name: yt-monitor-exe
+
+on:
+  push:
+    paths:
+      - "yt_monitor/**"
+      - "tests/test_yt_monitor*.py"
+      - "tests/fake_ollama.py"
+      - ".github/workflows/yt-monitor-exe.yml"
+    tags:
+      - "yt-monitor-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 패키지 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r yt_monitor/requirements.txt pyinstaller pytest
+
+      - name: 테스트
+        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py -q
+
+      - name: exe 빌드
+        run: python yt_monitor/build_exe.py
+
+      - name: exe 동작 확인 (설정 로드 + Ollama 확인 + prompts 복사)
+        shell: pwsh
+        run: |
+          $dir = "yt_monitor/dist"
+          python -c "import sys; sys.path.insert(0, '.'); from yt_monitor.config import read_raw, save_config; r = read_raw('x'); r['channels'] = [{'handle': '@test'}]; save_config(r, '$dir/config.yaml')"
+          $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList "--check-ollama" -Wait -PassThru
+          # 러너에는 Ollama가 없으므로 '서버 꺼짐'(종료 코드 1)이 정상. 2 이상이면 설정/모듈 문제.
+          if ($p.ExitCode -ne 1) { throw "예상치 못한 종료 코드: $($p.ExitCode)" }
+          if (-not (Test-Path "$dir/prompts/script_gen.txt")) { throw "prompts 복사 실패" }
+          Get-Content "$dir/logs/yt_monitor.log" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$dir/config.yaml", "$dir/prompts", "$dir/logs"
+          Copy-Item yt_monitor/README.md "$dir/사용법.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YouTubeMonitor-windows
+          path: |
+            yt_monitor/dist/YouTubeMonitor.exe
+            yt_monitor/dist/사용법.md
+
+      - name: Release 업로드 (태그일 때만)
+        if: startsWith(github.ref, 'refs/tags/yt-monitor-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: yt_monitor/dist/YouTubeMonitor.exe

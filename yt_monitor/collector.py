@@ -155,3 +155,32 @@ class YouTubeCollector:
         self.db.commit()
         log.info("수집 완료: %s (%s) 영상 %d개", title, channel_id, len(videos))
         return CollectResult(channel_id, title, len(videos), now)
+
+
+if __name__ == "__main__":  # 단독 테스트: python -m yt_monitor.collector @핸들_또는_UC채널ID [--save]
+    import argparse
+
+    from .config import ChannelConfig, load_config
+    from .paths import default_config_path
+
+    parser = argparse.ArgumentParser(description="채널 1개를 수집해 결과를 출력 (기본은 DB에 저장 안 함)")
+    parser.add_argument("channel", help="@핸들 또는 UC로 시작하는 채널 ID")
+    parser.add_argument("--config", default=str(default_config_path()))
+    parser.add_argument("--save", action="store_true", help="설정의 DB에 저장")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    is_handle = args.channel.startswith("@")
+    ch = ChannelConfig(None if is_handle else args.channel, args.channel if is_handle else None,
+                       None, cfg.analysis)
+    with Database(cfg.db_path if args.save else ":memory:") as db:
+        col = YouTubeCollector(build_youtube_service(cfg.youtube_api_key), db,
+                               max_videos=cfg.youtube["max_videos_per_channel"])
+        res = col.collect_channel(ch)
+        stats = db.get_channel_stats(res.channel_id)[-1]
+        print(f"채널: {res.channel_title} ({res.channel_id})  구독자 {stats['subscriber_count']}  "
+              f"총 조회수 {stats['view_count']:,}  영상 {res.video_count}개 수집")
+        for v in db.get_videos(res.channel_id)[:10]:
+            s = db.get_snapshots(v.video_id)[-1]
+            print(f"  {v.published_at:%Y-%m-%d}  조회 {s.view_count or 0:>10,}  "
+                  f"좋아요 {s.like_count or 0:>7,}  [{v.category_name}] {v.title}")

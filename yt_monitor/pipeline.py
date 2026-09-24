@@ -24,20 +24,49 @@ class ChannelResult:
     report_path: Path | None = None
     alerted: bool = False
     error: str | None = None
+    generation: object | None = None          # generator.Generation
+    generation_error: str | None = None
 
 
 def make_notifier(cfg: Config):
     tg = cfg.telegram
     if not tg.get("enabled", True):
         return None
-    token = cfg.secret("bot_token_env", "telegram", required=False)
-    chat_id = cfg.secret("chat_id_env", "telegram", required=False)
+    token = cfg.secret("telegram", "bot_token", required=False)
+    chat_id = cfg.secret("telegram", "chat_id", required=False)
     if not token or not chat_id:
-        log.warning("텔레그램 토큰/챗 ID가 .env에 없어 알림을 건너뜁니다.")
+        log.warning("텔레그램 봇 토큰/chat_id가 설정되지 않아 알림을 건너뜁니다.")
         return None
     from .notifier import TelegramNotifier
 
     return TelegramNotifier(token, chat_id)
+
+
+def make_generator(cfg: Config):
+    """둔화 감지 시 자동 생성을 쓸 때만 ScriptGenerator를 만든다."""
+    o = cfg.ollama
+    if not (o.get("enabled", True) and o.get("auto_generate_on_slowdown", True)):
+        return None
+    from .generator import ScriptGenerator
+
+    return ScriptGenerator.from_config(cfg)
+
+
+def _auto_generate(cfg: Config, generator, db: Database, a: ChannelAnalysis, tz: ZoneInfo,
+                   now: datetime, res: ChannelResult) -> None:
+    from .generator import record_generation, save_generation
+    from .report import channel_context
+
+    try:
+        g = generator.generate(channel_id=a.channel_id, channel_title=a.channel_title,
+                               context=channel_context(a, tz), now=now, trigger="auto")
+        save_generation(g, cfg.outputs_dir, tz)
+        record_generation(db, g)
+        res.generation = g
+        log.info("[%s] 주제/대본 생성 → %s", a.channel_title, g.output_path)
+    except Exception as exc:  # Ollama가 꺼져 있어도 알림은 보내야 한다
+        log.exception("[%s] 주제/대본 생성 실패", a.channel_title)
+        res.generation_error = f"{type(exc).__name__}: {exc}"
 
 
 def _resolve_channel_id(db: Database, ch: ChannelConfig) -> str | None:
@@ -47,14 +76,19 @@ def _resolve_channel_id(db: Database, ch: ChannelConfig) -> str | None:
     return row["channel_id"] if row else None
 
 
-def run_check(cfg: Config, *, collect: bool = True, notify: bool = True,
-              service=None, notifier=None, now: datetime | None = None) -> list[ChannelResult]:
+def run_check(cfg: Config, *, collect: bool = True, notify: bool = True, generate: bool = True,
+              service=None, notifier=None, generator=None,
+              now: datetime | None = None) -> list[ChannelResult]:
     now = now or utcnow()
     tz = ZoneInfo(cfg.schedule["timezone"])
     request = (cfg.raw.get("report") or {}).get("claude_request")
     max_videos = cfg.youtube["max_videos_per_channel"]
     if notify and notifier is None:
         notifier = make_notifier(cfg)
+    if generate and generator is None:
+        generator = make_generator(cfg)
+    if not generate:
+        generator = None
 
     results: list[ChannelResult] = []
     with Database(cfg.db_path) as db:
@@ -80,15 +114,26 @@ def run_check(cfg: Config, *, collect: bool = True, notify: bool = True,
                 log.info("[%s] %s → %s", a.channel_title,
                          "둔화" if a.slowdown else (a.insufficient or "정상"), res.report_path)
 
-                if notifier and should_alert(a, db, now):
-                    notifier.send_alert(
-                        a, tz, res.report_path if cfg.telegram.get("send_report_file") else None,
-                        request,
-                    )
+                if (notifier or generator) and should_alert(a, db, now):
+                    if generator:
+                        _auto_generate(cfg, generator, db, a, tz, now, res)
+                    if notifier:
+                        try:
+                            notifier.send_alert(
+                                a, tz, res.report_path if cfg.telegram.get("send_report_file") else None,
+                                request, generation=res.generation,
+                                generation_error=res.generation_error,
+                            )
+                            res.alerted = True
+                        except Exception as exc:
+                            log.exception("[%s] 텔레그램 알림 전송 실패", a.channel_title)
+                            res.error = f"텔레그램 전송 실패: {type(exc).__name__}: {exc}"
+                    if not (res.alerted or res.generation):
+                        continue  # 아무것도 못 했으면 다음 점검 때 다시 시도
+                    # 알림/생성 이력 → 쿨다운 동안 같은 채널로 반복 생성·알림하지 않음
                     db.add_alert(a.channel_id, now, " / ".join(a.reasons), a.drop_pct,
-                                 str(res.report_path))
+                                 str(res.generation.output_path if res.generation else res.report_path))
                     db.commit()
-                    res.alerted = True
             except Exception as exc:  # 한 채널 실패가 다른 채널 처리를 막지 않게
                 log.exception("[%s] 처리 실패", ch.label)
                 res.error = f"{type(exc).__name__}: {exc}"

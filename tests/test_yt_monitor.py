@@ -115,6 +115,8 @@ def write_config(tmp_path: Path, extra: str = "") -> Path:
     cfg.write_text(f"""
 channels:
   - handle: "@test"
+schedule:
+  timezone: Asia/Seoul
 analysis:
   recent_n: 5
   baseline_m: 10
@@ -131,10 +133,12 @@ telegram:
 
 class FakeNotifier:
     def __init__(self):
-        self.alerts, self.texts = [], []
+        self.alerts, self.texts, self.generations = [], [], []
 
-    def send_alert(self, a, tz, report_path=None, request=None):
+    def send_alert(self, a, tz, report_path=None, request=None, generation=None,
+                   generation_error=None):
         self.alerts.append((a, report_path))
+        self.generations.append((generation, generation_error))
 
     def send_text(self, text):
         self.texts.append(text)
@@ -293,7 +297,7 @@ def test_run_check_end_to_end(tmp_path):
     cfg = load_config(write_config(tmp_path), load_env=False)
     fake = FakeYouTube(make_videos(40, 100), T0)
     notifier = FakeNotifier()
-    results = run_check(cfg, service=fake, notifier=notifier, now=T0)
+    results = run_check(cfg, service=fake, notifier=notifier, generate=False, now=T0)
     r = results[0]
     assert r.error is None and r.alerted
     assert r.report_path.exists()
@@ -303,12 +307,12 @@ def test_run_check_end_to_end(tmp_path):
 
     # 6시간 뒤 재실행: 쿨다운으로 알림 없음, 리포트는 새로 저장
     fake.now = T0 + timedelta(hours=6)
-    results = run_check(cfg, service=fake, notifier=notifier, now=fake.now)
+    results = run_check(cfg, service=fake, notifier=notifier, generate=False, now=fake.now)
     assert not results[0].alerted and len(notifier.alerts) == 1
     assert len(list((tmp_path / "reports" / "2026-09-01").glob("*.md"))) == 2
 
     # --analyze-only: API 없이 DB로만
-    results = run_check(cfg, collect=False, notifier=notifier, now=fake.now)
+    results = run_check(cfg, collect=False, notifier=notifier, generate=False, now=fake.now)
     assert results[0].error is None and results[0].analysis.slowdown
 
 
@@ -320,7 +324,7 @@ def test_run_check_reports_errors(tmp_path):
             raise RuntimeError("quotaExceeded")
 
     notifier = FakeNotifier()
-    results = run_check(cfg, service=Broken([], T0), notifier=notifier, now=T0)
+    results = run_check(cfg, service=Broken([], T0), notifier=notifier, generate=False, now=T0)
     assert "quotaExceeded" in results[0].error
     assert notifier.texts and "오류" in notifier.texts[0]
 

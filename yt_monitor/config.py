@@ -1,13 +1,18 @@
-"""config.yaml + .env 로딩.
+"""config.yaml (+ 선택적으로 .env) 로딩/저장.
 
-비밀값(API 키, 봇 토큰, 챗 ID)은 config.yaml에 직접 쓰지 않고
-"어떤 환경변수에서 읽을지"만 적는다. 실제 값은 .env(또는 OS 환경변수)에 둔다.
+비밀값(YouTube API 키, 텔레그램 봇 토큰/챗 ID) 읽는 순서
+1) 환경변수 (config의 *_env 에 적힌 이름, 예: YOUTUBE_API_KEY) — .env 파일도 자동으로 읽음
+2) config.yaml 에 직접 적힌 값 (youtube.api_key, telegram.bot_token, telegram.chat_id)
+   → exe의 첫 실행 설정 창이 여기에 저장한다. config.yaml을 남에게 공유하지 마세요.
+
+단독 확인: python -m yt_monitor.config [config.yaml 경로]
 """
 
 from __future__ import annotations
 
 import copy
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,18 +36,42 @@ DEFAULT_ANALYSIS = {
 }
 
 DEFAULTS = {
-    "youtube": {"api_key_env": "YOUTUBE_API_KEY", "max_videos_per_channel": 30},
+    "youtube": {"api_key": "", "api_key_env": "YOUTUBE_API_KEY", "max_videos_per_channel": 30},
     "channels": [],
     "analysis": DEFAULT_ANALYSIS,
     "telegram": {
         "enabled": True,
+        "bot_token": "",
+        "chat_id": "",
         "bot_token_env": "TELEGRAM_BOT_TOKEN",
         "chat_id_env": "TELEGRAM_CHAT_ID",
         "send_report_file": True,
         "notify_on_every_check": False,
     },
-    "storage": {"db_path": "data/yt_monitor.db", "reports_dir": "reports"},
-    "schedule": {"cron": "0 */6 * * *", "timezone": "Asia/Seoul", "run_on_start": True},
+    "ollama": {
+        "enabled": True,
+        "host": "http://localhost:11434",
+        "model": "qwen2.5:7b",
+        "auto_generate_on_slowdown": True,  # 둔화 감지 시 주제/대본 자동 생성
+        "num_topics": 5,                    # 주제 후보 수 (3~5 권장)
+        "num_titles": 3,                    # 주제별 제목 후보 수 (2~3 권장)
+        "script_minutes": 3,                # 대본 목표 길이(분)
+        "temperature": 0.7,
+        "num_ctx": 8192,
+        "timeout_sec": 900,                 # CPU만 있는 PC는 7B 대본 생성에 수 분 걸릴 수 있음
+    },
+    "storage": {
+        "db_path": "data/yt_monitor.db",
+        "reports_dir": "reports",
+        "outputs_dir": "outputs",
+        "prompts_dir": "prompts",
+    },
+    "schedule": {
+        "cron": "0 */6 * * *",
+        "interval_hours": None,             # 값이 있으면 cron 대신 N시간 간격
+        "timezone": "Asia/Seoul",
+        "run_on_start": True,
+    },
 }
 
 
@@ -77,6 +106,7 @@ class Config:
     raw: dict
     base_dir: Path
     channels: list[ChannelConfig] = field(default_factory=list)
+    path: Path | None = None
 
     @property
     def youtube(self) -> dict:
@@ -87,6 +117,10 @@ class Config:
         return self.raw["telegram"]
 
     @property
+    def ollama(self) -> dict:
+        return self.raw["ollama"]
+
+    @property
     def schedule(self) -> dict:
         return self.raw["schedule"]
 
@@ -94,30 +128,43 @@ class Config:
     def analysis(self) -> dict:
         return self.raw["analysis"]
 
-    def path(self, key: str) -> Path:
+    def storage_path(self, key: str) -> Path:
         p = Path(self.raw["storage"][key])
         return p if p.is_absolute() else self.base_dir / p
 
     @property
     def db_path(self) -> Path:
-        return self.path("db_path")
+        return self.storage_path("db_path")
 
     @property
     def reports_dir(self) -> Path:
-        return self.path("reports_dir")
+        return self.storage_path("reports_dir")
 
-    def secret(self, env_name_key: str, section: str, required: bool = True) -> str | None:
-        env_name = self.raw[section][env_name_key]
-        value = os.environ.get(env_name, "").strip()
+    @property
+    def outputs_dir(self) -> Path:
+        return self.storage_path("outputs_dir")
+
+    @property
+    def prompts_dir(self) -> Path:
+        return self.storage_path("prompts_dir")
+
+    def secret(self, section: str, key: str, required: bool = True) -> str | None:
+        """환경변수(<key>_env에 적힌 이름) → config.yaml의 <key> 순으로 찾는다."""
+        sec = self.raw[section]
+        env_name = sec.get(f"{key}_env")
+        value = (os.environ.get(env_name, "") if env_name else "").strip()
+        if not value:
+            value = str(sec.get(key) or "").strip()
         if not value and required:
             raise ConfigError(
-                f"환경변수 {env_name} 가 비어 있습니다. {self.base_dir / '.env'} 에 값을 넣어주세요."
+                f"{section}.{key} 값이 없습니다. 설정 창(또는 config.yaml)에 입력하거나 "
+                f"환경변수 {env_name} 를 지정해주세요."
             )
         return value or None
 
     @property
     def youtube_api_key(self) -> str:
-        return self.secret("api_key_env", "youtube")  # type: ignore[return-value]
+        return self.secret("youtube", "api_key")  # type: ignore[return-value]
 
 
 def _validate_analysis(a: dict, where: str) -> None:
@@ -128,6 +175,32 @@ def _validate_analysis(a: dict, where: str) -> None:
     for key in ("recent_n", "baseline_m", "min_baseline", "top_k"):
         if int(a[key]) < 1:
             raise ConfigError(f"{where}.{key} 는 1 이상이어야 합니다.")
+
+
+def parse_channels(raw: dict) -> list[ChannelConfig]:
+    channels = []
+    for i, item in enumerate(raw.get("channels") or []):
+        if isinstance(item, str):
+            item = {"handle": item} if item.startswith("@") else {"id": item}
+        if not item.get("id") and not item.get("handle"):
+            raise ConfigError(f"channels[{i}] 에 id 또는 handle 이 필요합니다.")
+        handle = item.get("handle")
+        if handle and not handle.startswith("@"):
+            handle = "@" + handle
+        analysis = _merge(raw["analysis"], item.get("analysis") or {})
+        _validate_analysis(analysis, f"channels[{i}].analysis")
+        channels.append(ChannelConfig(item.get("id"), handle, item.get("name"), analysis))
+    return channels
+
+
+def read_raw(path: str | Path) -> dict:
+    """기본값과 병합된 설정 dict (검증 없음). 파일이 없으면 기본값."""
+    path = Path(path)
+    user = {}
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            user = yaml.safe_load(f) or {}
+    return _merge(DEFAULTS, user)
 
 
 def load_config(path: str | Path, load_env: bool = True) -> Config:
@@ -142,24 +215,43 @@ def load_config(path: str | Path, load_env: bool = True) -> Config:
         # OS에 이미 설정된 환경변수가 우선한다.
         load_dotenv(base_dir / ".env", override=False)
 
-    with open(path, encoding="utf-8") as f:
-        user = yaml.safe_load(f) or {}
-    raw = _merge(DEFAULTS, user)
+    raw = read_raw(path)
     _validate_analysis(raw["analysis"], "analysis")
-
-    channels = []
-    for i, item in enumerate(raw.get("channels") or []):
-        if isinstance(item, str):
-            item = {"handle": item} if item.startswith("@") else {"id": item}
-        if not item.get("id") and not item.get("handle"):
-            raise ConfigError(f"channels[{i}] 에 id 또는 handle 이 필요합니다.")
-        handle = item.get("handle")
-        if handle and not handle.startswith("@"):
-            handle = "@" + handle
-        analysis = _merge(raw["analysis"], item.get("analysis") or {})
-        _validate_analysis(analysis, f"channels[{i}].analysis")
-        channels.append(ChannelConfig(item.get("id"), handle, item.get("name"), analysis))
+    channels = parse_channels(raw)
     if not channels:
         raise ConfigError("config.yaml 의 channels 에 최소 1개 채널을 등록해주세요.")
+    return Config(raw=raw, base_dir=base_dir, channels=channels, path=path)
 
-    return Config(raw=raw, base_dir=base_dir, channels=channels)
+
+def save_config(raw: dict, path: str | Path) -> Path:
+    """설정 dict를 config.yaml로 저장 (GUI 설정 창에서 사용)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = ("# YouTube 채널 성과 모니터 설정 (프로그램의 [설정] 창에서도 수정할 수 있습니다)\n"
+              "# ⚠️ API 키/봇 토큰이 들어 있으니 다른 사람에게 공유하지 마세요.\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(header)
+        yaml.safe_dump(raw, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    return path
+
+
+def _mask(value: str | None) -> str:
+    if not value:
+        return "(없음)"
+    return value[:4] + "…" + value[-2:] if len(value) > 8 else "****"
+
+
+if __name__ == "__main__":  # 단독 확인: 설정을 읽어서 요약 출력
+    from .paths import default_config_path
+
+    cfg = load_config(sys.argv[1] if len(sys.argv) > 1 else default_config_path())
+    print(f"설정 파일: {cfg.path}")
+    print(f"채널 {len(cfg.channels)}개: " + ", ".join(c.label for c in cfg.channels))
+    print(f"YouTube API 키: {_mask(cfg.secret('youtube', 'api_key', required=False))}")
+    print(f"텔레그램 토큰: {_mask(cfg.secret('telegram', 'bot_token', required=False))}, "
+          f"chat_id: {cfg.secret('telegram', 'chat_id', required=False) or '(없음)'}")
+    print(f"Ollama: {cfg.ollama['host']} / 모델 {cfg.ollama['model']}")
+    print(f"하락 임계값: {cfg.analysis['drop_threshold_pct']}% / 주기: "
+          + (f"{cfg.schedule['interval_hours']}시간" if cfg.schedule.get("interval_hours")
+             else f"cron '{cfg.schedule['cron']}'"))
+    print(f"DB: {cfg.db_path}")

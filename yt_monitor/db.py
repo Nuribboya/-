@@ -7,6 +7,9 @@
 - video_stats     : 영상 단위 시계열 (수집 시각별 조회수/좋아요/댓글)
 - categories      : YouTube 카테고리 ID → 이름 캐시
 - alerts          : 전송한 알림 이력 (쿨다운 판단용)
+- generations     : Ollama로 생성한 주제/제목/대본 이력
+
+단독 확인: python -m yt_monitor.db [DB 경로]   → 테이블별 행 수 출력
 
 모든 시각은 UTC ISO-8601 문자열("2026-09-24T12:00:00+00:00")로 저장한다.
 """
@@ -72,7 +75,23 @@ CREATE TABLE IF NOT EXISTS alerts (
     message       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_channel ON alerts(channel_id, created_at);
+
+CREATE TABLE IF NOT EXISTS generations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    trigger       TEXT NOT NULL,       -- auto(둔화 감지) | manual(사용자 버튼)
+    model         TEXT NOT NULL,
+    topics_json   TEXT NOT NULL,       -- [{"topic","reason","titles":[...]}]
+    selected      INTEGER,             -- 대본을 쓴 주제 인덱스(0부터)
+    title         TEXT,
+    script        TEXT,
+    output_path   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_generations_channel ON generations(channel_id, created_at);
 """
+
+TABLES = ("channels", "channel_stats", "videos", "video_stats", "categories", "alerts", "generations")
 
 
 def utcnow() -> datetime:
@@ -197,6 +216,18 @@ class Database:
             (channel_id, to_iso(created_at), reason, drop_pct, message),
         )
 
+    def add_generation(self, channel_id: str, created_at: datetime, trigger: str, model: str,
+                       topics: list[dict], selected: int | None, title: str | None,
+                       script: str | None, output_path: str | None) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO generations (channel_id, created_at, trigger, model, topics_json,
+                                        selected, title, script, output_path)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (channel_id, to_iso(created_at), trigger, model,
+             json.dumps(topics, ensure_ascii=False), selected, title, script, output_path),
+        )
+        return int(cur.lastrowid)
+
     def commit(self) -> None:
         self.conn.commit()
 
@@ -252,8 +283,29 @@ class Database:
             "SELECT * FROM channel_stats WHERE channel_id = ? ORDER BY collected_at", (channel_id,)
         ).fetchall()
 
+    def last_generation(self, channel_id: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM generations WHERE channel_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    def counts(self) -> dict[str, int]:
+        return {t: self.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES}
+
     def last_alert(self, channel_id: str) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT * FROM alerts WHERE channel_id = ? ORDER BY created_at DESC LIMIT 1",
             (channel_id,),
         ).fetchone()
+
+
+if __name__ == "__main__":  # 단독 확인: 스키마 생성 + 테이블별 행 수
+    import sys
+
+    from .paths import app_dir
+
+    target = sys.argv[1] if len(sys.argv) > 1 else app_dir() / "data" / "yt_monitor.db"
+    with Database(target) as db:
+        print(f"DB: {target}")
+        for table, n in db.counts().items():
+            print(f"  {table:<14} {n:>8,}행")

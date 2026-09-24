@@ -127,7 +127,8 @@ def _video_brief(p: VideoPerf, a: ChannelAnalysis) -> str:
 
 # ---- Claude 프롬프트 --------------------------------------------------------
 
-def claude_prompt(a: ChannelAnalysis, tz: ZoneInfo, request: str | None = None) -> str:
+def channel_context(a: ChannelAnalysis, tz: ZoneInfo) -> str:
+    """채널 현황 요약 텍스트 (Claude 붙여넣기 블록과 Ollama 프롬프트가 함께 쓴다)."""
     lines = [
         f"채널: {a.channel_title}",
         f"분석 시각: {_local(a.analyzed_at, tz)}",
@@ -158,8 +159,11 @@ def claude_prompt(a: ChannelAnalysis, tz: ZoneInfo, request: str | None = None) 
         lines.append("- (없음)")
 
     lines += ["", "[상위 영상 패턴]"] + [f"- {x}" for x in pattern_lines(a)]
-    lines += ["", "요청:", (request or DEFAULT_CLAUDE_REQUEST).strip()]
     return "\n".join(lines)
+
+
+def claude_prompt(a: ChannelAnalysis, tz: ZoneInfo, request: str | None = None) -> str:
+    return "\n".join([channel_context(a, tz), "", "요청:", (request or DEFAULT_CLAUDE_REQUEST).strip()])
 
 
 # ---- 마크다운 리포트 --------------------------------------------------------

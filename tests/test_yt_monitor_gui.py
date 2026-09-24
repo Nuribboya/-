@@ -1,0 +1,186 @@
+"""GUI 테스트. tkinter와 화면(DISPLAY)이 있을 때만 실행된다 (리눅스는 xvfb-run pytest ...)."""
+
+import os
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+tk = pytest.importorskip("tkinter")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from fake_ollama import start_fake_ollama  # noqa: E402
+from test_yt_monitor import T0, FakeNotifier, FakeYouTube, make_videos  # noqa: E402
+from yt_monitor import gui  # noqa: E402
+from yt_monitor.config import load_config, read_raw, save_config  # noqa: E402
+from yt_monitor.pipeline import run_check  # noqa: E402
+
+PROMPTS = Path(__file__).resolve().parent.parent / "yt_monitor" / "prompts"
+
+
+# ---- 순수 함수 ---------------------------------------------------------------------
+
+def test_sparkline():
+    assert gui.sparkline([]) == ""
+    assert gui.sparkline([5, 5]) == "▄▄"
+    assert gui.sparkline([0, 50, 100]) == "▁▄█"
+
+
+def test_parse_channel_lines():
+    text = """@mychannel | 메인
+https://www.youtube.com/@sub_ch
+https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv
+UCabcdefghijklmnopqrstuv | 두번째
+handle_only
+# 주석"""
+    assert gui.parse_channel_lines(text) == [
+        {"handle": "@mychannel", "name": "메인"},
+        {"handle": "@sub_ch"},
+        {"id": "UCabcdefghijklmnopqrstuv"},
+        {"id": "UCabcdefghijklmnopqrstuv", "name": "두번째"},
+        {"handle": "@handle_only"},
+    ]
+    assert gui.channel_lines([{"handle": "@a", "name": "A"}, {"id": "UC1"}]) == "@a | A\nUC1"
+
+
+# ---- 실제 창 -----------------------------------------------------------------------
+
+@pytest.fixture
+def root():
+    try:
+        r = tk.Tk()
+    except tk.TclError:
+        pytest.skip("화면(DISPLAY)이 없어 GUI 테스트를 건너뜁니다.")
+    r.withdraw()
+    yield r
+    try:
+        r.destroy()
+    except tk.TclError:
+        pass
+
+
+@pytest.fixture
+def dialogs(monkeypatch):
+    calls = []
+    for name in ("showinfo", "showwarning", "showerror"):
+        monkeypatch.setattr(gui.messagebox, name, lambda *a, _n=name, **k: calls.append((_n, a)))
+    return calls
+
+
+def pump(root, cond, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        root.update()
+        if cond():
+            return True
+        time.sleep(0.02)
+    raise AssertionError("시간 초과")
+
+
+def make_config(tmp_path, url, model="qwen2.5:7b"):
+    raw = read_raw(tmp_path / "config.yaml")
+    raw["channels"] = [{"handle": "@test", "name": "테스트채널"}]
+    raw["youtube"]["api_key"] = "fake"
+    raw["telegram"]["enabled"] = False
+    raw["ollama"].update(host=url, model=model)
+    return save_config(raw, tmp_path / "config.yaml")
+
+
+def test_app_flow(root, dialogs, tmp_path):
+    server, url, _ = start_fake_ollama()
+    try:
+        path = make_config(tmp_path, url)
+        cfg = load_config(path, load_env=False)
+        run_check(cfg, service=FakeYouTube(make_videos(40, 100), T0), notifier=FakeNotifier(),
+                  generate=False, now=T0)
+
+        app = gui.App(root, path, check_ollama_on_start=False)
+        assert (tmp_path / "prompts" / "script_gen.txt").exists()   # 프롬프트 기본본 복사
+        pump(root, lambda: bool(app.analyses))
+        values = app.tree.item("ch0", "values")
+        assert "둔화" in values[0] and values[2] == "-60.0%"
+        assert "상위 성과" in app.summary_box.get("1.0", "end")
+
+        app.check_ollama()
+        pump(root, lambda: app.ollama_ok)
+
+        app.generate_now()
+        pump(root, lambda: not app.busy and app.generation is not None)
+        text = app.result_box.get("1.0", "end")
+        assert "## 주제 후보" in text and "## 대본" in text
+        assert list(app.topic_combo["values"])[0].startswith("1. ")
+        assert app.topic_combo.current() == 1
+        first_output = app.generation.output_path
+        assert first_output.exists() and first_output.parent.parent == tmp_path / "outputs"
+
+        app.topic_combo.current(0)
+        app.rewrite_script()
+        pump(root, lambda: not app.busy and app.generation.selected == 0)
+        assert app.generation.output_path != first_output
+
+        app._apply_auto_check(True, save=True)
+        assert app.scheduler is not None and read_raw(path)["gui"]["auto_check"] is True
+        app._apply_auto_check(False, save=True)
+        assert app.scheduler is None
+        assert not [d for d in dialogs if d[0] == "showerror"], dialogs
+        app.close()
+    finally:
+        server.shutdown()
+
+
+def test_missing_model_closes_app(root, dialogs, tmp_path):
+    server, url, _ = start_fake_ollama()
+    try:
+        app = gui.App(root, make_config(tmp_path, url, model="없는모델:1b"))
+        pump(root, lambda: app.closed)
+        assert any("ollama pull 없는모델:1b" in d[1][1] for d in dialogs if d[0] == "showerror")
+    finally:
+        server.shutdown()
+
+
+def test_setup_dialog_writes_config(root, dialogs, tmp_path):
+    path = tmp_path / "config.yaml"
+    dlg = gui.SetupDialog(root, path, first_run=True)
+    dlg.vars["api_key"].set("AIza-key")
+    dlg.channels_text.insert("1.0", "@첫채널 | 첫 채널\n")
+    dlg.vars["interval"].set("4")
+    dlg.vars["threshold"].set("25")
+    dlg._save()
+    assert dlg.saved
+    cfg = load_config(path, load_env=False)
+    assert cfg.youtube_api_key == "AIza-key" and cfg.channels[0].label == "첫 채널"
+    assert cfg.schedule["interval_hours"] == 4 and cfg.analysis["drop_threshold_pct"] == 25
+
+    bad = gui.SetupDialog(root, tmp_path / "bad.yaml")
+    bad._save()                                           # 필수값 없음 → 저장 안 됨
+    assert not bad.saved and dialogs[-1][0] == "showerror"
+    bad.destroy()
+
+
+@pytest.mark.skipif(not os.environ.get("YT_SCREENSHOT"), reason="스크린샷 필요할 때만")
+def test_screenshot(root, dialogs, tmp_path):
+    """YT_SCREENSHOT=경로.png 로 실행하면 메인 창 스크린샷을 저장 (문서용)."""
+    server, url, _ = start_fake_ollama()
+    try:
+        path = make_config(tmp_path, url)
+        cfg = load_config(path, load_env=False)
+        fake = FakeYouTube(make_videos(40, 100), T0)
+        from datetime import timedelta
+        for h in range(0, 24 * 15, 6):
+            fake.now = T0 + timedelta(hours=h)
+            run_check(cfg, service=fake, notifier=FakeNotifier(), generate=False, now=fake.now)
+        root.deiconify()
+        app = gui.App(root, path)
+        pump(root, lambda: app.analyses and app.ollama_ok)
+        app.generate_now()
+        pump(root, lambda: not app.busy and app.generation is not None)
+        root.geometry("1000x700+0+0")
+        for _ in range(20):
+            root.update()
+            time.sleep(0.05)
+        os.system(f"import -window root {os.environ['YT_SCREENSHOT']}")
+        app.close()
+    finally:
+        server.shutdown()
