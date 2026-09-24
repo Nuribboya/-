@@ -10,6 +10,7 @@ on:
       - "yt_monitor/**"
       - "tests/test_yt_monitor*.py"
       - "tests/fake_ollama.py"
+      - "tests/fake_video_services.py"
       - ".github/workflows/yt-monitor-exe.yml"
     tags:
       - "yt-monitor-v*"
@@ -35,13 +36,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r yt_monitor/requirements.txt pyinstaller pytest
 
+      - name: ffmpeg 설치 (영상 합성 테스트용, exe에는 포함하지 않음)
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -hide_banner -version
+
       - name: 테스트
-        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py -q
+        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py -q
 
       - name: exe 빌드
         run: python yt_monitor/build_exe.py
 
-      - name: exe 동작 확인 (설정 로드 + Ollama 확인 + prompts 복사)
+      - name: exe 동작 확인 (설정 로드 + Ollama 확인 + prompts 복사 + ffmpeg 영상 합성)
         shell: pwsh
         run: |
           $dir = "yt_monitor/dist"
@@ -50,8 +56,17 @@ jobs:
           # 러너에는 Ollama가 없으므로 '서버 꺼짐'(종료 코드 1)이 정상. 2 이상이면 설정/모듈 문제.
           if ($p.ExitCode -ne 1) { throw "예상치 못한 종료 코드: $($p.ExitCode)" }
           if (-not (Test-Path "$dir/prompts/script_gen.txt")) { throw "prompts 복사 실패" }
+          if (-not (Test-Path "$dir/prompts/video_keywords.txt")) { throw "video_keywords.txt 복사 실패" }
+          $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList "--check-ffmpeg" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "ffmpeg 확인 실패: $($p.ExitCode)" }
+          # 한글/공백이 든 경로로 오프라인 영상 합성 (ffmpeg 자막 필터의 Windows 경로 처리 확인)
+          Set-Content -Path "$dir/대본 테스트.txt" -Encoding utf8 -Value "안녕하세요. exe 영상 생성 테스트입니다.`n두 번째 문장입니다!"
+          $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList '--make-video', '"대본 테스트.txt"', '--title', '"exe 테스트"', '--offline' -WorkingDirectory $dir -Wait -PassThru
+          Get-ChildItem -Recurse "$dir/outputs" -ErrorAction SilentlyContinue | Select-Object FullName
+          if ($p.ExitCode -ne 0) { Get-Content "$dir/logs/yt_monitor.log"; throw "영상 생성 실패: $($p.ExitCode)" }
+          if (-not (Get-ChildItem -Recurse "$dir/outputs" -Filter "*.mp4")) { throw "mp4 없음" }
           Get-Content "$dir/logs/yt_monitor.log" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$dir/config.yaml", "$dir/prompts", "$dir/logs"
+          Remove-Item -Recurse -Force "$dir/config.yaml", "$dir/prompts", "$dir/logs", "$dir/outputs", "$dir/대본 테스트.txt"
           Copy-Item yt_monitor/README.md "$dir/사용법.md"
 
       - uses: actions/upload-artifact@v4

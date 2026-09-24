@@ -60,7 +60,38 @@ DEFAULTS = {
         "num_ctx": 8192,
         "timeout_sec": 900,                 # CPU만 있는 PC는 7B 대본 생성에 수 분 걸릴 수 있음
     },
+    "pexels": {                             # 무료 스톡 영상 (https://www.pexels.com/api/)
+        "api_key": "",
+        "api_key_env": "PEXELS_API_KEY",
+        "orientation": "portrait",          # 쇼츠용 세로 영상 우선 검색
+        "per_page": 15,
+        "timeout_sec": 60,
+    },
+    "video": {
+        "ffmpeg_path": "",                  # 비우면 exe 옆 ffmpeg.exe → PATH 순서로 찾음
+        "width": 1080,
+        "height": 1920,                     # 9:16 세로
+        "fps": 30,
+        "clip_max_seconds": 4.0,            # 씬당 클립 길이: 씬이 이보다 길면 클립 여러 개로 나눔
+        "min_scene_seconds": 2.5,           # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
+        "max_scene_chars": 90,              # 씬 하나에 넣을 최대 글자 수
+        "keywords_per_scene": 3,
+        "tts_voice": "ko-KR-SunHiNeural",   # edge-tts 음성 (ko-KR-InJoonNeural = 남성)
+        "tts_rate": "+10%",                 # 말하기 속도 (쇼츠는 약간 빠르게)
+        "tts_volume": "+0%",
+        "tts_pitch": "+0Hz",
+        "tts_proxy": "",                    # 회사망 등에서 필요할 때만 (예: http://proxy:8080)
+        "subtitle_font": "Malgun Gothic",   # 맑은 고딕 (Windows 기본 한글 폰트)
+        "subtitle_font_size": 72,           # 1080x1920 기준 픽셀
+        "subtitle_max_chars": 14,           # 자막 한 덩어리 최대 글자 수
+        "subtitle_margin_bottom": 320,      # 화면 아래에서 자막까지 거리(px). 쇼츠 UI에 안 가리게
+        "subtitle_box_opacity": 0.6,        # 자막 뒤 검은 박스 불투명도 (0~1)
+        "crf": 21,                          # 화질 (낮을수록 고화질·큰 파일, 18~28)
+        "preset": "veryfast",
+        "keep_work_files": True,            # 중간 파일(클립/음성/ffmpeg 로그) 보관 → 디버깅용
+    },
     "storage": {
+        "video_cache_dir": "data/video_cache",   # 다운로드한 스톡 영상 캐시
         "db_path": "data/yt_monitor.db",
         "reports_dir": "reports",
         "outputs_dir": "outputs",
@@ -121,6 +152,14 @@ class Config:
         return self.raw["ollama"]
 
     @property
+    def pexels(self) -> dict:
+        return self.raw["pexels"]
+
+    @property
+    def video(self) -> dict:
+        return self.raw["video"]
+
+    @property
     def schedule(self) -> dict:
         return self.raw["schedule"]
 
@@ -147,6 +186,10 @@ class Config:
     @property
     def prompts_dir(self) -> Path:
         return self.storage_path("prompts_dir")
+
+    @property
+    def video_cache_dir(self) -> Path:
+        return self.storage_path("video_cache_dir")
 
     def secret(self, section: str, key: str, required: bool = True) -> str | None:
         """환경변수(<key>_env에 적힌 이름) → config.yaml의 <key> 순으로 찾는다."""
@@ -251,6 +294,7 @@ if __name__ == "__main__":  # 단독 확인: 설정을 읽어서 요약 출력
     print(f"텔레그램 토큰: {_mask(cfg.secret('telegram', 'bot_token', required=False))}, "
           f"chat_id: {cfg.secret('telegram', 'chat_id', required=False) or '(없음)'}")
     print(f"Ollama: {cfg.ollama['host']} / 모델 {cfg.ollama['model']}")
+    print(f"Pexels API 키: {_mask(cfg.secret('pexels', 'api_key', required=False))}")
     print(f"하락 임계값: {cfg.analysis['drop_threshold_pct']}% / 주기: "
           + (f"{cfg.schedule['interval_hours']}시간" if cfg.schedule.get("interval_hours")
              else f"cron '{cfg.schedule['cron']}'"))

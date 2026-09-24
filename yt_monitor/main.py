@@ -10,6 +10,9 @@
     python main.py --schedule              # 창 없이 주기 실행 (APScheduler)
     python main.py --test-telegram         # 텔레그램 테스트 메시지
     python main.py --get-chat-id           # 봇과 대화한 채팅방의 chat_id 확인
+    python main.py --make-video 대본.txt --title "제목"   # 대본 → 쇼츠 mp4 (outputs/날짜/제목.mp4)
+    python main.py --make-video 대본.txt --offline        # 인터넷 없이 합성만 확인 (무음 + 단색 배경)
+    python main.py --check-ffmpeg          # ffmpeg 설치 확인 (영상 생성에 필요)
 
 exe(창 모드)에서도 같은 옵션을 쓸 수 있습니다. 예) Windows 작업 스케줄러에
 `YouTubeMonitor.exe --check-now` 등록. 이때 출력은 logs/yt_monitor.log 에 남습니다.
@@ -88,18 +91,33 @@ def run_cli(argv: list[str]) -> int:
     mode.add_argument("--schedule", action="store_true", help="창 없이 주기 실행")
     mode.add_argument("--test-telegram", action="store_true", help="텔레그램 테스트 메시지 전송")
     mode.add_argument("--get-chat-id", action="store_true", help="봇에게 메시지 보낸 채팅방 ID 조회")
+    mode.add_argument("--make-video", metavar="대본파일", help="대본 → 쇼츠 영상(mp4) 생성")
+    mode.add_argument("--check-ffmpeg", action="store_true", help="ffmpeg 설치 확인")
     parser.add_argument("--config", default=str(default_config_path()), help="설정 파일 경로")
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 알림을 보내지 않음")
     parser.add_argument("--no-generate", action="store_true", help="둔화 시 자동 생성을 하지 않음")
+    parser.add_argument("--title", help="--make-video: 영상 제목(파일 이름). 생략하면 대본 파일 이름")
+    parser.add_argument("--voice", help="--make-video: edge-tts 음성 (예: ko-KR-InJoonNeural)")
+    parser.add_argument("--offline", action="store_true",
+                        help="--make-video: 인터넷 없이 무음 + 단색 배경으로 합성만 확인")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     setup_logging(args.verbose)
 
     if args.gui or not any((args.check_now, args.analyze_only, args.generate, args.check_ollama,
-                            args.schedule, args.test_telegram, args.get_chat_id)):
+                            args.schedule, args.test_telegram, args.get_chat_id, args.make_video,
+                            args.check_ffmpeg)):
         from yt_monitor.gui import run_gui
 
         return run_gui(args.config)
+
+    if args.check_ffmpeg:
+        from yt_monitor.config import read_raw
+        from yt_monitor.video.ffmpeg import check_ffmpeg
+
+        st = check_ffmpeg(read_raw(args.config)["video"].get("ffmpeg_path"))
+        print(st.message + (f"\n경로: {st.path}" if st.path else ""))
+        return 0 if st.ok else 1
 
     try:
         cfg = load_config(args.config)
@@ -118,6 +136,23 @@ def run_cli(argv: list[str]) -> int:
             from yt_monitor.generator import main as generator_main
 
             return generator_main(["--channel", args.generate, "--config", args.config])
+
+        if args.make_video:
+            from yt_monitor.video.pipeline import VideoPipeline
+
+            script = Path(args.make_video)
+            try:
+                res = VideoPipeline(cfg, offline=args.offline).run(
+                    script.read_text(encoding="utf-8"), args.title or script.stem, voice=args.voice,
+                    on_progress=lambda n, t, m: print(f"[{n}/{t}] {m}", flush=True))
+            except Exception as exc:  # ffmpeg/TTS/Pexels 오류 → 메시지(로그 경로 포함)만 보여준다
+                logging.getLogger("yt_monitor").exception("영상 생성 실패")
+                print(f"\n❌ 영상 생성 실패: {exc}", file=sys.stderr)
+                return 1
+            print(f"🎬 {res.video_path}\n📝 {res.srt_path}")
+            for w in res.warnings:
+                print(f"⚠ {w}")
+            return 0
 
         if args.get_chat_id:
             from yt_monitor.notifier import fetch_chat_ids

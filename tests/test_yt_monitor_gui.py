@@ -130,6 +130,74 @@ def test_app_flow(root, dialogs, tmp_path):
         server.shutdown()
 
 
+def test_video_tab_flow(root, dialogs, tmp_path, monkeypatch):
+    """주제/대본 생성 → [영상 만들기] 탭으로 가져오기 → 6단계 진행 표시 → 결과 경로/폴더 열기."""
+    from fake_video_services import FakeEdgeTTS, make_test_clip, start_fake_pexels
+    from yt_monitor.video.ffmpeg import check_ffmpeg
+    from yt_monitor.video.pexels import PexelsClient
+    from yt_monitor.video.pipeline import VideoPipeline
+
+    ff = check_ffmpeg()
+    if not ff.ok:
+        pytest.skip("ffmpeg 없음")
+    server, url, _ = start_fake_ollama()
+    pex, pex_url, _ = start_fake_pexels({"a.mp4": make_test_clip(ff.path, tmp_path / "a.mp4", seconds=1)})
+    try:
+        path = make_config(tmp_path, url)
+        raw = read_raw(path)
+        raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
+                            subtitle_font_size=20, subtitle_margin_bottom=40)
+        raw["pexels"]["api_key"] = "fake"
+        save_config(raw, path)
+        cfg = load_config(path, load_env=False)
+        run_check(cfg, service=FakeYouTube(make_videos(40, 100), T0), notifier=FakeNotifier(),
+                  generate=False, now=T0)
+
+        app = gui.App(root, path, check_ollama_on_start=False)
+        app.video_pipeline_factory = lambda c: VideoPipeline(
+            c, pexels=PexelsClient("fake", api_url=pex_url, target_size=(180, 320)),
+            tts=FakeEdgeTTS(retry_delay=0))
+        opened = []
+        monkeypatch.setattr(gui, "open_path", lambda p, select=False: opened.append((p, select)))
+        pump(root, lambda: bool(app.analyses))
+
+        app.make_video()                                   # 대본 없음 → 안내만
+        assert dialogs[-1][0] == "showinfo" and app.video_result is None
+
+        app.generate_now()
+        pump(root, lambda: not app.busy and app.generation is not None)
+        # 생성 결과가 영상 탭에 자동으로 들어온다 (TTS용으로 정리된 대본)
+        script = app.video_script.get("1.0", "end")
+        assert "편의점" in script and "[효과음]" not in script and "#" not in script
+        assert app.video_title_var.get() == app.generation.title
+
+        app.video_script.delete("1.0", "end")
+        app.send_to_video()
+        assert app.nb.select() == str(app.video_tab) and "편의점" in app.video_script.get("1.0", "end")
+        app.video_title_var.set("GUI 테스트 영상")
+        app.voice_combo.current(1)
+
+        steps = []
+        orig = app._on_video_progress
+        app._on_video_progress = lambda n, t, m: (steps.append(n), orig(n, t, m))
+        app.make_video()
+        assert str(app.btn_generate["state"]) == "disabled"
+        pump(root, lambda: not app.busy, timeout=120)
+        assert not [d for d in dialogs if d[0] in ("showerror", "showwarning")], dialogs
+        assert steps == [1, 2, 3, 4, 5, 6]
+        res = app.video_result
+        assert res.video_path.exists() and res.video_path.name == "GUI_테스트_영상.mp4"
+        assert app.video_path_var.get() == str(res.video_path)
+        assert "완료" in app.video_step_var.get()
+        assert "6/6" in app.video_log.get("1.0", "end")
+        app.btn_open_folder.invoke()
+        assert opened == [(res.video_path, True)]
+        app.close()
+    finally:
+        server.shutdown()
+        pex.shutdown()
+
+
 def test_missing_model_closes_app(root, dialogs, tmp_path):
     server, url, _ = start_fake_ollama()
     try:
@@ -147,11 +215,13 @@ def test_setup_dialog_writes_config(root, dialogs, tmp_path):
     dlg.channels_text.insert("1.0", "@첫채널 | 첫 채널\n")
     dlg.vars["interval"].set("4")
     dlg.vars["threshold"].set("25")
+    dlg.vars["pexels_key"].set("pexels-key ")
     dlg._save()
     assert dlg.saved
     cfg = load_config(path, load_env=False)
     assert cfg.youtube_api_key == "AIza-key" and cfg.channels[0].label == "첫 채널"
     assert cfg.schedule["interval_hours"] == 4 and cfg.analysis["drop_threshold_pct"] == 25
+    assert cfg.pexels["api_key"] == "pexels-key" and cfg.video["width"] == 1080
 
     bad = gui.SetupDialog(root, tmp_path / "bad.yaml")
     bad._save()                                           # 필수값 없음 → 저장 안 됨

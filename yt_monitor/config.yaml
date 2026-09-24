@@ -57,11 +57,42 @@ ollama:                           # 로컬 LLM (https://ollama.com) — API 비�
   num_ctx: 8192
   timeout_sec: 900                # CPU만 있는 PC는 대본 생성에 수 분 걸릴 수 있음
 
+pexels:                           # 무료 스톡 영상 API — https://www.pexels.com/api/ 가입하면 즉시 발급
+  api_key: ""
+  api_key_env: PEXELS_API_KEY     # .env 에 PEXELS_API_KEY=... 로 넣어도 됨
+  orientation: portrait           # 쇼츠용 세로 영상 우선 (landscape | portrait | square)
+  per_page: 15                    # 키워드당 검색 결과 수
+  timeout_sec: 60
+
+video:                            # 대본 → 쇼츠 영상 자동 생성 (edge-tts + Pexels + ffmpeg)
+  ffmpeg_path: ""                 # 비우면 exe 옆 ffmpeg.exe → PATH 순서로 찾음
+  width: 1080
+  height: 1920                    # 9:16 세로
+  fps: 30
+  clip_max_seconds: 4             # 씬당 클립 길이. 씬이 이보다 길면 클립 여러 개로 나눠 붙임
+  min_scene_seconds: 2.5          # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
+  max_scene_chars: 90             # 씬 하나에 넣을 최대 글자 수
+  keywords_per_scene: 3           # Ollama가 뽑을 씬별 검색 키워드 수 (앞에서부터 검색)
+  tts_voice: ko-KR-SunHiNeural    # 여성. 남성: ko-KR-InJoonNeural / 영어: en-US-JennyNeural
+  tts_rate: "+10%"                # 말하기 속도
+  tts_volume: "+0%"
+  tts_pitch: "+0Hz"
+  tts_proxy: ""                   # 회사망 등에서 필요할 때만 (예: http://proxy:8080)
+  subtitle_font: Malgun Gothic    # 맑은 고딕 (Windows 기본). 굵게 표시됨
+  subtitle_font_size: 72          # 1080x1920 기준 픽셀
+  subtitle_max_chars: 14          # 자막 한 덩어리 최대 글자 수
+  subtitle_margin_bottom: 320     # 화면 아래에서 자막까지 거리(px). 쇼츠 버튼/설명에 안 가리게
+  subtitle_box_opacity: 0.6       # 자막 뒤 검은 박스 불투명도 (0~1)
+  crf: 21                         # 화질 (낮을수록 고화질·큰 파일, 18~28)
+  preset: veryfast                # 인코딩 속도 (ultrafast ~ slow)
+  keep_work_files: true           # 중간 파일(클립, 음성, ffmpeg 로그)을 <이름>_work/ 에 보관
+
 storage:
   db_path: data/yt_monitor.db     # 이 파일 기준 상대 경로
   reports_dir: reports            # 수집할 때마다 저장하는 채널 리포트
-  outputs_dir: outputs            # 생성한 주제/대본 (outputs/날짜/채널명.md)
-  prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt)
+  outputs_dir: outputs            # 생성한 주제/대본/영상 (outputs/날짜/채널명.md, 제목.mp4)
+  prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt, video_keywords.txt)
+  video_cache_dir: data/video_cache  # 다운로드한 스톡 영상 캐시 (지워도 됨)
 
 schedule:
   interval_hours: null            # 숫자를 넣으면 N시간 간격 (설정 창의 '체크 주기')

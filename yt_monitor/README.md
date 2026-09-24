@@ -1,14 +1,17 @@
 # YouTube 채널 성과 모니터 + 로컬 LLM 주제/대본 생성
 
 조회수 체크 → 성장 둔화 감지 → 다음 영상 주제/제목/대본 자동 생성 → 텔레그램 알림까지
-자동으로 처리하는 프로그램입니다. 무료 도구만 사용합니다:
-YouTube Data API 무료 쿼터, Telegram Bot API, **로컬 Ollama**(qwen2.5:7b). 유료 LLM API는 쓰지 않습니다.
+자동으로 처리하고, 대본을 **쇼츠 영상(mp4)**으로까지 만들어 주는 프로그램입니다. 무료 도구만 사용합니다:
+YouTube Data API 무료 쿼터, Telegram Bot API, **로컬 Ollama**(qwen2.5:7b), **Pexels**(무료 스톡 영상),
+**edge-tts**(무료 TTS), **ffmpeg**. 유료 API는 쓰지 않습니다.
 Windows용 **단일 exe**(`YouTubeMonitor.exe`)로 배포할 수 있습니다.
 
 ```
 YouTube Data API ─▶ SQLite 시계열 ─▶ 하락 감지 ─┬─▶ 리포트 (reports/날짜/)
                                               └─▶ Ollama 주제·제목·대본 생성 (outputs/날짜/채널명.md)
-                                                    └─▶ 텔레그램 알림 (요약 + 파일 첨부)
+                                                    ├─▶ 텔레그램 알림 (요약 + 파일 첨부)
+                                                    └─▶ 🎬 영상 생성: 씬 분리 → 키워드(Ollama) → Pexels 영상
+                                                          → edge-tts 음성 → 자막(SRT) → ffmpeg 합성 → outputs/날짜/제목.mp4
 ```
 
 ## 0. 먼저 확인할 것
@@ -20,6 +23,8 @@ YouTube Data API ─▶ SQLite 시계열 ─▶ 하락 감지 ─┬─▶ 리�
 | YouTube API 키 | 아래 발급 방법 참고 |
 | 채널 | `@핸들`, `UC…` 채널 ID, 채널 주소 중 아무거나 |
 | 텔레그램 봇 토큰 / chat_id | 아래 발급 방법 참고 (선택. 없으면 알림 없이 동작) |
+| ffmpeg (영상 생성) | 명령 프롬프트에서 `ffmpeg -version`. 없으면 [영상 생성](#3-대본--쇼츠-영상-자동-생성) 참고 |
+| Pexels API 키 (영상 생성) | <https://www.pexels.com/api/> 가입 즉시 무료 발급 (없으면 단색 배경으로 만듦) |
 
 - Ollama는 설치하면 백그라운드에서 서버(`localhost:11434`)가 자동으로 뜹니다.
   프로그램은 서버가 켜져 있는지와 모델이 있는지만 확인하며, **모델이 없으면
@@ -57,7 +62,7 @@ config.yaml        ← 설정 (API 키/토큰 포함 — 공유 금지)
 prompts/           ← 프롬프트 템플릿. 메모장으로 고치면 다음 생성부터 반영
 data/              ← SQLite DB (조회수 시계열)
 reports/           ← 체크할 때마다 저장되는 채널 리포트
-outputs/           ← 생성한 주제/대본 (날짜/채널명.md, 채널명_대본.txt)
+outputs/           ← 생성한 주제/대본 (날짜/채널명.md, 채널명_대본.txt), 영상 (날짜/제목.mp4)
 logs/              ← 실행 로그
 ```
 
@@ -72,7 +77,8 @@ logs/              ← 실행 로그
 | **자동 체크** 토글 | 켜면 설정한 주기마다 백그라운드로 체크 (APScheduler). 상태는 다음 실행에도 유지 |
 | 채널 목록 | 상태, 구독자, 최근/이전 변화율, 최근 7일 조회수, 14일 추이(스파크라인), 마지막 체크 |
 | **조회수 추이** 탭 | 선택한 채널의 지표, 최근 영상 성과, 상위 성과 영상, 패턴 |
-| **주제/대본** 탭 | 생성 결과(수정 가능). **주제 선택 → [선택한 주제로 대본 생성]**, **[💾 파일로 저장]** |
+| **주제/대본** 탭 | 생성 결과(수정 가능). **주제 선택 → [선택한 주제로 대본 생성]**, **[💾 파일로 저장]**, **[🎬 이 대본으로 영상 만들기]** |
+| **영상 생성** 탭 | 대본 입력(생성 결과가 자동으로 들어옴) → **[🎬 영상 만들기]** → 6단계 진행 표시 → 결과 경로 + **[📂 폴더 열기]** |
 | ⚙ 설정 / 📂 출력 폴더 | 설정 변경, outputs 폴더 열기 |
 
 창을 닫으면 자동 체크도 멈춥니다. 창 없이 계속 돌리고 싶다면 Windows **작업 스케줄러**에
@@ -97,7 +103,91 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 `{script_chars}`, `{channel_name}` 자리표시자만 값으로 바뀌고, 나머지 중괄호(JSON 예시 등)는 그대로 남습니다.
 원래대로 되돌리려면 파일을 지우세요. 다음 실행 때 기본본이 다시 복사됩니다.
 
-## 3. 성장 둔화 판단
+## 3. 대본 → 쇼츠 영상 자동 생성
+
+대본을 넣으면 스톡 영상 · 음성 · 자막을 붙여 **9:16 세로 mp4**를 만듭니다. 전부 무료입니다.
+
+| 단계 | 하는 일 | 사용 도구 |
+| --- | --- | --- |
+| 1/6 키워드 추출 | 대본을 문장/씬으로 나누고, 씬마다 영어 검색어 2~3개 추출 | 로컬 Ollama (`prompts/video_keywords.txt`). 꺼져 있으면 대본의 명사로 대신 검색 |
+| 2/6 영상 다운로드 | 검색어로 세로 영상 검색 → 출력 해상도에 맞는 파일 다운로드 (캐시) | Pexels API (시간당 200회 무료) |
+| 3/6 TTS 음성 | 씬마다 음성 합성 + 단어별 타임스탬프 | edge-tts (키 불필요, 한국어/영어) |
+| 4/6 자막 | 타임스탬프로 14자 안팎의 짧은 자막 덩어리 생성 → SRT | 직접 생성 |
+| 5/6 합성 | 씬 길이에 맞춰 클립 이어붙이기 (짧으면 반복, 길면 자름, 가운데 크롭) + 음성 삽입 (배경음악 없음) | ffmpeg |
+| 6/6 저장 | 자막 번인 (하단 중앙, 굵은 글씨, 반투명 검은 박스) → `outputs/날짜/제목.mp4` | ffmpeg (libass) |
+
+결과 파일 (`outputs/2026-09-24/`):
+```
+제목.mp4          ← 완성 영상 (1080x1920, 30fps, H.264 + AAC)
+제목.srt          ← 자막 파일 (유튜브에 따로 올리거나 편집용)
+제목_출처.txt      ← 사용한 Pexels 영상 작가/주소 (설명란에 넣으면 좋음)
+제목_work/        ← 중간 파일: 클립(shots/), 씬별 음성(tts/), scenes.json, ffmpeg 로그(logs/)
+```
+
+### 먼저 준비할 것
+
+**1) ffmpeg 설치** — 프로그램이 시작 시 확인하고, 없으면 아래 안내를 띄웁니다.
+- Windows: 명령 프롬프트에서 `winget install Gyan.FFmpeg` → 프로그램 재실행
+- 또는 <https://www.gyan.dev/ffmpeg/builds/>에서 `ffmpeg-release-essentials.zip`을 받아 `bin\ffmpeg.exe`를
+  `YouTubeMonitor.exe` 옆에 복사 (또는 `config.yaml`의 `video.ffmpeg_path`에 경로 입력)
+- 확인: `YouTubeMonitor.exe --check-ffmpeg` (또는 `python main.py --check-ffmpeg`)
+
+**2) Pexels API 키 (무료)**
+1. <https://www.pexels.com/api/>에 가입/로그인합니다.
+2. **Your API Key** 페이지에서 사용 목적(예: 개인 유튜브 영상 제작)을 적으면 키가 바로 발급됩니다.
+3. 프로그램 **⚙ 설정 → Pexels API 키**에 붙여넣습니다. (`.env`의 `PEXELS_API_KEY`도 가능)
+
+키가 없으면 스톡 영상 대신 단색 배경으로 만들지 물어봅니다.
+
+### 사용법 (GUI)
+1. **✨ 새 주제/대본 생성**으로 대본을 만들면 **영상 생성** 탭에 대본과 제목이 자동으로 들어갑니다.
+   (다른 대본은 직접 붙여넣거나 **[📥 주제/대본 탭에서 가져오기]**)
+2. 음성을 고르고 **[🎬 영상 만들기]**. `1/6 씬 분리 · 키워드 추출 중…` 처럼 진행 상황과 로그가 표시됩니다.
+3. 끝나면 결과 경로와 **[📂 폴더 열기] [▶ 영상 열기]** 버튼이 활성화됩니다.
+
+명령줄: `python main.py --make-video 대본.txt --title "편의점 꿀조합" [--voice ko-KR-InJoonNeural]`
+
+### 영상 설정 (`config.yaml` → `video:`)
+| 설정 | 기본값 | 의미 |
+| --- | --- | --- |
+| `clip_max_seconds` | 4 | **씬당 클립 길이.** 씬이 이보다 길면 클립 여러 개로 나눠 화면을 바꿈 |
+| `min_scene_seconds` / `max_scene_chars` | 2.5 / 90 | 짧은 문장은 다음 문장과 합쳐 한 씬으로 / 씬 최대 글자 수 |
+| `tts_voice` / `tts_rate` | `ko-KR-SunHiNeural` / `+10%` | 음성(남성: `ko-KR-InJoonNeural`) / 말하기 속도 |
+| `subtitle_font` / `subtitle_font_size` | `Malgun Gothic` / 72 | 자막 폰트(굵게) / 크기(1080x1920 기준 px) |
+| `subtitle_max_chars` | 14 | 자막 한 덩어리 최대 글자 수 |
+| `subtitle_margin_bottom` | 320 | 화면 아래에서 자막까지 거리(px). 쇼츠 버튼/설명에 가리지 않게 |
+| `subtitle_box_opacity` | 0.6 | 자막 뒤 검은 박스 불투명도 (0~1) |
+| `width` / `height` / `fps` | 1080 / 1920 / 30 | 출력 해상도 (9:16) |
+| `crf` / `preset` | 21 / `veryfast` | 화질 / 인코딩 속도 |
+| `keep_work_files` | true | 중간 파일과 ffmpeg 로그를 `제목_work/`에 남김 |
+
+`pexels:`에서 `orientation`(기본 `portrait`), `per_page`를 바꿀 수 있습니다.
+
+### 단계별 단독 테스트 (각 단계의 결과 파일을 직접 확인)
+저장소 루트에서 실행하며, 결과는 `samples/` 아래에 생깁니다.
+
+| 단계 | 명령 | 결과물 |
+| --- | --- | --- |
+| 0) ffmpeg 확인 | `python -m yt_monitor.video.ffmpeg` | 버전, libass/libx264 지원 여부 |
+| 1) Pexels | `python -m yt_monitor.video.pexels "ocean waves" "coffee" --out samples/pexels` | 키워드별 mp4 다운로드 |
+| 2) TTS | `python -m yt_monitor.video.tts "안녕하세요. 테스트입니다." --out samples/tts` | `tts.mp3`, `tts_words.json`(단어 타이밍), `tts.srt` |
+| 3) 자막 | `python -m yt_monitor.video.subtitles 대본.txt --words samples/tts/tts_words.json` | `samples/subs/subtitles.srt`, `.ass` |
+| 4) 합성 | `python -m yt_monitor.video.compose --out samples/compose` | 인터넷 없이 테스트 패턴으로 `01_clips.mp4` → `02_with_audio.mp4` → `03_final.mp4` (`--step concat`/`audio`로 중간까지만) |
+| 4) 합성 (내 파일) | `python -m yt_monitor.video.compose --clips a.mp4 b.mp4 --audio samples/tts/tts.mp3` | 받은 클립 + TTS 음성으로 합성 |
+| 씬/키워드 | `python -m yt_monitor.video.scenes 대본.txt` | 씬 분리 결과와 Ollama 키워드 |
+| 5) 전체 | `python -m yt_monitor.video.pipeline 대본.txt --title 제목` | `outputs/날짜/제목.mp4` |
+| 5) 전체 (오프라인) | `python -m yt_monitor.video.pipeline 대본.txt --offline` | 무음 + 단색 배경으로 합성만 확인 |
+
+### 문제 해결
+- **ffmpeg 오류**: 오류 창에 ffmpeg 출력 마지막 15줄과 로그 파일 경로가 나옵니다.
+  `제목_work/logs/NN_단계.log`에 실행한 **명령줄 전체**, 작업 폴더, 종료 코드, ffmpeg 출력이 모두 남으니
+  명령줄을 복사해 명령 프롬프트에서 그대로 다시 실행해 볼 수 있습니다. 프로그램 로그는 `logs/yt_monitor.log`.
+- **자막이 네모(□)로 나옴**: `subtitle_font`에 PC에 설치된 한글 폰트 이름을 넣으세요 (예: `NanumGothic`).
+- **TTS 실패**: edge-tts는 인터넷(`speech.platform.bing.com`)이 필요합니다. 회사망이면 `video.tts_proxy`에 프록시 주소를 넣으세요.
+- **영상이 주제와 안 맞음**: `prompts/video_keywords.txt`를 고치거나, 대본에 구체적인 장면(사물·장소·행동)을 넣으면 좋아집니다.
+  Pexels는 영어 검색 결과가 훨씬 많으니 Ollama를 켜 두는 것을 권장합니다.
+
+## 4. 성장 둔화 판단
 
 | 설정 (`analysis`) | 기본값 | 의미 |
 | --- | --- | --- |
@@ -110,7 +200,7 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 
 채널별로 다른 임계값을 쓰려면 `config.yaml`의 채널 항목에 `analysis:`를 추가하세요.
 
-## 4. 소스로 실행 / 단계별 단독 테스트
+## 5. 소스로 실행 / 단계별 단독 테스트
 
 ```bash
 cd yt_monitor
@@ -135,6 +225,7 @@ python main.py --schedule                # 창 없이 주기 실행
 | 3) 생성 | `python -m yt_monitor.generator --demo` | 예시 채널 데이터로 주제·대본 생성 → outputs/ |
 | 4) 감지+알림 | `python main.py --check-now` / `--test-telegram` | 둔화 판단, 자동 생성, 텔레그램 |
 | 5) GUI | `python -m yt_monitor.gui` | 창 실행 |
+| 영상 | `python -m yt_monitor.video.pipeline 대본.txt` | 대본 → mp4 ([3. 영상 생성](#3-대본--쇼츠-영상-자동-생성)의 단계별 테스트 참고) |
 | 6) 빌드 | `python yt_monitor/build_exe.py` | `yt_monitor/dist/YouTubeMonitor(.exe)` |
 
 ### exe 직접 빌드 (Windows)
@@ -147,9 +238,10 @@ PyInstaller는 크로스 컴파일을 하지 않으므로 **Windows exe는 Windo
 macOS나 Linux에서 같은 명령을 실행하면 해당 OS용 실행 파일이 만들어집니다.
 
 ### 테스트
-YouTube, Ollama, 텔레그램은 가짜 서버와 객체로 대체되므로 키나 모델이 없어도 됩니다.
+YouTube, Ollama, 텔레그램, Pexels, edge-tts는 가짜 서버와 객체로 대체되므로 키나 모델이 없어도 됩니다.
+영상 합성 테스트는 ffmpeg가 설치되어 있을 때만 실행됩니다.
 ```bash
-pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py
+pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py
 # 리눅스 서버처럼 화면이 없으면: xvfb-run -a pytest ...
 ```
 

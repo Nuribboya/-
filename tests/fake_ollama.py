@@ -21,6 +21,15 @@ TOPICS_JSON = {
     "best": 2,
 }
 
+KEYWORDS_JSON = {
+    "scenes": [
+        {"scene": 1, "keywords": ["convenience store", "snack shelf", "night street"]},
+        {"scene": 2, "keywords": ["instant noodles", "rice ball"]},
+        {"scene": 3, "keywords": ["yogurt granola", "breakfast bowl"]},
+        {"scene": 4, "keywords": ["subscribe button", "smartphone"]},
+    ]
+}
+
 SCRIPT_TEXT = """# 대본
 제목: 편의점 신상 조합 TOP5
 
@@ -59,8 +68,12 @@ class _Handler(BaseHTTPRequestHandler):
         type(self).requests_log.append(payload)
         if payload["model"] not in self.models:
             return self._json(404, {"error": f"model '{payload['model']}' not found"})
-        content = (json.dumps(TOPICS_JSON, ensure_ascii=False) if payload.get("format") == "json"
-                   else SCRIPT_TEXT)
+        prompt = payload["messages"][-1]["content"]
+        if payload.get("format") == "json":
+            data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON
+            content = json.dumps(data, ensure_ascii=False)
+        else:
+            content = SCRIPT_TEXT
         if not payload.get("stream"):
             return self._json(200, {"message": {"role": "assistant", "content": content}, "done": True})
         self.send_response(200)

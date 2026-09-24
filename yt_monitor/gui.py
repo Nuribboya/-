@@ -1,4 +1,4 @@
-"""tkinter GUI: 채널 현황 · 지금 체크 · 주제/대본 생성 · 자동 체크 토글 · 설정.
+"""tkinter GUI: 채널 현황 · 지금 체크 · 주제/대본 생성 · 영상 생성 · 자동 체크 토글 · 설정.
 
 스레드 규칙: 오래 걸리는 작업(YouTube 수집, Ollama 생성, 스케줄러 작업)은 백그라운드 스레드에서
 돌리고, 화면 갱신은 self.ui(...)로 큐에 넣어 Tk 메인 스레드에서만 실행한다.
@@ -12,6 +12,7 @@ import logging
 import os
 import queue
 import re
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -134,6 +135,19 @@ def channel_lines(channels: list) -> str:
     return "\n".join(lines)
 
 
+def open_path(path: Path, select: bool = False) -> None:
+    """파일/폴더를 OS 기본 프로그램으로 연다. select=True면 탐색기에서 그 파일을 선택한 채로 연다."""
+    path = Path(path)
+    if sys.platform == "win32":
+        if select and path.is_file():
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            os.startfile(path if not select else path.parent)  # type: ignore[attr-defined]
+    else:
+        target = path.parent if select and path.is_file() else path
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(target)])
+
+
 # ---- 설정 창 ----------------------------------------------------------------------
 
 class SetupDialog(tk.Toplevel):
@@ -158,6 +172,7 @@ class SetupDialog(tk.Toplevel):
         self.vars: dict[str, tk.Variable] = {
             "api_key": tk.StringVar(value=r["youtube"].get("api_key") or ""),
             "bot_token": tk.StringVar(value=r["telegram"].get("bot_token") or ""),
+            "pexels_key": tk.StringVar(value=r["pexels"].get("api_key") or ""),
             "chat_id": tk.StringVar(value=str(r["telegram"].get("chat_id") or "")),
             "interval": tk.StringVar(value=str(r["schedule"].get("interval_hours") or 6)),
             "model": tk.StringVar(value=r["ollama"]["model"]),
@@ -189,6 +204,9 @@ class SetupDialog(tk.Toplevel):
         field("텔레그램 chat_id", "chat_id", width=20)
         ttk.Button(frm, text="chat_id 찾기", command=self._find_chat_id).grid(
             row=row - 1, column=1, sticky="e")
+        field("Pexels API 키", "pexels_key", hint="영상 생성용 (무료)")
+        ttk.Button(frm, text="발급 페이지 열기", command=self._open_pexels).grid(
+            row=row - 1, column=2, sticky="e", padx=6)
         field("체크 주기(시간)", "interval", width=8)
         field("하락 임계값(%)", "threshold", width=8, hint="최근 영상이 이전보다 이만큼 떨어지면 알림")
         field("Ollama 모델", "model", width=24, hint="기본 qwen2.5:7b")
@@ -203,6 +221,14 @@ class SetupDialog(tk.Toplevel):
         ttk.Button(btns, text="취소", command=self.destroy).pack(side="right")
         self.bind("<Escape>", lambda _e: self.destroy())
         self.grab_set()
+
+    def _open_pexels(self):
+        import webbrowser
+
+        from .video.pexels import KEY_HELP, SIGNUP_URL
+
+        webbrowser.open(SIGNUP_URL)
+        messagebox.showinfo("Pexels API 키", KEY_HELP, parent=self)
 
     def _find_chat_id(self):
         token = self.vars["bot_token"].get().strip()
@@ -259,6 +285,7 @@ class SetupDialog(tk.Toplevel):
         r["youtube"]["api_key"] = v["api_key"].strip()
         r["telegram"]["bot_token"] = v["bot_token"].strip()
         r["telegram"]["chat_id"] = v["chat_id"].strip()
+        r["pexels"]["api_key"] = v["pexels_key"].strip()
         r["schedule"]["interval_hours"] = interval
         r["analysis"]["drop_threshold_pct"] = threshold
         r["ollama"]["model"] = v["model"].strip() or "qwen2.5:7b"
@@ -291,6 +318,9 @@ class App:
         self.ollama_ok = False
         self.closed = False
         self._gains: dict[str, list[float]] = {}
+        self.video_result = None
+        # 테스트에서 가짜 Pexels/TTS를 넣을 수 있게 파이프라인 생성을 함수로 둔다
+        self.video_pipeline_factory: Callable = self._default_video_pipeline
 
         root.title(APP_TITLE)
         root.geometry("1000x700")
@@ -370,10 +400,65 @@ class App:
         self.btn_cancel = ttk.Button(bar, text="취소", command=self.cancel, state="disabled")
         self.btn_cancel.pack(side="left", padx=4)
         ttk.Button(bar, text="💾 파일로 저장", command=self.save_result).pack(side="right")
+        ttk.Button(bar, text="🎬 이 대본으로 영상 만들기", command=self.send_to_video).pack(side="right", padx=4)
         self.result_box = scrolledtext.ScrolledText(gen_tab, wrap="word", font=self.text_font, undo=True)
         self.result_box.pack(fill="both", expand=True)
         self.nb.add(gen_tab, text="주제/대본")
+        self._build_video_tab()
         paned.add(self.nb, weight=3)
+
+    def _build_video_tab(self):
+        from .video.tts import VOICES
+
+        tab = ttk.Frame(self.nb)
+        self.video_tab = tab
+        row1 = ttk.Frame(tab, padding=(0, 6))
+        row1.pack(fill="x")
+        ttk.Label(row1, text="제목(파일명):").pack(side="left")
+        self.video_title_var = tk.StringVar()
+        ttk.Entry(row1, textvariable=self.video_title_var, width=34).pack(side="left", padx=4)
+        ttk.Label(row1, text="음성:").pack(side="left", padx=(8, 0))
+        self.voice_var = tk.StringVar()
+        self.voice_combo = ttk.Combobox(row1, textvariable=self.voice_var, width=30,
+                                        values=[f"{k}  {v}" for k, v in VOICES.items()])
+        self.voice_combo.pack(side="left", padx=4)
+        ttk.Button(row1, text="📥 주제/대본 탭에서 가져오기", command=self.import_script).pack(side="right")
+
+        # 아래쪽 줄(진행/로그/결과)을 먼저 붙여야 창이 작아도 결과 경로와 버튼이 가려지지 않는다
+        row3 = ttk.Frame(tab, padding=(0, 6))
+        row3.pack(side="bottom", fill="x")
+        ttk.Label(row3, text="결과:").pack(side="left")
+        self.video_path_var = tk.StringVar(value="-")
+        ttk.Entry(row3, textvariable=self.video_path_var, state="readonly").pack(
+            side="left", fill="x", expand=True, padx=4)
+        self.btn_open_video = ttk.Button(row3, text="▶ 영상 열기", state="disabled",
+                                         command=lambda: self._open_result(select=False))
+        self.btn_open_video.pack(side="right")
+        self.btn_open_folder = ttk.Button(row3, text="📂 폴더 열기", state="disabled",
+                                          command=lambda: self._open_result(select=True))
+        self.btn_open_folder.pack(side="right", padx=4)
+
+        self.video_log = scrolledtext.ScrolledText(tab, wrap="word", font=self.text_font, height=5)
+        self.video_log.configure(state="disabled")
+        self.video_log.pack(side="bottom", fill="x")
+
+        row2 = ttk.Frame(tab, padding=(0, 6))
+        row2.pack(side="bottom", fill="x")
+        self.btn_video = ttk.Button(row2, text="🎬 영상 만들기", command=self.make_video)
+        self.btn_video.pack(side="left")
+        self.btn_video_cancel = ttk.Button(row2, text="취소", command=self.cancel, state="disabled")
+        self.btn_video_cancel.pack(side="left", padx=4)
+        self.video_progress = ttk.Progressbar(row2, mode="determinate", maximum=6, length=160)
+        self.video_progress.pack(side="left", padx=8)
+        self.video_step_var = tk.StringVar(value="대본을 넣고 [영상 만들기]를 누르세요.")
+        ttk.Label(row2, textvariable=self.video_step_var).pack(side="left")
+
+        ttk.Label(tab, text="대본 (한 줄에 한 문장 권장. [효과음], (화면 전환), 이모지, 마크다운은 자동으로 빠집니다)",
+                  foreground="#777").pack(anchor="w")
+        self.video_script = scrolledtext.ScrolledText(tab, wrap="word", font=self.text_font, height=6, undo=True)
+        self.video_script.pack(fill="both", expand=True)
+
+        self.nb.add(tab, text="영상 생성")
 
 
     # ---- 스레드 도우미 ------------------------------------------------------------
@@ -399,9 +484,10 @@ class App:
     def _set_busy(self, busy: bool, text: str | None = None, cancellable: bool = False):
         self.busy = busy
         state = "disabled" if busy else "normal"
-        for b in (self.btn_check, self.btn_generate, self.btn_rescript):
+        for b in (self.btn_check, self.btn_generate, self.btn_rescript, self.btn_video):
             b.configure(state=state)
-        self.btn_cancel.configure(state="normal" if busy and cancellable else "disabled")
+        for b in (self.btn_cancel, self.btn_video_cancel):
+            b.configure(state="normal" if busy and cancellable else "disabled")
         if busy:
             self.progress.start(12)
         else:
@@ -421,9 +507,10 @@ class App:
                 result = work()
             except Exception as exc:
                 from .ollama_client import GenerationCancelled
+                from .video.ffmpeg import Cancelled
 
-                if isinstance(exc, GenerationCancelled):
-                    self.ui(lambda: self._set_busy(False, "생성을 취소했습니다."))
+                if isinstance(exc, (GenerationCancelled, Cancelled)):
+                    self.ui(lambda: self._set_busy(False, "작업을 취소했습니다."))
                     return
                 log.exception("작업 실패: %s", text)
                 msg = f"{type(exc).__name__}: {exc}" if not str(exc).startswith(("Ollama", "모델")) else str(exc)
@@ -717,6 +804,8 @@ class App:
         self.topic_combo.configure(values=[f"{i + 1}. {t['topic']}" for i, t in enumerate(g.topics)])
         if g.selected is not None:
             self.topic_combo.current(g.selected)
+        if g.script_lines and not self.video_script.get("1.0", "end").strip():
+            self._fill_video_script(g.script, g.title or "")
         self.status_var.set(f"생성 완료 — 저장됨: {g.output_path}")
 
     def save_result(self):
@@ -738,10 +827,113 @@ class App:
     def open_outputs(self):
         out = self.cfg.outputs_dir
         out.mkdir(parents=True, exist_ok=True)
-        if hasattr(os, "startfile"):
-            os.startfile(out)  # type: ignore[attr-defined]
-        else:
+        try:
+            open_path(out)
+        except OSError:
             messagebox.showinfo(APP_TITLE, f"출력 폴더: {out}")
+
+    # ---- 영상 생성 ----------------------------------------------------------------------
+
+    def _default_video_pipeline(self, cfg):
+        from .video.pipeline import VideoPipeline
+
+        return VideoPipeline(cfg)
+
+    def _fill_video_script(self, script: str, title: str):
+        self.video_script.delete("1.0", "end")
+        self.video_script.insert("1.0", script)
+        if title:
+            self.video_title_var.set(title)
+
+    def import_script(self):
+        """주제/대본 탭의 결과를 영상 탭으로 가져온다 (생성 결과가 있으면 TTS용으로 정리된 대본)."""
+        g = self.generation
+        if g is not None and g.script_lines:
+            self._fill_video_script(g.script, g.title or (g.selected_topic or {}).get("topic", ""))
+            return True
+        from .generator import tts_lines
+
+        lines = tts_lines(self.result_box.get("1.0", "end"))
+        if not lines:
+            messagebox.showinfo(APP_TITLE, "가져올 대본이 없습니다. [✨ 새 주제/대본 생성]을 먼저 하거나 "
+                                "대본을 직접 붙여넣으세요.")
+            return False
+        self._fill_video_script("\n".join(lines), "")
+        return True
+
+    def send_to_video(self):
+        if self.import_script():
+            self.nb.select(self.video_tab)
+
+    def _video_log(self, msg: str):
+        def append():
+            self.video_log.configure(state="normal")
+            self.video_log.insert("end", msg + "\n")
+            self.video_log.see("end")
+            self.video_log.configure(state="disabled")
+        self.ui(append)
+
+    def _on_video_progress(self, n: int, total: int, msg: str):
+        text = f"{n}/{total} {msg}"
+
+        def apply():
+            self.video_progress.configure(maximum=total, value=n - 1)
+            self.video_step_var.set(text)
+            self.status_var.set(text)
+        self.ui(apply)
+        self._video_log(f"▶ {text}")
+
+    def make_video(self):
+        from .video.ffmpeg import check_ffmpeg
+        from .video.pexels import KEY_HELP
+
+        script = self.video_script.get("1.0", "end").strip()
+        if not script:
+            messagebox.showinfo(APP_TITLE, "대본을 입력하거나 [📥 주제/대본 탭에서 가져오기]를 누르세요.")
+            return
+        ff = check_ffmpeg(self.cfg.video.get("ffmpeg_path"))
+        if not ff.ok:
+            messagebox.showerror(APP_TITLE, ff.message)
+            return
+        if not self.cfg.secret("pexels", "api_key", required=False):
+            if not messagebox.askyesno(APP_TITLE, KEY_HELP + "\n\n지금은 키 없이 단색 배경으로 만들까요?"):
+                return
+        title = self.video_title_var.get().strip() or "영상"
+        voice = self.voice_var.get().split()[0] if self.voice_var.get().strip() else None
+        self.cancel_event = threading.Event()
+        cancel = self.cancel_event
+        self.video_progress.configure(value=0)
+        self.video_path_var.set("-")
+        self.btn_open_folder.configure(state="disabled")
+        self.btn_open_video.configure(state="disabled")
+        self.video_log.configure(state="normal")
+        self.video_log.delete("1.0", "end")
+        self.video_log.configure(state="disabled")
+        pipeline = self.video_pipeline_factory(self.cfg)
+        self.run_bg("영상 생성 중…",
+                    lambda: pipeline.run(script, title, voice=voice, on_progress=self._on_video_progress,
+                                         on_status=self._video_log, cancel=cancel),
+                    self._on_video_done, cancellable=True)
+
+    def _on_video_done(self, res):
+        self.video_result = res
+        self.video_progress.configure(value=self.video_progress["maximum"])
+        self.video_step_var.set(f"✅ 완료 ({res.duration:.1f}초)")
+        self.video_path_var.set(str(res.video_path))
+        self.btn_open_folder.configure(state="normal")
+        self.btn_open_video.configure(state="normal")
+        self.status_var.set(f"영상 생성 완료 — {res.video_path}")
+        if res.warnings:
+            messagebox.showwarning(APP_TITLE, "영상은 만들어졌지만 확인할 점이 있습니다:\n\n" +
+                                   "\n".join(f"· {w}" for w in res.warnings[:8]))
+
+    def _open_result(self, select: bool):
+        if self.video_result is None:
+            return
+        try:
+            open_path(self.video_result.video_path, select=select)
+        except OSError as exc:
+            messagebox.showinfo(APP_TITLE, f"{self.video_result.video_path}\n\n({exc})")
 
     def close(self):
         if self.closed:
