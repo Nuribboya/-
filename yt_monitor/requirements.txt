@@ -1,0 +1,5 @@
+google-api-python-client>=2.100
+APScheduler>=3.10,<4
+python-telegram-bot>=21
+python-dotenv>=1.0
+PyYAML>=6.0
