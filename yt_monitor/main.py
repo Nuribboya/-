@@ -13,6 +13,8 @@
     python main.py --make-video 대본.txt --title "제목"   # 대본 → 쇼츠 mp4 (outputs/날짜/제목.mp4)
     python main.py --make-video 대본.txt --offline        # 인터넷 없이 합성만 확인 (무음 + 단색 배경)
     python main.py --check-ffmpeg          # ffmpeg 설치 확인 (영상 생성에 필요)
+    python main.py --trends                # 최근 유행 쇼츠 분석 → 주제/쇼츠 대본 (outputs/날짜/트렌드.md)
+    python main.py --trends --with-video   # + 영상까지 (작업 스케줄러에 매일 등록하면 자동 쇼츠 공장)
 
 exe(창 모드)에서도 같은 옵션을 쓸 수 있습니다. 예) Windows 작업 스케줄러에
 `YouTubeMonitor.exe --check-now` 등록. 이때 출력은 logs/yt_monitor.log 에 남습니다.
@@ -93,11 +95,13 @@ def run_cli(argv: list[str]) -> int:
     mode.add_argument("--get-chat-id", action="store_true", help="봇에게 메시지 보낸 채팅방 ID 조회")
     mode.add_argument("--make-video", metavar="대본파일", help="대본 → 쇼츠 영상(mp4) 생성")
     mode.add_argument("--check-ffmpeg", action="store_true", help="ffmpeg 설치 확인")
+    mode.add_argument("--trends", action="store_true", help="최근 유행 쇼츠 분석 → 주제/쇼츠 대본 생성")
     parser.add_argument("--config", default=str(default_config_path()), help="설정 파일 경로")
     parser.add_argument("--dry-run", action="store_true", help="텔레그램 알림을 보내지 않음")
     parser.add_argument("--no-generate", action="store_true", help="둔화 시 자동 생성을 하지 않음")
     parser.add_argument("--title", help="--make-video: 영상 제목(파일 이름). 생략하면 대본 파일 이름")
     parser.add_argument("--voice", help="--make-video: edge-tts 음성 (예: ko-KR-InJoonNeural)")
+    parser.add_argument("--with-video", action="store_true", help="--trends: 대본으로 영상까지 생성")
     parser.add_argument("--offline", action="store_true",
                         help="--make-video: 인터넷 없이 무음 + 단색 배경으로 합성만 확인")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -106,7 +110,7 @@ def run_cli(argv: list[str]) -> int:
 
     if args.gui or not any((args.check_now, args.analyze_only, args.generate, args.check_ollama,
                             args.schedule, args.test_telegram, args.get_chat_id, args.make_video,
-                            args.check_ffmpeg)):
+                            args.check_ffmpeg, args.trends)):
         from yt_monitor.gui import run_gui
 
         return run_gui(args.config)
@@ -136,6 +140,26 @@ def run_cli(argv: list[str]) -> int:
             from yt_monitor.generator import main as generator_main
 
             return generator_main(["--channel", args.generate, "--config", args.config])
+
+        if args.trends:
+            from yt_monitor.pipeline import redact_secrets
+            from yt_monitor.trends import run_trends
+
+            try:
+                res = run_trends(cfg, on_status=lambda m: print(f"▶ {m}", flush=True))
+                g = res.generation
+                print("\n" + res.table + f"\n\n✅ 주제/대본: {g.output_path}\n🎬 제목: {g.title}")
+                if args.with_video:
+                    from yt_monitor.video.pipeline import VideoPipeline
+
+                    v = VideoPipeline(cfg).run(g.script, g.title or "트렌드",
+                                               on_progress=lambda n, t, m: print(f"[{n}/{t}] {m}", flush=True))
+                    print(f"🎬 영상: {v.video_path}")
+            except Exception as exc:
+                logging.getLogger("yt_monitor").exception("유행 쇼츠 분석 실패")
+                print(f"\n❌ 실패: {redact_secrets(str(exc))}", file=sys.stderr)
+                return 1
+            return 0
 
         if args.make_video:
             from yt_monitor.video.pipeline import VideoPipeline

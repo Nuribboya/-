@@ -73,9 +73,11 @@ logs/              ← 실행 로그
 | 영역 | 기능 |
 | --- | --- |
 | **▶ 지금 체크하기** | YouTube에서 통계 수집 → 분석 → 리포트 저장. 둔화가 감지되면 주제/대본 자동 생성 + 텔레그램 알림 |
+| **🔥 유행 쇼츠 분석** | 최근 며칠 한국에서 조회수가 빠르게 오른 쇼츠를 분석 → 지금 뜨는 주제 추천 → 50초 쇼츠 대본 (→ 체크하면 영상까지) |
 | **✨ 새 주제/대본 생성** | 선택한 채널의 주제/대본을 바로 생성 (Ollama 호출, 글자가 생성되는 대로 표시, 취소 가능) |
 | **자동 체크** 토글 | 켜면 설정한 주기마다 백그라운드로 체크 (APScheduler). 상태는 다음 실행에도 유지 |
 | 채널 목록 | 상태, 구독자, 최근/이전 변화율, 최근 7일 조회수, 14일 추이(스파크라인), 마지막 체크 |
+| **🔥 트렌드** 탭 | 유행 쇼츠 순위 (시간당 조회수, 조회수, 구독자, 🔥 떡상 표시), "대본 생성 후 영상까지 자동으로 만들기" 체크박스 |
 | **조회수 추이** 탭 | 선택한 채널의 지표, 최근 영상 성과, 상위 성과 영상, 패턴 |
 | **주제/대본** 탭 | 생성 결과(수정 가능). **주제 선택 → [선택한 주제로 대본 생성]**, **[💾 파일로 저장]**, **[🎬 이 대본으로 영상 만들기]** |
 | **영상 생성** 탭 | 대본 입력(생성 결과가 자동으로 들어옴) → **[🎬 영상 만들기]** → 6단계 진행 표시 → 결과 경로 + **[📂 폴더 열기]** |
@@ -102,6 +104,21 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 `{channel_data}`, `{topic}`, `{title}`, `{reason}`, `{num_topics}`, `{num_titles}`, `{script_minutes}`,
 `{script_chars}`, `{channel_name}` 자리표시자만 값으로 바뀌고, 나머지 중괄호(JSON 예시 등)는 그대로 남습니다.
 원래대로 되돌리려면 파일을 지우세요. 다음 실행 때 기본본이 다시 복사됩니다.
+
+## 🔥 유행 쇼츠 분석 → 영상
+
+유튜브는 알고리즘 점수를 공개하지 않으므로, **최근 올라왔는데 조회수가 빠르게 오르는 쇼츠**를 찾아 유행을 추정합니다.
+
+1. **수집** (YouTube Data API, 1회 약 210 unit / 무료 하루 10,000)
+   - 한국 인기 급상승 목록 + 최근 3일 조회수 상위 짧은 영상 검색 (검색어 없음, `#shorts`)
+   - 3분 이하 · 최근 3일 · 조회수 1만 이상 · 한글 제목만 남김
+2. **분석**: 시간당 조회수로 순위, 조회수가 구독자의 3배 이상이면 🔥 떡상(작은 채널이 알고리즘을 탄 경우), 반복 키워드
+3. **주제 추천** (Ollama, `prompts/trend_topics.txt`): 유행의 공통점을 탄 주제 5개. 스톡 영상 + 내레이션으로 만들 수 있는 주제 위주
+4. **쇼츠 대본** (`prompts/shorts_script.txt`): 약 50초, 첫 문장 훅 → `outputs/날짜/트렌드.md`, `트렌드_대본.txt`
+5. **영상**: 영상 생성 탭에 대본이 자동으로 들어갑니다. "대본 생성 후 영상까지 자동으로 만들기"를 켜면 바로 mp4까지.
+
+매일 자동으로 돌리려면 Windows **작업 스케줄러**에 `YouTubeMonitor.exe --trends --with-video`를 등록하세요.
+설정은 `config.yaml`의 `trends:` (`lookback_days`, `search_queries`, `min_views`, `script_seconds` 등).
 
 ## 3. 대본 → 쇼츠 영상 자동 생성
 
@@ -224,6 +241,7 @@ python main.py --schedule                # 창 없이 주기 실행
 | 3) Ollama | `python -m yt_monitor.ollama_client --check` / `--prompt "안녕"` | 서버/모델 확인, 스트리밍 응답 |
 | 3) 생성 | `python -m yt_monitor.generator --demo` | 예시 채널 데이터로 주제·대본 생성 → outputs/ |
 | 4) 감지+알림 | `python main.py --check-now` / `--test-telegram` | 둔화 판단, 자동 생성, 텔레그램 |
+| 트렌드 | `python -m yt_monitor.trends` / `--generate` | 유행 쇼츠 목록 / + 주제·대본 |
 | 5) GUI | `python -m yt_monitor.gui` | 창 실행 |
 | 영상 | `python -m yt_monitor.video.pipeline 대본.txt` | 대본 → mp4 ([3. 영상 생성](#3-대본--쇼츠-영상-자동-생성)의 단계별 테스트 참고) |
 | 6) 빌드 | `python yt_monitor/build_exe.py` | `yt_monitor/dist/YouTubeMonitor(.exe)` |
@@ -241,7 +259,7 @@ macOS나 Linux에서 같은 명령을 실행하면 해당 OS용 실행 파일이
 YouTube, Ollama, 텔레그램, Pexels, edge-tts는 가짜 서버와 객체로 대체되므로 키나 모델이 없어도 됩니다.
 영상 합성 테스트는 ffmpeg가 설치되어 있을 때만 실행됩니다.
 ```bash
-pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py
+pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py
 # 리눅스 서버처럼 화면이 없으면: xvfb-run -a pytest ...
 ```
 

@@ -35,6 +35,21 @@ DEFAULT_ANALYSIS = {
     "shorts_max_seconds": 180,
 }
 
+DEFAULT_TRENDS = {  # 최근 유행 쇼츠 분석 (trends.py)
+    "region": "KR",
+    "language": "ko",
+    "lookback_days": 3,            # 최근 며칠 안에 올라온 영상만
+    "shorts_max_seconds": 180,     # 쇼츠 최대 길이 (유튜브 쇼츠는 최대 3분)
+    "search_queries": ["", "#shorts"],   # 빈 문자열 = 검색어 없이 전체 조회수 상위
+    "popular_pages": 4,            # 인기 급상승 목록 페이지 수 (50개씩)
+    "korean_only": True,           # 제목에 한글이 있는 영상만
+    "top_n": 30,                   # Ollama에 넘길 상위 영상 수
+    "breakout_ratio": 3.0,         # 조회수 ≥ 구독자 × 이 값이면 '떡상'
+    "min_views": 10000,
+    "script_seconds": 50,          # 쇼츠 대본 목표 길이(초)
+    "auto_video": False,           # GUI: 대본 생성 후 영상까지 자동으로 만들기
+}
+
 DEFAULTS = {
     "youtube": {"api_key": "", "api_key_env": "YOUTUBE_API_KEY", "max_videos_per_channel": 30},
     "channels": [],
@@ -60,6 +75,7 @@ DEFAULTS = {
         "num_ctx": 8192,
         "timeout_sec": 900,                 # CPU만 있는 PC는 7B 대본 생성에 수 분 걸릴 수 있음
     },
+    "trends": DEFAULT_TRENDS,
     "pexels": {                             # 무료 스톡 영상 (https://www.pexels.com/api/)
         "api_key": "",
         "api_key_env": "PEXELS_API_KEY",

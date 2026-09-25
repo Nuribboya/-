@@ -332,6 +332,7 @@ class App:
         if self._load_or_setup():
             self.refresh_channels()
             self._apply_auto_check(self.cfg.raw.get("gui", {}).get("auto_check", False))
+            self.trend_auto_var.set(bool(self.cfg.raw.get("trends", {}).get("auto_video", False)))
             if check_ollama_on_start:
                 self.check_ollama(startup=True)
 
@@ -353,6 +354,8 @@ class App:
         self.btn_check.pack(side="left")
         self.btn_generate = ttk.Button(top, text="✨ 새 주제/대본 생성", command=self.generate_now)
         self.btn_generate.pack(side="left", padx=6)
+        self.btn_trend = ttk.Button(top, text="🔥 유행 쇼츠 분석", command=self.trend_now)
+        self.btn_trend.pack(side="left")
         self.auto_var = tk.BooleanVar(value=False)
         self.auto_chk = ttk.Checkbutton(top, text="자동 체크", variable=self.auto_var,
                                         command=lambda: self._apply_auto_check(self.auto_var.get(), save=True))
@@ -388,8 +391,10 @@ class App:
         self.summary_box = scrolledtext.ScrolledText(self.nb, wrap="none", font=self.text_font)
         self.summary_box.configure(state="disabled")
         self.nb.add(self.summary_box, text="조회수 추이")
+        self._build_trend_tab()
 
         gen_tab = ttk.Frame(self.nb)
+        self.gen_tab = gen_tab
         bar = ttk.Frame(gen_tab, padding=(0, 6))
         bar.pack(fill="x")
         ttk.Label(bar, text="주제:").pack(side="left")
@@ -406,6 +411,25 @@ class App:
         self.nb.add(gen_tab, text="주제/대본")
         self._build_video_tab()
         paned.add(self.nb, weight=3)
+
+    def _build_trend_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.trend_tab = tab
+        bar = ttk.Frame(tab, padding=(0, 6))
+        bar.pack(fill="x")
+        self.btn_trend2 = ttk.Button(bar, text="🔥 유행 쇼츠 분석 시작", command=self.trend_now)
+        self.btn_trend2.pack(side="left")
+        self.trend_auto_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bar, text="대본 생성 후 영상까지 자동으로 만들기", variable=self.trend_auto_var,
+                        command=self._save_trend_auto).pack(side="left", padx=10)
+        ttk.Label(bar, text="최근 며칠 한국에서 조회수가 빠르게 오른 쇼츠 → 주제 추천 → 쇼츠 대본",
+                  foreground="#777").pack(side="left")
+        self.trend_box = scrolledtext.ScrolledText(tab, wrap="none", font=self.text_font)
+        self.trend_box.insert("1.0", "[🔥 유행 쇼츠 분석]을 누르면 최근 유행하는 쇼츠 목록이 여기에 표시됩니다.\n"
+                              "(YouTube API 쿼터를 1회 약 200 사용합니다. 무료 쿼터는 하루 10,000)")
+        self.trend_box.configure(state="disabled")
+        self.trend_box.pack(fill="both", expand=True)
+        self.nb.add(tab, text="🔥 트렌드")
 
     def _build_video_tab(self):
         from .video.tts import VOICES
@@ -484,7 +508,8 @@ class App:
     def _set_busy(self, busy: bool, text: str | None = None, cancellable: bool = False):
         self.busy = busy
         state = "disabled" if busy else "normal"
-        for b in (self.btn_check, self.btn_generate, self.btn_rescript, self.btn_video):
+        for b in (self.btn_check, self.btn_generate, self.btn_rescript, self.btn_video, self.btn_trend,
+                  self.btn_trend2):
             b.configure(state=state)
         for b in (self.btn_cancel, self.btn_video_cancel):
             b.configure(state="normal" if busy and cancellable else "disabled")
@@ -512,8 +537,11 @@ class App:
                 if isinstance(exc, (GenerationCancelled, Cancelled)):
                     self.ui(lambda: self._set_busy(False, "작업을 취소했습니다."))
                     return
+                from .pipeline import redact_secrets
+
                 log.exception("작업 실패: %s", text)
                 msg = f"{type(exc).__name__}: {exc}" if not str(exc).startswith(("Ollama", "모델")) else str(exc)
+                msg = redact_secrets(msg)
                 self.ui(lambda: (self._set_busy(False, "오류"), messagebox.showerror(APP_TITLE, msg)))
                 return
             self.ui(lambda: (self._set_busy(False), done(result) if done else None))
@@ -723,7 +751,7 @@ class App:
     # ---- 주제/대본 생성 ---------------------------------------------------------------
 
     def _stream_start(self, header: str):
-        self.nb.select(1)
+        self.nb.select(self.gen_tab)
         self.result_box.delete("1.0", "end")
         self.result_box.insert("end", header + "\n\n")
 
@@ -797,7 +825,7 @@ class App:
         from .generator import render_generation_md
 
         self.generation = g
-        self.nb.select(1)
+        self.nb.select(self.gen_tab)
         self.result_box.delete("1.0", "end")
         self.result_box.insert("1.0", render_generation_md(g, self.tz))
         self.result_box.see("1.0")
@@ -831,6 +859,54 @@ class App:
             open_path(out)
         except OSError:
             messagebox.showinfo(APP_TITLE, f"출력 폴더: {out}")
+
+    # ---- 유행 쇼츠 분석 ------------------------------------------------------------------
+
+    def _save_trend_auto(self):
+        raw = read_raw(self.config_path)
+        raw.setdefault("trends", {})["auto_video"] = bool(self.trend_auto_var.get())
+        save_config(raw, self.config_path)
+        self.cfg.raw.setdefault("trends", {})["auto_video"] = bool(self.trend_auto_var.get())
+
+    def _set_trend_text(self, text: str):
+        self.trend_box.configure(state="normal")
+        self.trend_box.delete("1.0", "end")
+        self.trend_box.insert("1.0", text)
+        self.trend_box.configure(state="disabled")
+
+    def trend_now(self):
+        """최근 유행 쇼츠 수집 → 주제 추천 → 쇼츠 대본 (→ 체크돼 있으면 영상까지)."""
+        from .ollama_client import OllamaClient
+        from .trends import run_trends
+
+        o = self.cfg.ollama
+        st = OllamaClient(o["host"], o["model"]).status()
+        if not st.ok:
+            self._on_ollama_status(st, startup=False)
+            if not st.server_up:
+                messagebox.showerror(APP_TITLE, st.message)
+            return
+        self.cancel_event = threading.Event()
+        cancel = self.cancel_event
+        self._set_trend_text("유행 쇼츠 수집 중…")
+        self._stream_start(f"🔥 최근 유행 쇼츠를 분석해서 {o['model']}로 주제/대본 생성 중… "
+                           "(PC 사양에 따라 수 분 걸릴 수 있습니다)")
+        status = self._on_gen_status
+
+        self.run_bg("유행 쇼츠 분석 중…",
+                    lambda: run_trends(self.cfg, on_status=status, on_token=self._on_token, cancel=cancel),
+                    self._on_trend_done, cancellable=True)
+
+    def _on_trend_done(self, res):
+        self._set_trend_text(res.table)
+        g = res.generation
+        self.show_generation(g)
+        self._fill_video_script(g.script, g.title or "")
+        self.status_var.set(f"유행 쇼츠 {len(res.videos)}개 분석 · 대본 저장됨: {g.output_path} "
+                            f"(쿼터 약 {res.units} 사용)")
+        if self.trend_auto_var.get():
+            self.nb.select(self.video_tab)
+            self.make_video()
 
     # ---- 영상 생성 ----------------------------------------------------------------------
 

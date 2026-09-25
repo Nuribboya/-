@@ -198,6 +198,47 @@ def test_video_tab_flow(root, dialogs, tmp_path, monkeypatch):
         pex.shutdown()
 
 
+def test_trend_flow_with_auto_video(root, dialogs, tmp_path, monkeypatch):
+    """🔥 유행 쇼츠 분석 → 트렌드 탭 표 + 쇼츠 대본 → (자동 체크 시) 영상까지."""
+    from fake_video_services import FakeEdgeTTS
+    from test_yt_monitor_trends import NOW, FakeTrendYouTube
+    from yt_monitor import collector, trends
+    from yt_monitor.video.ffmpeg import check_ffmpeg
+    from yt_monitor.video.pipeline import VideoPipeline
+
+    if not check_ffmpeg().ok:
+        pytest.skip("ffmpeg 없음")
+    monkeypatch.setattr(collector, "build_youtube_service", lambda key: FakeTrendYouTube())
+    monkeypatch.setattr(trends, "utcnow", lambda: NOW)
+    server, url, _ = start_fake_ollama()
+    try:
+        path = make_config(tmp_path, url)
+        raw = read_raw(path)
+        raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
+                            subtitle_font_size=20, subtitle_margin_bottom=40)
+        raw["pexels"]["api_key"] = "fake"
+        raw["trends"]["popular_pages"] = 1
+        save_config(raw, path)
+        app = gui.App(root, path, check_ollama_on_start=False)
+        app.video_pipeline_factory = lambda c: VideoPipeline(c, pexels=None, tts=FakeEdgeTTS(retry_delay=0),
+                                                             offline=True)
+        app.trend_auto_var.set(True)
+        app._save_trend_auto()
+        assert read_raw(path)["trends"]["auto_video"] is True
+
+        app.trend_now()
+        pump(root, lambda: app.video_result is not None and not app.busy, timeout=120)
+        assert not [d for d in dialogs if d[0] in ("showerror", "showwarning")], dialogs
+        assert "편의점 라면 꿀조합" in app.trend_box.get("1.0", "end")
+        assert app.generation.trigger == "trend"
+        assert app.video_title_var.get() == app.generation.title
+        assert app.video_result.video_path.exists()
+        assert app.nb.select() == str(app.video_tab)
+        app.close()
+    finally:
+        server.shutdown()
+
+
 def test_missing_model_closes_app(root, dialogs, tmp_path):
     server, url, _ = start_fake_ollama()
     try:

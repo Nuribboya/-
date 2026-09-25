@@ -57,6 +57,20 @@ ollama:                           # 로컬 LLM (https://ollama.com) — API 비�
   num_ctx: 8192
   timeout_sec: 900                # CPU만 있는 PC는 대본 생성에 수 분 걸릴 수 있음
 
+trends:                           # 🔥 최근 유행 쇼츠 분석 → 주제/쇼츠 대본 → 영상
+  region: KR
+  language: ko
+  lookback_days: 3                # 최근 며칠 안에 올라온 쇼츠만
+  shorts_max_seconds: 180         # 쇼츠 최대 길이(초)
+  search_queries: ["", "#shorts"] # 조회수순 검색어 ("" = 검색어 없이 전체). 검색 1번 = 쿼터 100
+  popular_pages: 4                # 인기 급상승 목록 페이지 수 (50개씩, 페이지당 쿼터 1)
+  korean_only: true               # 제목에 한글이 있는 영상만
+  top_n: 30                       # Ollama에 넘길 상위 영상 수
+  breakout_ratio: 3               # 조회수가 구독자의 N배 이상이면 '떡상' 표시
+  min_views: 10000
+  script_seconds: 50              # 쇼츠 대본 목표 길이(초)
+  auto_video: false               # true면 대본 생성 후 영상까지 자동으로 만듦 (GUI 체크박스와 같음)
+
 pexels:                           # 무료 스톡 영상 API — https://www.pexels.com/api/ 가입하면 즉시 발급
   api_key: ""
   api_key_env: PEXELS_API_KEY     # .env 에 PEXELS_API_KEY=... 로 넣어도 됨

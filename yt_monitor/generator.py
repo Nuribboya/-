@@ -177,6 +177,8 @@ class Generation:
     script_lines: list[str] = field(default_factory=list)
     output_path: Path | None = None
     script_path: Path | None = None
+    script_prompt: str = SCRIPT_PROMPT        # 트렌드 쇼츠는 shorts_script.txt
+    script_minutes: float | None = None       # None이면 설정의 script_minutes
 
     @property
     def script(self) -> str:
@@ -190,7 +192,7 @@ class Generation:
 def render_generation_md(g: Generation, tz: ZoneInfo) -> str:
     when = g.created_at.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
     reason = {"auto": "🚨 성장 둔화 감지 (자동 생성)", "manual": "🖐 수동 생성",
-              "demo": "🧪 데모"}.get(g.trigger, g.trigger)
+              "demo": "🧪 데모", "trend": "🔥 최근 유행 쇼츠 분석"}.get(g.trigger, g.trigger)
     out = [
         f"# 🎬 {g.channel_title} 다음 영상 기획안",
         "",
@@ -271,10 +273,11 @@ class ScriptGenerator:
         return {"temperature": self.s.get("temperature", 0.7), "num_ctx": self.s.get("num_ctx", 8192)}
 
     def generate_topics(self, channel_title: str, context: str, *,
+                        template: str = TOPICS_PROMPT,
                         on_token: Callable[[str], None] | None = None,
                         cancel: threading.Event | None = None) -> tuple[list[dict], int]:
         n_topics, n_titles = int(self.s.get("num_topics", 5)), int(self.s.get("num_titles", 3))
-        prompt = render_template(load_template(self.prompts_dir, TOPICS_PROMPT), {
+        prompt = render_template(load_template(self.prompts_dir, template), {
             "channel_name": channel_title, "channel_data": context,
             "num_topics": n_topics, "num_titles": n_titles,
         })
@@ -283,13 +286,15 @@ class ScriptGenerator:
         return parse_topics(text, n_topics, n_titles)
 
     def generate_script(self, channel_title: str, context: str, topic: dict, title: str, *,
+                        template: str = SCRIPT_PROMPT, minutes: float | None = None,
                         on_token: Callable[[str], None] | None = None,
                         cancel: threading.Event | None = None) -> list[str]:
-        minutes = float(self.s.get("script_minutes", 3))
-        prompt = render_template(load_template(self.prompts_dir, SCRIPT_PROMPT), {
+        minutes = float(minutes if minutes is not None else self.s.get("script_minutes", 3))
+        prompt = render_template(load_template(self.prompts_dir, template), {
             "channel_name": channel_title, "channel_data": context,
             "topic": topic["topic"], "title": title, "reason": topic.get("reason", ""),
             "script_minutes": f"{minutes:g}", "script_chars": int(minutes * CHARS_PER_MINUTE),
+            "script_seconds": int(round(minutes * 60)),
         })
         text = self.client.chat(prompt, options=self._options(), on_token=on_token, cancel=cancel)
         lines = tts_lines(text)
@@ -299,13 +304,17 @@ class ScriptGenerator:
 
     def generate(self, *, channel_id: str, channel_title: str, context: str, now: datetime,
                  trigger: str, selected: int | None = None,
+                 topics_prompt: str = TOPICS_PROMPT, script_prompt: str = SCRIPT_PROMPT,
+                 script_minutes: float | None = None,
                  on_status: Callable[[str], None] | None = None,
                  on_token: Callable[[str], None] | None = None,
                  cancel: threading.Event | None = None) -> Generation:
         status = on_status or (lambda msg: log.info(msg))
         status(f"[{channel_title}] 주제 후보 생성 중… ({self.model})")
-        topics, best = self.generate_topics(channel_title, context, on_token=on_token, cancel=cancel)
-        g = Generation(channel_id, channel_title, now, trigger, self.model, context, topics, best)
+        topics, best = self.generate_topics(channel_title, context, template=topics_prompt,
+                                            on_token=on_token, cancel=cancel)
+        g = Generation(channel_id, channel_title, now, trigger, self.model, context, topics, best,
+                       script_prompt=script_prompt, script_minutes=script_minutes)
         idx = best if selected is None or not 0 <= selected < len(topics) else selected
         return self.write_script(g, idx, on_status=status, on_token=on_token, cancel=cancel)
 
@@ -319,6 +328,7 @@ class ScriptGenerator:
         if on_status:
             on_status(f"[{g.channel_title}] 대본 작성 중: {topic['topic']}")
         g.script_lines = self.generate_script(g.channel_title, g.context, topic, title,
+                                              template=g.script_prompt, minutes=g.script_minutes,
                                               on_token=on_token, cancel=cancel)
         g.selected, g.title = index, title
         return g
