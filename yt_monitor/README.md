@@ -179,6 +179,12 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 4. 영상을 만들면 Ollama가 씬마다 영화 같은 장면 묘사를 쓰고, ComfyUI가 768x1344 세로 이미지를 만듭니다.
    이미지는 줌 효과로 움직이는 영상처럼 들어갑니다. 이미지를 만들기 전에 Ollama 모델을 그래픽카드에서 내려서
    8GB로도 돌아가게 했습니다. 처음 켤 때는 모델을 읽느라 1~2분 걸립니다.
+- **실제 사람 같은 얼굴(추천)**: 실사 전용 모델 **RealVisXL V5.0 Lightning**
+  (<https://huggingface.co/SG161222/RealVisXL_V5.0_Lightning> → `RealVisXL_V5.0_Lightning_fp16.safetensors`)을
+  같은 `checkpoints` 폴더에 넣으세요. 모델이 여러 개면 **실사 모델(RealVis > Juggernaut)을 자동으로 먼저** 쓰고,
+  권장값(5스텝 · cfg 1.5 · dpmpp_sde · karras)도 자동으로 맞춥니다.
+  기본 스타일도 "RAW photo, candid, 35mm, 자연광, 피부 질감"으로 바뀌었고, AI 이미지에는 채도 보정을 하지 않습니다.
+- 사람이 나오는 AI 이미지는 업로드할 때 **'변경되거나 합성된 콘텐츠'를 '예'로** 표시하세요 (YouTube 정책).
 - 다른 모델: Juggernaut XL Lightning 등은 `ai_images.steps/cfg/sampler/scheduler` 값(기본 6 · 2.0 · dpmpp_sde · karras)을 쓰고,
   일반 SDXL 모델은 `steps: 25`, `cfg: 6`으로 바꾸세요. 모델마다 이용 조건이 다르니 상업적 이용이 가능한지 확인하세요.
 - ComfyUI를 켜지 못하면 경고만 남기고 스톡 영상으로 계속 만듭니다. 원인은 `<영상>_work/logs/comfyui.log`에 있습니다.

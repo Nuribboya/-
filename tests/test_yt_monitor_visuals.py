@@ -46,6 +46,8 @@ def test_shot_filter_zoom_and_color():
     assert "setpts=PTS-STARTPTS" in vf and "(1+0.1*t/2.000)" in vf and "eval=frame" in vf
     assert "eq=contrast=1.1:saturation=1.3" in vf
     assert "(1+0.1*(1-t/2.000))" in comp.shot_filter(compose.Shot(60, Path("a.mp4"), zoom_out=True))
+    img = comp.shot_filter(compose.Shot(60, Path("ai.png")))        # AI 이미지는 줌만, 색 보정 없음
+    assert "eval=frame" in img and "eq=" not in img
     plain = comp.shot_filter(compose.Shot(60, None))                 # 단색 배경은 효과 없음
     assert "eval=frame" not in plain and "eq=" not in plain
     comp.zoom = 0
@@ -97,7 +99,7 @@ def test_config_upgrade_speeds_up_cuts_only_if_default(tmp_path):
         raw["channels"] = [{"handle": "@x"}]
         path = save_config(raw, tmp_path / f"c{old_value}.yaml")
         new = read_raw(path)
-        assert new["video"]["clip_max_seconds"] == expected and new["config_version"] == 2
+        assert new["video"]["clip_max_seconds"] == expected and new["config_version"] == 3
         assert new["video"]["zoom"] == 0.08 and new["ai_images"]["enabled"] is False
 
 
@@ -134,7 +136,7 @@ def test_comfy_status_and_generate(tmp_path):
         assert wf["4"]["inputs"]["ckpt_name"] == "juggernautXL_lightning.safetensors"
         assert wf["5"]["inputs"] == {"width": 512, "height": 896, "batch_size": 1}
         assert wf["6"]["inputs"]["text"] == "a giant shark, cinematic" and wf["7"]["inputs"]["text"] == "text"
-        assert wf["3"]["inputs"]["seed"] == 7 and wf["3"]["inputs"]["steps"] == 6
+        assert wf["3"]["inputs"]["seed"] == 7 and wf["3"]["inputs"]["steps"] == 5   # juggernaut lightning 권장값
         assert ComfyClient(url, checkpoint="없는모델").status().ok is False
     finally:
         server.shutdown()

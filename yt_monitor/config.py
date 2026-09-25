@@ -76,7 +76,12 @@ def apply_language(raw: dict, lang: str) -> dict:
     return raw
 
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
+OLD_AI_STYLE = "cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo"
+OLD_AI_NEGATIVE = "text, watermark, logo, blurry, low quality, deformed, ugly, nsfw"
+REALISTIC_STYLE = "RAW photo, candid photograph, shot on 35mm, natural lighting, realistic skin texture, subtle film grain, sharp focus"
+REALISTIC_NEGATIVE = ("cgi, 3d render, illustration, painting, drawing, cartoon, anime, plastic skin, airbrushed, overly sm"
+                      "ooth skin, oversaturated, text, watermark, logo, blurry, low quality, deformed hands, extra fingers, ugly, nsfw")
 
 
 def upgrade_config(raw: dict, user: dict) -> dict:
@@ -89,6 +94,13 @@ def upgrade_config(raw: dict, user: dict) -> dict:
         # v2: 쇼츠는 컷이 빨라야 한다 → 예전 기본값(4초)이면 2.5초로
         if float(raw["video"].get("clip_max_seconds") or 0) == 4.0:
             raw["video"]["clip_max_seconds"] = 2.5
+    if version < 3:
+        # v3: AI 이미지를 실제 사진처럼 → 예전 기본 스타일(영화 같은 · 과한 색감)을 그대로 쓰고 있으면 교체
+        ai = raw.get("ai_images") or {}
+        if ai.get("style") == OLD_AI_STYLE:
+            ai["style"] = REALISTIC_STYLE
+        if ai.get("negative") == OLD_AI_NEGATIVE:
+            ai["negative"] = REALISTIC_NEGATIVE
     raw["config_version"] = CONFIG_VERSION
     return raw
 
@@ -184,8 +196,9 @@ DEFAULTS = {
         "cfg": 2.0,                         # Lightning 기준. 일반 SDXL은 5~7
         "sampler": "dpmpp_sde",
         "scheduler": "karras",
-        "style": "cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo",
-        "negative": "text, watermark, logo, blurry, low quality, deformed, ugly, nsfw",
+        # 실제 사진처럼 (AI 티 나는 매끈한 얼굴 · 과한 색감을 피한다)
+        "style": REALISTIC_STYLE,
+        "negative": REALISTIC_NEGATIVE,
         "timeout_sec": 300,
     },
     "storage": {

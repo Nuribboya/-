@@ -100,13 +100,29 @@ def tuned_params(checkpoint: str, steps: int, cfg: float, sampler: str, schedule
     """모델 이름에 맞는 권장값. ByteDance SDXL-Lightning은 steps/cfg/sampler가 틀리면 흐릿하게 나온다.
 
     sdxl_lightning_4step → 4스텝 · cfg 1 · euler · sgm_uniform (2step/8step도 이름대로)
-    Juggernaut XL Lightning 같은 병합 모델은 권장값이 달라서(6스텝 · DPM++ SDE) 설정값을 그대로 쓴다.
+    RealVisXL / Juggernaut XL Lightning (실사 모델) → 5스텝 · cfg 1.5 · dpmpp_sde · karras (배포 페이지 권장값)
+    그 밖의 모델은 설정값을 그대로 쓴다.
     """
     name = checkpoint.lower()
     if re.search(r"sdxl[_-]?lightning", name):
         m = re.search(r"(\d+)\s*-?step", name)
         return (int(m.group(1)) if m else 4), 1.0, "euler", "sgm_uniform"
+    if "lightning" in name and any(k in name for k in REALISTIC_MODELS):
+        return 5, 1.5, "dpmpp_sde", "karras"
     return steps, cfg, sampler, scheduler
+
+
+# 모델을 따로 지정하지 않았을 때 먼저 고르는 실사(photorealistic) 모델 이름 조각 (앞일수록 우선)
+REALISTIC_MODELS = ("realvis", "juggernaut", "epicrealism", "realistic")
+
+
+def pick_checkpoint(checkpoints: list[str]) -> str:
+    """여러 모델이 있으면 실사 모델을 우선 (RealVisXL > Juggernaut > …), 없으면 첫 번째."""
+    for key in REALISTIC_MODELS:
+        for c in checkpoints:
+            if key in c.lower():
+                return c
+    return checkpoints[0] if checkpoints else ""
 
 
 class ComfyClient:
@@ -157,8 +173,7 @@ class ComfyClient:
             ckpts = self.list_checkpoints()
         except (requests.RequestException, KeyError, ValueError, IndexError):
             ckpts = []
-        chosen = self.checkpoint if self.checkpoint in ckpts else ("" if self.checkpoint else
-                                                                    (ckpts[0] if ckpts else ""))
+        chosen = self.checkpoint if self.checkpoint in ckpts else ("" if self.checkpoint else pick_checkpoint(ckpts))
         return ComfyStatus(True, ckpts, chosen, self.host)
 
     # ---- 생성 -------------------------------------------------------------------

@@ -120,7 +120,8 @@ class Composer:
             dur = max(shot.frames / self.fps, 0.1)
             z = f"(1+{self.zoom:g}*(1-t/{dur:.3f}))" if shot.zoom_out else f"(1+{self.zoom:g}*t/{dur:.3f})"
             parts += [f"scale=w='trunc({w}*{z}/2)*2':h='trunc({h}*{z}/2)*2':eval=frame", f"crop={w}:{h}"]
-        if shot.source is not None and (self.contrast != 1 or self.saturation != 1):
+        # AI 이미지는 색 보정을 하지 않는다 (채도를 올리면 AI 티가 더 난다)
+        if shot.source is not None and not shot.is_image and (self.contrast != 1 or self.saturation != 1):
             parts.append(f"eq=contrast={self.contrast:g}:saturation={self.saturation:g}")
         return ",".join(parts + ["setsar=1", "format=yuv420p"])
 

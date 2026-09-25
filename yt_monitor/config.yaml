@@ -105,8 +105,8 @@ ai_images:                        # (선택) 로컬 AI 이미지 생성 — Comf
   cfg: 2.0                        # Lightning 기준. 일반 SDXL은 5~7
   sampler: dpmpp_sde
   scheduler: karras
-  style: cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo
-  negative: text, watermark, logo, blurry, low quality, deformed, ugly, nsfw
+  style: RAW photo, candid photograph, shot on 35mm, natural lighting, realistic skin texture, subtle film grain, sharp focus   # 실제 사진처럼
+  negative: cgi, 3d render, illustration, painting, drawing, cartoon, anime, plastic skin, airbrushed, overly smooth skin, oversaturated, text, watermark, logo, blurry, low quality, deformed hands, extra fingers, ugly, nsfw
   timeout_sec: 300
 
 video:                            # 대본 → 쇼츠 영상 자동 생성 (edge-tts + Pexels + ffmpeg)

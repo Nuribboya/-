@@ -2,7 +2,7 @@
 
 - 대본은 generator.tts_lines()로 정리한다 (마크다운, [효과음], 이모지 제거 · 한 줄에 한 문장).
 - 문장을 순서대로 모아, 예상 길이가 min_scene_seconds 이상이 될 때까지(단 max_scene_chars 이하) 한 씬으로 묶는다.
-- 키워드는 Ollama에 씬 전체를 한 번에 보내 영어 검색어 JSON으로 받는다 (prompts/video_scenes.txt).
+- 키워드는 Ollama에 씬 전체를 한 번에 보내 영어 검색어 JSON으로 받는다 (prompts/scene_visuals.txt).
   Ollama가 꺼져 있거나 응답이 이상하면 대본에서 뽑은 한국어 단어로 대신 검색한다 (결과는 적을 수 있음).
 
 단독 테스트:
@@ -22,7 +22,7 @@ from ..generator import GenerationError, _extract_json, load_template, render_te
 
 log = logging.getLogger(__name__)
 
-KEYWORDS_PROMPT = "video_scenes.txt"
+KEYWORDS_PROMPT = "scene_visuals.txt"
 CHARS_PER_SECOND = 5.5 * 1.1   # 한국어 내레이션 ≈ 분당 330자, 쇼츠는 약간 빠르게
 EN_CHARS_PER_SECOND = 15.0     # 영어 내레이션 ≈ 분당 150단어 × 6자
 

@@ -76,7 +76,32 @@ def test_tuned_params_for_lightning():
                                                                                               "sgm_uniform")
     assert tuned_params("sdxl_lightning_8step.safetensors", 6, 2.0, "a", "b")[0] == 8
     assert tuned_params("juggernautXL.safetensors", 30, 6.0, "dpmpp_2m", "karras") == (30, 6.0, "dpmpp_2m", "karras")
-    assert tuned_params("juggernautXL_lightning.safetensors", 6, 2.0, "dpmpp_sde", "karras")[0] == 6
+    assert tuned_params("juggernautXL_lightning.safetensors", 6, 2.0, "a", "b") == (5, 1.5, "dpmpp_sde", "karras")
+    assert tuned_params("RealVisXL_V5.0_Lightning_fp16.safetensors", 6, 2.0, "a", "b") == (5, 1.5, "dpmpp_sde",
+                                                                                          "karras")
+
+
+def test_realistic_model_preferred():
+    from yt_monitor.video.comfyui import pick_checkpoint
+
+    assert pick_checkpoint(["sdxl_lightning_4step.safetensors", "RealVisXL_V5.0_Lightning_fp16.safetensors"]) \
+        == "RealVisXL_V5.0_Lightning_fp16.safetensors"
+    assert pick_checkpoint(["a.safetensors", "b.safetensors"]) == "a.safetensors" and pick_checkpoint([]) == ""
+
+
+def test_old_ai_style_upgraded_to_realistic(tmp_path):
+    from yt_monitor.config import (OLD_AI_STYLE, REALISTIC_NEGATIVE, REALISTIC_STYLE, read_raw,
+                                   save_config)
+
+    raw = read_raw(tmp_path / "x.yaml")
+    raw["config_version"] = 2
+    raw["ai_images"]["style"] = OLD_AI_STYLE
+    raw["ai_images"]["negative"] = "my own negative"
+    raw["channels"] = [{"handle": "@x"}]
+    path = save_config(raw, tmp_path / "config.yaml")
+    up = read_raw(path)
+    assert up["ai_images"]["style"] == REALISTIC_STYLE and up["ai_images"]["negative"] == "my own negative"
+    assert REALISTIC_NEGATIVE.startswith("cgi, 3d render") and up["config_version"] == 3
 
 
 def test_generate_uses_tuned_params(tmp_path):

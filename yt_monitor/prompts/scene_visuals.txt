@@ -11,8 +11,10 @@
 - 추상적인 단어(행복, 성공, 방법)만 쓰지 마. 가장 잘 맞는 검색어를 먼저.
 
 [image_prompt 규칙]
-- 한 문장, 25단어 이내의 영어. 스크롤을 멈추게 할 만큼 강렬하고 영화 같은 장면.
-- 주인공이 되는 사물/장면 + 구도(extreme close-up, low angle, wide shot) + 분위기(조명, 색감)를 넣어.
+- 한 문장, 25단어 이내의 영어. 실제 카메라로 찍은 사진처럼 보이는, 스크롤을 멈추게 할 만큼 강렬한 장면.
+- 주인공이 되는 사람/사물/장면 + 구도(close-up, low angle, wide shot) + 실제 장소와 자연스러운 조명을 넣어.
+- 사람이 나오면 평범한 실제 사람처럼: 나이·옷차림·표정을 구체적으로 (예: "a tired middle-aged man in a gray hoodie,
+  candid"). 모델 같은 완벽한 얼굴, 판타지, 과장된 효과, "epic", "hyper detailed", "8k" 같은 말은 쓰지 마.
 - 실존 인물, 유명인, 브랜드 로고, 글자, 선정적이거나 잔인한 장면은 넣지 마.
 
 [mood 규칙]
@@ -29,4 +31,4 @@
 {scenes}
 
 [출력 형식]
-{"mood": "energetic", "scenes": [{"scene": 1, "keywords": ["keyword one", "keyword two"], "image_prompt": "extreme close-up of ..."}]}
+{"mood": "energetic", "scenes": [{"scene": 1, "keywords": ["keyword one", "keyword two"], "image_prompt": "candid photo of ..."}]}
