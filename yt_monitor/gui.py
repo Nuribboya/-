@@ -503,6 +503,9 @@ class App:
         self.video_path_var = tk.StringVar(value="-")
         ttk.Entry(row3, textvariable=self.video_path_var, state="readonly").pack(
             side="left", fill="x", expand=True, padx=4)
+        self.btn_upload_info = ttk.Button(row3, text="📋 업로드 정보", state="disabled",
+                                          command=self._open_upload_info)
+        self.btn_upload_info.pack(side="right")
         self.btn_open_video = ttk.Button(row3, text="▶ 영상 열기", state="disabled",
                                          command=lambda: self._open_result(select=False))
         self.btn_open_video.pack(side="right")
@@ -1044,12 +1047,16 @@ class App:
         self.video_path_var.set("-")
         self.btn_open_folder.configure(state="disabled")
         self.btn_open_video.configure(state="disabled")
+        self.btn_upload_info.configure(state="disabled")
+        g = self.generation
+        # 주제/대본 단계에서 만든 업로드 정보는 대본을 그대로 쓸 때만 (직접 바꾼 대본이면 영상 만들 때 새로 생성)
+        upload = g.upload if g is not None and g.upload and g.script.strip() == script else None
         self.video_log.configure(state="normal")
         self.video_log.delete("1.0", "end")
         self.video_log.configure(state="disabled")
         pipeline = self.video_pipeline_factory(self.cfg)
         self.run_bg("영상 생성 중…",
-                    lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text,
+                    lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text, upload_meta=upload,
                                          on_progress=self._on_video_progress,
                                          on_status=self._video_log, cancel=cancel),
                     self._on_video_done, cancellable=True)
@@ -1062,10 +1069,22 @@ class App:
         self.video_path_var.set(str(res.video_path))
         self.btn_open_folder.configure(state="normal")
         self.btn_open_video.configure(state="normal")
+        if getattr(res, "upload_path", None):
+            self.btn_upload_info.configure(state="normal")
+            self._video_log(f"📋 추천 제목: {res.upload_title}  → [📋 업로드 정보]에서 제목·카테고리·설명·해시태그 확인")
         self.status_var.set(f"영상 생성 완료 — {res.video_path}")
         if res.warnings:
             messagebox.showwarning(APP_TITLE, "영상은 만들어졌지만 확인할 점이 있습니다:\n\n" +
                                    "\n".join(f"· {w}" for w in res.warnings[:8]))
+
+    def _open_upload_info(self):
+        path = getattr(self.video_result, "upload_path", None)
+        if not path:
+            return
+        try:
+            open_path(path)
+        except OSError:
+            messagebox.showinfo(APP_TITLE, Path(path).read_text(encoding="utf-8"))
 
     def _open_result(self, select: bool):
         if self.video_result is None:

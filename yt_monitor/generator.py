@@ -218,6 +218,9 @@ class Generation:
     script_path: Path | None = None
     script_prompt: str = SCRIPT_PROMPT        # 트렌드 쇼츠는 shorts_script.txt
     script_minutes: float | None = None       # None이면 설정의 script_minutes
+    upload: dict | None = None                # 업로드 정보 (upload_meta.UploadMeta.to_dict())
+    upload_hint: str = ""                     # 유행 쇼츠의 카테고리 통계 (업로드 정보 프롬프트용)
+    upload_stats: list = field(default_factory=list)
 
     @property
     def script(self) -> str:
@@ -269,6 +272,10 @@ def render_generation_md(g: Generation, tz: ZoneInfo) -> str:
             "```",
             "",
         ]
+    if g.upload:
+        from .upload_meta import UploadMeta, render_upload_md
+
+        out += render_upload_md(UploadMeta.from_dict(g.upload))
     out += ["## 참고: 생성에 사용한 채널 데이터", "", "```text", g.context, "```", ""]
     return "\n".join(out)
 
@@ -360,7 +367,7 @@ class ScriptGenerator:
     def generate(self, *, channel_id: str, channel_title: str, context: str, now: datetime,
                  trigger: str, selected: int | None = None,
                  topics_prompt: str = TOPICS_PROMPT, script_prompt: str = SCRIPT_PROMPT,
-                 script_minutes: float | None = None,
+                 script_minutes: float | None = None, upload_hint: str = "", upload_stats: list | None = None,
                  on_status: Callable[[str], None] | None = None,
                  on_token: Callable[[str], None] | None = None,
                  cancel: threading.Event | None = None) -> Generation:
@@ -369,7 +376,8 @@ class ScriptGenerator:
         topics, best = self.generate_topics(channel_title, context, template=topics_prompt,
                                             on_token=on_token, cancel=cancel)
         g = Generation(channel_id, channel_title, now, trigger, self.model, context, topics, best,
-                       script_prompt=script_prompt, script_minutes=script_minutes)
+                       script_prompt=script_prompt, script_minutes=script_minutes,
+                       upload_hint=upload_hint, upload_stats=list(upload_stats or []))
         idx = best if selected is None or not 0 <= selected < len(topics) else selected
         return self.write_script(g, idx, on_status=status, on_token=on_token, cancel=cancel)
 
@@ -386,7 +394,24 @@ class ScriptGenerator:
                                               template=g.script_prompt, minutes=g.script_minutes,
                                               on_token=on_token, cancel=cancel)
         g.selected, g.title = index, title
+        g.upload = None
+        if self.s.get("upload_meta", True):
+            if on_status:
+                on_status(f"[{g.channel_title}] 업로드 정보(제목 후보 · 카테고리 · 해시태그) 만드는 중…")
+            meta = self.upload_meta(g.script, title, topic, hint=g.upload_hint, stats=g.upload_stats,
+                                    cancel=cancel)
+            g.upload = meta.to_dict()
+            if meta.title and not (self.lang == "en" and has_hangul(meta.title)):
+                g.title = meta.title         # 가장 클릭 잘 될 제목을 영상 제목/훅으로
         return g
+
+    def upload_meta(self, script: str, title: str, topic: dict | None = None, *, hint: str = "",
+                    stats: list | None = None, cancel: threading.Event | None = None):
+        from .upload_meta import generate_upload_meta
+
+        return generate_upload_meta(self.client, self.prompts_dir, lang=self.lang, title=title, script=script,
+                                    topic=topic, trend_hint=hint, stats=stats, options=self._options(),
+                                    cancel=cancel)
 
 
 def record_generation(db, g: Generation) -> int:

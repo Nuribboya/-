@@ -43,6 +43,15 @@ SCRIPT_TEXT = """# 대본
 구독과 좋아요 부탁드려요.
 """
 
+UPLOAD_JSON = {
+    "titles": [{"title": "편의점 조합 TOP5", "why": "숫자가 있어 궁금함"},
+               {"title": "Gas Station Snack Hacks That Work", "why": "구체적인 약속"},
+               {"title": "You've Been Eating Chips Wrong", "why": "도발적인 문장"}],
+    "best": 3, "category_id": "26", "category_reason": "노하우 쇼츠가 요즘 잘 뜸",
+    "description": "Which one would you try first?\nComment below!",
+    "hashtags": ["#Shorts", "snackhack", "#food"], "tags": ["snack hacks", "gas station food"],
+}
+
 # 영어 프롬프트에는 qwen이 실제로 돌려준 모양대로 (머리말 · 한국어 제목 섞임)
 SCRIPT_TEXT_EN = """Sure, here is the voice-over script for your YouTube Shorts video:
 편의점 꿀조합
@@ -84,7 +93,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": f"model '{payload['model']}' not found"})
         prompt = payload["messages"][-1]["content"]
         if payload.get("format") == "json":
-            data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON
+            if "category_id" in prompt:
+                data = UPLOAD_JSON
+            else:
+                data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON
             content = json.dumps(data, ensure_ascii=False)
         elif "American English" in prompt:
             content = SCRIPT_TEXT_EN

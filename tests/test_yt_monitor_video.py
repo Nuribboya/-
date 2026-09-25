@@ -360,6 +360,9 @@ def test_pipeline_end_to_end(tmp_path, services):
     assert len(debug["scenes"]) == len(res.scenes)
     assert sum(s["frames"] for s in debug["shots"]) == round(res.duration * 15)
     assert (res.work_dir / "logs").is_dir() and not res.warnings
+    up = res.upload_path.read_text(encoding="utf-8")
+    assert res.upload_path.name == "편의점_꿀조합_업로드정보.txt" and "노하우/스타일" in up
+    assert "#Shorts" in up and "Stock footage: Pexels" in up and res.upload_title
 
     # 같은 제목으로 또 만들면 덮어쓰지 않는다
     res2 = make_pipeline(make_cfg(tmp_path, keep_work_files=False), services).run(SCRIPT, "편의점 꿀조합", now=now)

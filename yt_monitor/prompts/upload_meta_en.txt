@@ -1,0 +1,28 @@
+You are a YouTube Shorts growth expert for the US market. Write the upload metadata for this Short so that as many people as possible click it.
+
+[This Short]
+Topic: {topic}
+Working title: {title}
+Script:
+{script}
+
+[What is trending right now]
+{category_data}
+
+[YouTube categories: id: name]
+{categories}
+
+[Rules]
+- "titles": 5 different English titles, max 60 characters (ideally under 40 so they are not cut off on phones).
+  Use a different hook style for each: curiosity gap, number/list, shocking fact, direct question, "POV"/relatable.
+  Strong words, specific details, no clickbait that the video does not deliver. No hashtags or emojis in titles.
+- For each title, "why": ONE sentence in KOREAN (한국어로) explaining why people would click it.
+- "best": the number (1-5) of the title most likely to get the highest click-through rate.
+- "category_id": pick the best id from the list above. If trending data shows a category that fits this topic and performs well, prefer it.
+- "category_reason": ONE sentence in KOREAN (한국어로) explaining the choice.
+- "description": 2 short English lines that add curiosity and invite comments (no hashtags here).
+- "hashtags": 3-5 English hashtags, the first one must be "#Shorts".
+- "tags": 8-12 English search keywords.
+- Answer ONLY with JSON in exactly this format.
+
+{"titles": [{"title": "...", "why": "한국어 이유"}], "best": 1, "category_id": "24", "category_reason": "한국어 이유", "description": "...", "hashtags": ["#Shorts", "#..."], "tags": ["...", "..."]}

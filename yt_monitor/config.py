@@ -116,6 +116,7 @@ DEFAULTS = {
         "num_topics": 5,                    # 주제 후보 수 (3~5 권장)
         "num_titles": 3,                    # 주제별 제목 후보 수 (2~3 권장)
         "script_minutes": 3,                # 대본 목표 길이(분)
+        "upload_meta": True,                # 업로드 정보(제목 후보 · 카테고리 · 설명 · 해시태그) 생성
         "temperature": 0.7,
         "num_ctx": 8192,
         "timeout_sec": 900,                 # CPU만 있는 PC는 7B 대본 생성에 수 분 걸릴 수 있음
@@ -157,6 +158,7 @@ DEFAULTS = {
         "crf": 21,                          # 화질 (낮을수록 고화질·큰 파일, 18~28)
         "preset": "veryfast",
         "keep_work_files": True,            # 중간 파일(클립/음성/ffmpeg 로그) 보관 → 디버깅용
+        "upload_meta": True,                # 영상 옆에 <이름>_업로드정보.txt
     },
     "pixabay": {                            # 무료 스톡 영상 추가 소스 (https://pixabay.com/api/docs/)
         "api_key": "",

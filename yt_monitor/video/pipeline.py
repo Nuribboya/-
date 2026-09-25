@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 from ..generator import has_hangul, tts_lines
 from ..report import safe_name
+from ..upload_meta import UploadMeta, fallback_meta, generate_upload_meta, render_upload_text
 from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frames
 from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
@@ -57,6 +58,8 @@ class VideoResult:
     warnings: list[str] = field(default_factory=list)
     mood: str = ""
     voice: str = ""
+    upload_path: Path | None = None     # <파일명>_업로드정보.txt
+    upload_title: str = ""              # 추천 제목
 
 
 def output_path_for(outputs_dir: Path, title: str, now: datetime, tz: ZoneInfo) -> Path:
@@ -148,7 +151,7 @@ class VideoPipeline:
 
     # ---- 실행 ---------------------------------------------------------------------
     def run(self, script: str, title: str = "", *, voice: str | None = None, hook_text: str | None = None,
-            output_path: Path | None = None, now: datetime | None = None,
+            output_path: Path | None = None, now: datetime | None = None, upload_meta=None,
             on_progress: Callable[[int, int, str], None] | None = None,
             on_status: Callable[[str], None] | None = None,
             cancel: threading.Event | None = None) -> VideoResult:
@@ -212,6 +215,7 @@ class VideoPipeline:
                          options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status)
         for s in scenes:
             status(f"  씬 {s.index}: {', '.join(s.keywords) or '-'}")
+        upload = self._upload_meta(upload_meta, scenes, title, ollama, status, cancel)
 
         # 2) 스톡 영상 · AI 이미지 -------------------------------------------------------------
         comfy = self._make_comfy()
@@ -338,6 +342,12 @@ class VideoPipeline:
         srt = final.with_suffix(".srt")
         shutil.copyfile(srt_work, srt)
         credits = self._write_credits(final, scenes, scene_clips)
+        upload_path = None
+        if upload is not None:
+            upload_path = final.with_name(final.stem + "_업로드정보.txt")
+            credit_text = credits.read_text(encoding="utf-8") if credits else ""
+            upload_path.write_text(render_upload_text(upload, credit_text) + "\n", encoding="utf-8")
+            status(f"업로드 정보 저장: {upload_path.name} (추천 제목: {upload.title})")
         if not self.v.get("keep_work_files", True):
             shutil.rmtree(work, ignore_errors=True)
             work_kept = None
@@ -345,7 +355,24 @@ class VideoPipeline:
             work_kept = work
         status(f"완료: {final} ({total:.1f}초)")
         return VideoResult(final, srt, credits, work_kept, total, scenes, warnings,
-                           mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")))
+                           mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")),
+                           upload_path=upload_path, upload_title=upload.title if upload else "")
+
+    def _upload_meta(self, given, scenes, title, ollama, status, cancel) -> UploadMeta | None:
+        """주제/대본 단계에서 만든 업로드 정보가 있으면 그대로, 없으면 여기서 만든다."""
+        if isinstance(given, UploadMeta):
+            return given
+        if isinstance(given, dict):
+            return UploadMeta.from_dict(given)
+        if not self.v.get("upload_meta", True):
+            return None
+        script = "\n".join(s.text for s in scenes)
+        if ollama is None:
+            return fallback_meta(title, None, [], self.cfg.language)
+        status("업로드 정보(제목 후보 · 카테고리 · 해시태그) 만드는 중…")
+        o = self.cfg.ollama
+        return generate_upload_meta(ollama, self.cfg.prompts_dir, lang=self.cfg.language, title=title,
+                                    script=script, options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel)
 
     # ---- AI 이미지 -------------------------------------------------------------------
     def _ai_images(self, comfy, scenes, scene_clips, work: Path, status, warn, cancel) -> dict[int, Path]:
@@ -441,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
     res = VideoPipeline(cfg, offline=args.offline).run(
         script_file.read_text(encoding="utf-8"), args.title or script_file.stem, voice=args.voice)
     print(f"\n🎬 {res.video_path}\n📝 {res.srt_path}" + (f"\n📄 {res.credits_path}" if res.credits_path else ""))
+    if res.upload_path:
+        print(f"📋 {res.upload_path}")
     if res.work_dir:
         print(f"🔧 중간 파일 / ffmpeg 로그: {res.work_dir}")
     for w in res.warnings:

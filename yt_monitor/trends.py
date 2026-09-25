@@ -89,6 +89,7 @@ class TrendVideo:
     comments: int | None = None
     subscribers: int | None = None
     category: str = ""
+    category_id: str = ""
     tags: list[str] = field(default_factory=list)
     sources: set[str] = field(default_factory=set)   # popular | search:<검색어>
 
@@ -221,7 +222,7 @@ class TrendCollector:
             vids.append(TrendVideo(vid, title, sn.get("channelId", ""), sn.get("channelTitle", ""),
                                    published, duration, views, _int(st.get("likeCount")),
                                    _int(st.get("commentCount")), category=sn.get("categoryId", ""),
-                                   tags=list(sn.get("tags") or [])[:8], sources=sources.get(vid, set())))
+                                   category_id=sn.get("categoryId", ""), tags=list(sn.get("tags") or [])[:8], sources=sources.get(vid, set())))
         check()
         if vids:
             status(f"채널 {len({v.channel_id for v in vids})}개 구독자 수 확인 중…")
@@ -353,10 +354,14 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
         return result
 
     ensure_prompts(cfg)
+    from .upload_meta import category_hint, category_stats
+
+    stats = category_stats(videos, now, int(settings["top_n"]))
     gen = generator or ScriptGenerator.from_config(cfg)
     g = gen.generate(channel_id=TREND_CHANNEL_ID, channel_title=TREND_TITLE, context=context, now=now,
                      trigger="trend", topics_prompt=TREND_TOPICS_PROMPT, script_prompt=SHORTS_SCRIPT_PROMPT,
                      script_minutes=float(settings["script_seconds"]) / 60,
+                     upload_hint=category_hint(stats, cfg.language), upload_stats=stats,
                      on_status=on_status, on_token=on_token, cancel=cancel)
     save_generation(g, cfg.outputs_dir, tz)
     from .db import Database

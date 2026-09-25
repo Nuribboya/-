@@ -150,9 +150,10 @@ def test_generator_end_to_end_saves_files(ollama, tmp_path):
     g = gen.generate(channel_id="c1", channel_title="내 채널", context="채널 데이터 요약",
                      now=T0, trigger="manual")
     assert len(g.topics) == 3 and g.best == 1 and g.selected == 1
-    assert g.title == "편의점 신상 조합 TOP5"
+    assert g.title == "You've Been Eating Chips Wrong"        # 업로드 정보의 ⭐ 추천 제목
+    assert g.upload["category_id"] == "26"
     assert g.script_lines[0] == "여러분, 편의점에서 이 조합 먹어보셨나요?"
-    prompt = handler.requests_log[-1]["messages"][-1]["content"]
+    prompt = handler.requests_log[-2]["messages"][-1]["content"]
     assert "채널 데이터 요약" in prompt and "약 660자" in prompt and "{" not in prompt.split("[작성 규칙]")[1]
 
     from yt_monitor.generator import save_generation
@@ -165,7 +166,7 @@ def test_generator_end_to_end_saves_files(ollama, tmp_path):
 
     # 다른 주제로 대본 다시 쓰기 (GUI의 '선택한 주제로 대본 생성')
     gen.write_script(g, 0)
-    assert g.selected == 0 and g.title == "3천원으로 일주일 도시락 끝"
+    assert g.selected == 0 and g.upload and g.title == "You've Been Eating Chips Wrong"
     assert "대본" in build_generation_html(g)
 
 
@@ -215,7 +216,7 @@ def test_manual_generate_for_channel(ollama, tmp_path):
     statuses = []
     g = generate_for_channel(cfg, "UC_TEST", now=T0, on_status=statuses.append)
     assert g.trigger == "manual" and g.output_path.name == "테스트채널.md"
-    assert "상위 성과 영상" in g.context and len(statuses) == 2
+    assert "상위 성과 영상" in g.context and len(statuses) == 3 and "업로드 정보" in statuses[2]
     with pytest.raises(GenerationError):
         generate_for_channel(cfg, "UC_EMPTY", now=T0)
 

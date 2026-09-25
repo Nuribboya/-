@@ -58,6 +58,7 @@ ollama:                           # 로컬 LLM (https://ollama.com) — API 비�
   num_topics: 5                   # 주제 후보 수 (3~5)
   num_titles: 3                   # 주제별 제목 후보 수 (2~3)
   script_minutes: 3               # 대본 목표 길이(분)
+  upload_meta: true               # 대본과 함께 업로드 정보(클릭 잘 되는 제목 5개 · 카테고리 · 설명 · 해시태그) 생성
   temperature: 0.7
   num_ctx: 8192
   timeout_sec: 900                # CPU만 있는 PC는 대본 생성에 수 분 걸릴 수 있음
@@ -133,6 +134,7 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   crf: 21                         # 화질 (낮을수록 고화질·큰 파일, 18~28)
   preset: veryfast                # 인코딩 속도 (ultrafast ~ slow)
   keep_work_files: true           # 중간 파일(클립, 음성, ffmpeg 로그)을 <이름>_work/ 에 보관
+  upload_meta: true               # 영상 옆에 <이름>_업로드정보.txt (제목 후보 · 카테고리 · 설명 · 해시태그 · 출처)
 
 storage:
   db_path: data/yt_monitor.db     # 이 파일 기준 상대 경로

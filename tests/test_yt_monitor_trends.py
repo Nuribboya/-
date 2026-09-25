@@ -193,6 +193,13 @@ def test_run_trends_english_us(tmp_path):
         assert "No Korean" in prompts[1]                                     # 코드에서 덧붙이는 영어 전용 지시
         assert res.generation.script_lines[0] == "You won't believe these gas station snack hacks."
         assert not any("편의점" in s or "Sure" in s for s in res.generation.script_lines)
+        # 업로드 정보: 유행 카테고리 통계가 프롬프트에 들어가고, 추천 제목이 영상 제목이 된다
+        assert "Categories of the trending Shorts" in prompts[2] and "24 Entertainment: 3 videos" in prompts[2]
+        up = res.generation.upload
+        assert up["category_id"] == "26" and up["hashtags"][0] == "#Shorts"
+        assert res.generation.title == "You've Been Eating Chips Wrong"
+        md = res.generation.output_path.read_text(encoding="utf-8")
+        assert "## 📋 업로드 정보" in md and "노하우/스타일" in md
     finally:
         server.shutdown()
 
