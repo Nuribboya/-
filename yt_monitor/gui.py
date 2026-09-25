@@ -1225,13 +1225,14 @@ class App:
         same = g is not None and g.script.strip() == script
         upload = g.upload if same and g.upload else None
         visual_hint = g.visual_hint if same else ""
+        source = {"trend": "trend", "oneclick": "topic"}.get(g.channel_id, "manual") if same else "manual"
         self.video_log.configure(state="normal")
         self.video_log.delete("1.0", "end")
         self.video_log.configure(state="disabled")
         pipeline = self.video_pipeline_factory(self.cfg)
         self.run_bg("🚀 원클릭 2/2 — 영상 만드는 중…" if one_click else "영상 생성 중…",
                     lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text, upload_meta=upload,
-                                         visual_hint=visual_hint,
+                                         visual_hint=visual_hint, source=source,
                                          on_progress=self._on_video_progress,
                                          on_status=self._video_log, cancel=cancel),
                     lambda res: self._on_video_done(res, one_click=one_click), cancellable=True)

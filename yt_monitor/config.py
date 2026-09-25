@@ -208,6 +208,14 @@ DEFAULTS = {
         "negative": REALISTIC_NEGATIVE,
         "timeout_sec": 300,
     },
+    "learning": {                           # 📈 내 채널 학습 (channel_learning.py)
+        "enabled": True,
+        "min_videos": 6,                    # 48시간 지난 내 쇼츠가 이만큼 쌓이면 반영
+        "settle_hours": 48,
+        "max_videos": 60,
+        "refresh_hours": 6,                 # 원클릭 전에 내 채널 조회수가 이보다 오래됐으면 새로 수집
+        "weight": 0.5,                      # 대본 길이: 내 채널 값 비중 (나머지는 유행 분석 값)
+    },
     "storage": {
         "video_cache_dir": "data/video_cache",   # 다운로드한 스톡 영상 캐시
         "bgm_dir": "bgm",                        # 배경음악 폴더 (분위기별 하위 폴더)

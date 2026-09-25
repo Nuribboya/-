@@ -116,6 +116,14 @@ ai_images:                        # (선택) 로컬 AI 이미지 생성 — Comf
   negative: cgi, 3d render, illustration, painting, drawing, cartoon, anime, plastic skin, airbrushed, overly smooth skin, oversaturated, text, watermark, logo, blurry, low quality, deformed hands, extra fingers, ugly, nsfw
   timeout_sec: 300
 
+learning:                         # 📈 내 채널 학습: 내가 올린 쇼츠 중 잘 된 것을 다음 영상에 반영
+  enabled: true
+  min_videos: 6                   # 48시간 지난 내 쇼츠가 이만큼 쌓이면 반영 (그 전엔 리포트만)
+  settle_hours: 48                # 게시 후 이 시간의 조회수로 비교
+  max_videos: 60
+  refresh_hours: 6                # 원클릭 전에 내 채널 조회수가 이보다 오래됐으면 새로 수집 (쿼터 몇 unit)
+  weight: 0.5                     # 대본 길이: 내 채널 값 비중 (나머지는 유행 분석 값)
+
 video:                            # 대본 → 쇼츠 영상 자동 생성 (edge-tts + Pexels + ffmpeg)
   ffmpeg_path: ""                 # 비우면 exe 옆 ffmpeg.exe → PATH 순서로 찾음
   width: 1080

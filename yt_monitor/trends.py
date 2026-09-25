@@ -392,13 +392,29 @@ def _script_seconds(settings: dict, ins) -> float:
     return float(settings["script_seconds"])
 
 
-def _apply_insights(g, ins) -> None:
-    """분석 결과를 생성 결과에 붙인다: 추천 업로드 시간 · 첫 화면 스타일."""
-    if ins is None:
-        return
-    if g.upload is not None and ins.upload_times:
-        g.upload["upload_times"] = list(ins.upload_times)
-    g.visual_hint = ins.visual_summary_en
+def _apply_insights(g, ins, mine=None) -> None:
+    """분석 결과를 생성 결과에 붙인다: 추천 업로드 시간(내 채널 기준이 있으면 먼저) · 첫 화면 스타일."""
+    times = list(mine.upload_times) if mine is not None and mine.ready else []
+    if ins is not None:
+        times += [t for t in ins.upload_times if t not in times]
+        g.visual_hint = ins.visual_summary_en
+    if g.upload is not None and times:
+        g.upload["upload_times"] = times[:3]
+
+
+def _my_insights(cfg, now: datetime, status):
+    """📈 내 채널 학습 (실패해도 영상 만들기는 계속)."""
+    from .channel_learning import load_my_insights
+
+    try:
+        return load_my_insights(cfg, now, status=status)
+    except Exception as exc:
+        log.warning("내 채널 학습 실패: %s", exc)
+        return None
+
+
+def _join(*parts: str) -> str:
+    return "\n\n".join(p for p in parts if p)
 
 
 def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now: datetime | None = None,
@@ -419,13 +435,17 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
         raise TrendError("조건에 맞는 최근 유행 쇼츠를 찾지 못했습니다. config.yaml 의 trends 설정"
                          "(lookback_days, min_views 등)을 넓혀 보세요.")
     ins = _analyze(cfg, settings, videos, now, tz, thumbs, vision=generate, status=status, cancel=cancel)
+    from . import channel_learning as learning
+
+    mine = _my_insights(cfg, now, status) if generate else None
     try:
         save_cache(trend_cache_path(cfg), settings, videos, thumbs, cached_at or now)
     except OSError as exc:
         log.warning("유행 캐시 저장 실패: %s", exc)
-    context = "\n\n".join(x for x in (trend_context(videos, now, tz, settings), prompt_text(ins, cfg.language)) if x)
+    context = _join(trend_context(videos, now, tz, settings), prompt_text(ins, cfg.language),
+                    learning.prompt_text(mine, cfg.language))
     table = trend_table(videos, now, tz, breakout_ratio=float(settings["breakout_ratio"]))
-    report = report_ko(ins)
+    report = _join(learning.report_ko(mine), report_ko(ins))
     result = TrendResult(videos, context, (report + "\n\n" + table) if report else table, units=units,
                          insights=ins, cached_at=cached_at)
     if not generate:
@@ -435,16 +455,19 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
     from .upload_meta import category_hint, category_stats
 
     stats = category_stats(videos, now, int(settings["top_n"]))
-    seconds = _script_seconds(settings, ins)
+    seconds = learning.blend_seconds(_script_seconds(settings, ins), mine, cfg.raw.get("learning"),
+                                     int(settings.get("min_script_seconds", 20)),
+                                     int(settings.get("max_script_seconds", 58)))
     if seconds != float(settings["script_seconds"]):
         status(f"분석 결과에 맞춰 대본 목표 길이를 {seconds:.0f}초로 합니다")
     gen = generator or ScriptGenerator.from_config(cfg)
-    hint = "\n\n".join(x for x in (category_hint(stats, cfg.language), title_hint(ins, cfg.language)) if x)
+    hint = _join(category_hint(stats, cfg.language), title_hint(ins, cfg.language),
+                 learning.title_hint(mine, cfg.language))
     g = gen.generate(channel_id=TREND_CHANNEL_ID, channel_title=TREND_TITLE, context=context, now=now,
                      trigger="trend", topics_prompt=TREND_TOPICS_PROMPT, script_prompt=SHORTS_SCRIPT_PROMPT,
                      script_minutes=seconds / 60, upload_hint=hint, upload_stats=stats,
                      on_status=on_status, on_token=on_token, cancel=cancel)
-    _apply_insights(g, ins)
+    _apply_insights(g, ins, mine)
     save_generation(g, cfg.outputs_dir, tz)
     from .db import Database
 
@@ -475,23 +498,31 @@ def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
     if hit and hit[0]:
         ins = _analyze(cfg, settings, hit[0], now, tz, hit[1], vision=False, status=on_status or log.info,
                        cancel=cancel)
+    from . import channel_learning as learning
+
+    mine = _my_insights(cfg, now, on_status or log.info)
     ensure_prompts(cfg)
     gen = generator or ScriptGenerator.from_config(cfg)
-    context = f"(The creator picked this topic: {topic})"
-    if ins is not None:
-        context += "\n\n" + prompt_text(ins, cfg.language)
+    context = _join(f"(The creator picked this topic: {topic})",
+                    prompt_text(ins, cfg.language) if ins is not None else "",
+                    learning.prompt_text(mine, cfg.language))
+    seconds = learning.blend_seconds(_script_seconds(settings, ins), mine, cfg.raw.get("learning"),
+                                     int(settings.get("min_script_seconds", 20)),
+                                     int(settings.get("max_script_seconds", 58)))
     g = Generation(ONE_CLICK_CHANNEL_ID, ONE_CLICK_TITLE, now, "manual", gen.model, context,
                    [{"topic": topic, "reason": "직접 입력한 주제", "titles": [topic]}], 0,
-                   script_prompt=SHORTS_SCRIPT_PROMPT, script_minutes=_script_seconds(settings, ins) / 60,
-                   upload_hint=title_hint(ins, cfg.language) if ins is not None else "")
+                   script_prompt=SHORTS_SCRIPT_PROMPT, script_minutes=seconds / 60,
+                   upload_hint=_join(title_hint(ins, cfg.language) if ins is not None else "",
+                                     learning.title_hint(mine, cfg.language)))
     gen.write_script(g, 0, on_status=on_status, on_token=on_token, cancel=cancel)
-    _apply_insights(g, ins)
+    _apply_insights(g, ins, mine)
     save_generation(g, cfg.outputs_dir, tz)
     with Database(cfg.db_path) as db:
         record_generation(db, g)
     note = "최근 유행 분석 결과를 길이 · 제목 · 업로드 시간에 반영했습니다" if ins is not None else \
         "유행 분석은 건너뛰었습니다 (먼저 [🔥 유행 쇼츠 분석]을 해 두면 그 결과를 반영합니다)"
-    return TrendResult([], context, f"직접 입력한 주제: {topic}\n({note})", generation=g, insights=ins)
+    table = _join(f"직접 입력한 주제: {topic}\n({note})", learning.report_ko(mine))
+    return TrendResult([], context, table, generation=g, insights=ins)
 
 
 def main(argv: list[str] | None = None) -> int:

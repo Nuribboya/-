@@ -158,6 +158,7 @@ class VideoPipeline:
     # ---- 실행 ---------------------------------------------------------------------
     def run(self, script: str, title: str = "", *, voice: str | None = None, hook_text: str | None = None,
             output_path: Path | None = None, now: datetime | None = None, upload_meta=None, visual_hint: str = "",
+            source: str = "manual",
             on_progress: Callable[[int, int, str], None] | None = None,
             on_status: Callable[[str], None] | None = None,
             cancel: threading.Event | None = None) -> VideoResult:
@@ -367,11 +368,26 @@ class VideoPipeline:
         else:
             work_kept = work
         status(f"완료: {final} ({total:.1f}초)")
+        self._record_production(now, title, upload, meta.get("mood", ""), str(getattr(tts, "voice", "")),
+                                bgm_track.name if bgm_track else "", total, len(scene_images), source, final)
         return VideoResult(final, srt, credits, work_kept, total, scenes, warnings,
                            mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")),
                            upload_path=upload_path, upload_title=upload.title if upload else "",
                            bgm=bgm_track.name if bgm_track else "", upload=upload, description=description,
                            bgm_note=bgm_note)
+
+    def _record_production(self, now, title, upload, mood, voice, bgm, total, ai_count, source, final):
+        """내 채널 학습용 기록: 나중에 실제로 올라간 영상과 제목으로 연결한다."""
+        from ..db import Database
+
+        titles = [t["title"] for t in (upload.titles if upload else [])]
+        try:
+            with Database(self.cfg.db_path) as db:
+                db.add_production(now, title, titles or [title], mood=mood, voice=voice, bgm=bgm, duration=total,
+                                  ai_images=ai_count, source=source, video_path=str(final))
+                db.commit()
+        except Exception as exc:  # 기록 실패가 영상 생성을 막으면 안 된다
+            log.warning("제작 기록 저장 실패: %s", exc)
 
     def _add_bgm(self, comp, narration: Path, total: float, mood: str, status, warn) -> tuple[Path, Path | None]:
         """분위기에 맞는 배경음악을 bgm/ 폴더에서 골라 섞는다. 곡이 없거나 실패하면 목소리만."""

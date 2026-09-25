@@ -8,6 +8,8 @@
 - categories      : YouTube 카테고리 ID → 이름 캐시
 - alerts          : 전송한 알림 이력 (쿨다운 판단용)
 - generations     : Ollama로 생성한 주제/제목/대본 이력
+- productions     : 이 프로그램이 만든 영상 기록 (제목 후보 · 분위기 · 음성 · 길이 …) → 내 채널 학습에서
+                    실제로 올라간 영상과 제목으로 연결해 무엇이 잘 됐는지 비교
 
 단독 확인: python -m yt_monitor.db [DB 경로]   → 테이블별 행 수 출력
 
@@ -89,9 +91,24 @@ CREATE TABLE IF NOT EXISTS generations (
     output_path   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_generations_channel ON generations(channel_id, created_at);
+
+CREATE TABLE IF NOT EXISTS productions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at    TEXT NOT NULL,
+    title         TEXT NOT NULL,       -- 영상 파일 제목
+    titles_json   TEXT NOT NULL,       -- 업로드 제목 후보들 (실제 영상과 연결할 때 사용)
+    mood          TEXT,
+    voice         TEXT,
+    bgm           TEXT,
+    duration      REAL,
+    ai_images     INTEGER,
+    source        TEXT,                -- trend | topic | manual
+    video_path    TEXT
+);
 """
 
-TABLES = ("channels", "channel_stats", "videos", "video_stats", "categories", "alerts", "generations")
+TABLES = ("channels", "channel_stats", "videos", "video_stats", "categories", "alerts", "generations",
+          "productions")
 
 
 def utcnow() -> datetime:
@@ -227,6 +244,21 @@ class Database:
              json.dumps(topics, ensure_ascii=False), selected, title, script, output_path),
         )
         return int(cur.lastrowid)
+
+    def add_production(self, created_at: datetime, title: str, titles: list[str], *, mood: str = "",
+                       voice: str = "", bgm: str = "", duration: float | None = None, ai_images: int = 0,
+                       source: str = "", video_path: str = "") -> int:
+        cur = self.conn.execute(
+            """INSERT INTO productions (created_at, title, titles_json, mood, voice, bgm, duration, ai_images,
+                                        source, video_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (to_iso(created_at), title, json.dumps(titles, ensure_ascii=False), mood, voice, bgm, duration,
+             ai_images, source, video_path))
+        return int(cur.lastrowid)
+
+    def get_productions(self) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM productions ORDER BY created_at").fetchall()
+        return [{**dict(r), "created_at": from_iso(r["created_at"]), "titles": json.loads(r["titles_json"] or "[]")}
+                for r in rows]
 
     def commit(self) -> None:
         self.conn.commit()
