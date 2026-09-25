@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>전공 적성검사</title>
+<style>
+  body {
+    font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #222;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  nav { margin-bottom: 16px; font-size: 0.9rem; }
+  nav a { color: #555; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  .error { color: #c62828; }
+  fieldset {
+    border: none;
+    border-top: 1px solid #ddd;
+    padding: 12px 0;
+    margin: 0;
+  }
+  fieldset legend {
+    font-weight: bold;
+    padding: 0;
+    white-space: normal;
+  }
+  .likert {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .likert label {
+    flex: 1;
+    text-align: center;
+    font-size: 0.78rem;
+    color: #555;
+    cursor: pointer;
+  }
+  .likert input { display: block; margin: 0 auto 4px; }
+  button {
+    margin-top: 24px;
+    padding: 10px 24px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  .result { margin-top: 32px; padding: 16px; border-radius: 8px; background: #eef4fb; border: 1px solid #90b8e0; }
+  .holland-code { font-size: 1.6rem; font-weight: bold; letter-spacing: 2px; }
+  .trait-bars { margin-top: 12px; }
+  .trait-bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .trait-bar-label { width: 150px; font-size: 0.85rem; flex-shrink: 0; }
+  .trait-bar-track { flex: 1; background: #dde6f0; border-radius: 4px; height: 14px; overflow: hidden; }
+  .trait-bar-fill { background: #3f6fb0; height: 100%; }
+  .trait-bar-value { width: 42px; text-align: right; font-size: 0.85rem; color: #555; }
+  .majors { margin-top: 20px; padding: 0; list-style: none; }
+  .major-card {
+    background: #fff;
+    border: 1px solid #d7e0ea;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .major-card h3 { margin: 0 0 4px; font-size: 1.05rem; }
+  .major-card .match { color: #3f6fb0; font-weight: bold; font-size: 0.9rem; }
+  .major-card .careers { color: #666; font-size: 0.85rem; margin-top: 6px; }
+</style>
+</head>
+<body>
+<nav><a href="/">← 수학 채점 시스템</a></nav>
+<h1>전공 적성검사</h1>
+<p>60개 문항에 얼마나 가깝게 느껴지는지 1~5점으로 응답하면, 홀랜드(RIASEC)
+진로적성 6개 유형 점수를 바탕으로 잘 맞을 가능성이 높은 전공을 추천해 드립니다.</p>
+
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+
+{% if result %}
+<div class="result">
+  <p>당신의 홀랜드 코드는 <span class="holland-code">{{ result.holland_code }}</span> 입니다.</p>
+  <div class="trait-bars">
+  {% for code in trait_order %}
+    <div class="trait-bar-row">
+      <span class="trait-bar-label">{{ traits[code].name }}</span>
+      <span class="trait-bar-track"><span class="trait-bar-fill" style="width: {{ result.trait_scores[code] }}%;"></span></span>
+      <span class="trait-bar-value">{{ result.trait_scores[code] }}%</span>
+    </div>
+  {% endfor %}
+  </div>
+</div>
+
+<h2>추천 전공</h2>
+<ul class="majors">
+{% for rec in result.top_recommendations %}
+  <li class="major-card">
+    <h3>{{ loop.index }}. {{ rec.name }} <span class="match">(적합도 {{ rec.match_score }}%, {{ rec.holland_code }}형)</span></h3>
+    <p>{{ rec.description }}</p>
+    <p class="careers">관련 직업: {{ rec.careers | join(', ') }}</p>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<form method="post" action="/aptitude">
+{% for q in questions %}
+  <fieldset>
+    <legend>{{ loop.index }}. {{ q.text }}</legend>
+    <div class="likert">
+    {% for value, label in likert_labels.items() %}
+      <label>
+        <input type="radio" name="{{ q.id }}" value="{{ value }}" {% if answers.get(q.id) == value %}checked{% endif %} required>
+        {{ label }}
+      </label>
+    {% endfor %}
+    </div>
+  </fieldset>
+{% endfor %}
+  <button type="submit">결과 보기</button>
+</form>
+</body>
+</html>
