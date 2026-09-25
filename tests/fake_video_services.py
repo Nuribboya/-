@@ -126,3 +126,96 @@ class FakeEdgeTTS(EdgeTTS):
             self.fail_times -= 1
             raise ConnectionError("가짜 네트워크 오류")
         return FakeCommunicate(text)
+
+
+def start_fake_pixabay(clip_bytes: dict[str, bytes]):
+    """/api/videos/?key=..&q=.. → hits (세로·가로 섞음), /files/<name> → mp4."""
+    names = sorted(clip_bytes)
+
+    class Handler(BaseHTTPRequestHandler):
+        log: list = []
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            from urllib.parse import parse_qs, urlparse
+
+            type(self).log.append(self.path)
+            host = f"http://127.0.0.1:{self.server.server_address[1]}"
+            if self.path.startswith("/api/videos/"):
+                q = parse_qs(urlparse(self.path).query)
+                if q.get("key") != ["good"]:
+                    body, code = b"[ERROR 400] Invalid or missing API key", 400
+                else:
+                    base = 500_000 + abs(hash(q["q"][0])) % 10_000 * 10
+                    hits = [{"id": base + k, "pageURL": f"https://pixabay.com/videos/id-{base + k}/",
+                             "duration": 2, "user": f"pix{k}",
+                             "videos": {"large": {"url": f"{host}/files/{n}", "width": 1920, "height": 1080},
+                                        "medium": {"url": f"{host}/files/{n}",
+                                                   "width": 360 if k else 640, "height": 640 if k else 360}}}
+                            for k, n in enumerate(names[:2])]
+                    body, code = json.dumps({"hits": hits}).encode(), 200
+            elif self.path.startswith("/files/"):
+                body, code = clip_bytes[self.path.rsplit("/", 1)[1]], 200
+            else:
+                body, code = b"{}", 404
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/api/videos/", Handler
+
+
+def start_fake_comfy(png: bytes, checkpoints=("juggernautXL_lightning.safetensors",), fail: bool = False,
+                     new_combo_format: bool = False):
+    """ComfyUI API 흉내: /system_stats, /object_info, /prompt, /history, /view, /free, /interrupt."""
+
+    class Handler(BaseHTTPRequestHandler):
+        prompts: list = []
+        freed: list = []
+
+        def log_message(self, *args):
+            pass
+
+        def _send(self, code, obj=None, raw=None):
+            body = raw if raw is not None else json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/system_stats":
+                return self._send(200, {"system": {}})
+            if self.path == "/object_info/CheckpointLoaderSimple":
+                spec = ["COMBO", {"options": list(checkpoints)}] if new_combo_format else [list(checkpoints), {}]
+                return self._send(200, {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": spec}}}})
+            if self.path.startswith("/history/"):
+                pid = self.path.rsplit("/", 1)[1]
+                if fail:
+                    return self._send(200, {pid: {"outputs": {}, "status": {
+                        "status_str": "error", "completed": False,
+                        "messages": [["execution_error", {"exception_message": "CUDA out of memory"}]]}}})
+                return self._send(200, {pid: {"outputs": {"9": {"images": [
+                    {"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}},
+                    "status": {"status_str": "success", "completed": True}}})
+            if self.path.startswith("/view"):
+                return self._send(200, raw=png)
+            self._send(404, {})
+
+        def do_POST(self):
+            data = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            if self.path == "/prompt":
+                type(self).prompts.append(data["prompt"])
+                return self._send(200, {"prompt_id": f"p{len(type(self).prompts)}", "number": 1})
+            if self.path == "/free":
+                type(self).freed.append(data)
+            self._send(200, {})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}", Handler

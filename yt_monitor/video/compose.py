@@ -38,6 +38,14 @@ class Shot:
     source: Path | None = None     # None → 단색 배경 (스톡 영상을 못 찾았을 때)
     seek: float = 0.0              # 원본에서 시작할 위치(초). 같은 영상을 두 번 쓸 때 다른 장면이 나오게
     color: str = BACKGROUND_COLORS[0]
+    zoom_out: bool = False         # True면 확대된 상태에서 천천히 빠진다 (컷마다 번갈아 → 단조롭지 않게)
+
+    @property
+    def is_image(self) -> bool:
+        return self.source is not None and Path(self.source).suffix.lower() in IMAGE_EXTS
+
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def split_frames(boundaries: list[float], fps: int, clip_max_seconds: float) -> list[list[int]]:
@@ -87,6 +95,10 @@ class Composer:
         self.fps = int(video_cfg.get("fps") or 30)
         self.crf = str(video_cfg.get("crf") or 21)
         self.preset = str(video_cfg.get("preset") or "veryfast")
+        # 스톡 영상이 밋밋해 보이지 않게: 천천히 줌 + 대비/채도 강화
+        self.zoom = float(video_cfg.get("zoom", 0.08) or 0)
+        self.contrast = float(video_cfg.get("contrast", 1.08) or 1)
+        self.saturation = float(video_cfg.get("saturation", 1.2) or 1)
 
     def _encode_args(self) -> list[str]:
         return ["-c:v", "libx264", "-preset", self.preset, "-crf", self.crf, "-pix_fmt", "yuv420p",
@@ -100,11 +112,24 @@ class Composer:
         return wav_duration(out)
 
     # 1) 클립 맞추기 ------------------------------------------------------------------
+    def shot_filter(self, shot: Shot) -> str:
+        """크기 맞추기 → (줌) → 색감. 줌은 매 프레임 크기를 키운 뒤 가운데를 잘라내는 방식 (zoompan보다 2배 빠름)."""
+        w, h = self.w, self.h
+        parts = [f"scale={w}:{h}:force_original_aspect_ratio=increase", f"crop={w}:{h}", f"fps={self.fps}", "setpts=PTS-STARTPTS"]
+        if self.zoom > 0 and shot.source is not None:
+            dur = max(shot.frames / self.fps, 0.1)
+            z = f"(1+{self.zoom:g}*(1-t/{dur:.3f}))" if shot.zoom_out else f"(1+{self.zoom:g}*t/{dur:.3f})"
+            parts += [f"scale=w='trunc({w}*{z}/2)*2':h='trunc({h}*{z}/2)*2':eval=frame", f"crop={w}:{h}"]
+        if shot.source is not None and (self.contrast != 1 or self.saturation != 1):
+            parts.append(f"eq=contrast={self.contrast:g}:saturation={self.saturation:g}")
+        return ",".join(parts + ["setsar=1", "format=yuv420p"])
+
     def prepare_shot(self, shot: Shot, out: Path) -> Path:
-        vf = (f"scale={self.w}:{self.h}:force_original_aspect_ratio=increase,"
-              f"crop={self.w}:{self.h},fps={self.fps},setsar=1,format=yuv420p")
+        vf = self.shot_filter(shot)
         if shot.source is None:
             inputs = ["-f", "lavfi", "-i", f"color=c={shot.color}:s={self.w}x{self.h}:r={self.fps}"]
+        elif shot.is_image:                                     # AI 이미지 등 정지 사진 → 줌으로 움직임
+            inputs = ["-loop", "1", "-framerate", str(self.fps), "-i", shot.source]
         else:
             inputs = ["-stream_loop", "-1"]                    # 클립이 짧으면 반복
             if shot.seek > 0:

@@ -23,7 +23,8 @@ TOPICS_JSON = {
 
 KEYWORDS_JSON = {
     "scenes": [
-        {"scene": 1, "keywords": ["convenience store", "snack shelf", "night street"]},
+        {"scene": 1, "keywords": ["convenience store", "snack shelf", "night street"],
+         "image_prompt": "neon convenience store at night, low angle, rain reflections"},
         {"scene": 2, "keywords": ["instant noodles", "rice ball"]},
         {"scene": 3, "keywords": ["yogurt granola", "breakfast bowl"]},
         {"scene": 4, "keywords": ["subscribe button", "smartphone"]},
@@ -45,6 +46,7 @@ SCRIPT_TEXT = """# 대본
 class _Handler(BaseHTTPRequestHandler):
     models = ["qwen2.5:7b", "llama3:latest"]
     requests_log: list = []
+    unloads: list = []
 
     def log_message(self, *args):
         pass
@@ -66,6 +68,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         type(self).requests_log.append(payload)
+        if self.path == "/api/generate":            # keep_alive=0 → 모델 내리기
+            type(self).unloads.append(payload.get("model"))
+            return self._json(200, {"done": True})
         if payload["model"] not in self.models:
             return self._json(404, {"error": f"model '{payload['model']}' not found"})
         prompt = payload["messages"][-1]["content"]
@@ -86,7 +91,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def start_fake_ollama(port: int = 0, models: list[str] | None = None):
-    handler = type("Handler", (_Handler,), {"models": models or _Handler.models, "requests_log": []})
+    handler = type("Handler", (_Handler,), {"models": models or _Handler.models, "requests_log": [],
+                                            "unloads": []})
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}", handler

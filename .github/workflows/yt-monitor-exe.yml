@@ -42,7 +42,7 @@ jobs:
           ffmpeg -hide_banner -version
 
       - name: 테스트
-        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py -q
+        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py tests/test_yt_monitor_visuals.py -q
 
       - name: exe 빌드
         run: python yt_monitor/build_exe.py
@@ -56,7 +56,7 @@ jobs:
           # 러너에는 Ollama가 없으므로 '서버 꺼짐'(종료 코드 1)이 정상. 2 이상이면 설정/모듈 문제.
           if ($p.ExitCode -ne 1) { throw "예상치 못한 종료 코드: $($p.ExitCode)" }
           if (-not (Test-Path "$dir/prompts/script_gen.txt")) { throw "prompts 복사 실패" }
-          if (-not (Test-Path "$dir/prompts/video_keywords.txt")) { throw "video_keywords.txt 복사 실패" }
+          if (-not (Test-Path "$dir/prompts/video_scenes.txt")) { throw "video_scenes.txt 복사 실패" }
           $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList "--check-ffmpeg" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "ffmpeg 확인 실패: $($p.ExitCode)" }
           # 한글/공백이 든 경로로 오프라인 영상 합성 (ffmpeg 자막 필터의 Windows 경로 처리 확인)

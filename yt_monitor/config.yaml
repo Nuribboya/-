@@ -8,6 +8,7 @@
 # 콘텐츠 언어/시장: en = 미국 중심 영어 쇼츠 (광고 단가가 높음), ko = 한국어
 # 설정 창에서 바꾸면 아래 trends/video 의 지역·음성·자막 값이 한꺼번에 바뀝니다.
 language: en
+config_version: 2
 
 youtube:
   api_key: ""
@@ -82,12 +83,37 @@ pexels:                           # 무료 스톡 영상 API — https://www.pex
   per_page: 15                    # 키워드당 검색 결과 수
   timeout_sec: 60
 
+pixabay:                          # (선택) 스톡 영상 추가 소스 — https://pixabay.com/api/docs/ 가입하면 키 표시
+  api_key: ""
+  api_key_env: PIXABAY_API_KEY
+  per_page: 15
+
+ai_images:                        # (선택) 로컬 AI 이미지 생성 — ComfyUI (https://www.comfy.org/download)
+  enabled: false
+  host: http://127.0.0.1:8188
+  mode: mix                       # mix = 첫 씬(훅) + 스톡 영상 없는 씬 / all = 모든 씬
+  checkpoint: ""                  # 비우면 ComfyUI models/checkpoints 의 첫 번째 모델
+  width: 768
+  height: 1344                    # 9:16에 가까운 SDXL 해상도
+  steps: 6                        # Lightning/Turbo 모델 기준. 일반 SDXL은 25~30
+  cfg: 2.0                        # Lightning 기준. 일반 SDXL은 5~7
+  sampler: dpmpp_sde
+  scheduler: karras
+  style: cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo
+  negative: text, watermark, logo, blurry, low quality, deformed, ugly, nsfw
+  timeout_sec: 300
+
 video:                            # 대본 → 쇼츠 영상 자동 생성 (edge-tts + Pexels + ffmpeg)
   ffmpeg_path: ""                 # 비우면 exe 옆 ffmpeg.exe → PATH 순서로 찾음
   width: 1080
   height: 1920                    # 9:16 세로
   fps: 30
-  clip_max_seconds: 4             # 씬당 클립 길이. 씬이 이보다 길면 클립 여러 개로 나눠 붙임
+  clip_max_seconds: 2.5           # 씬당 클립 길이. 씬이 이보다 길면 클립 여러 개로 나눠 붙임 (쇼츠는 빠른 컷)
+  zoom: 0.08                      # 컷마다 천천히 8% 줌인/줌아웃 (0이면 끔)
+  contrast: 1.08                  # 대비 (1 = 원본)
+  saturation: 1.2                 # 채도 (1 = 원본). 스톡 영상 특유의 밋밋함을 줄임
+  hook_seconds: 2.5               # 첫 화면 큰 훅 문구 표시 시간 (0이면 끔)
+  hook_font_size: 96
   min_scene_seconds: 2.5          # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
   max_scene_chars: 160            # 씬 하나에 넣을 최대 글자 수
   keywords_per_scene: 3           # Ollama가 뽑을 씬별 검색 키워드 수 (앞에서부터 검색)
@@ -109,7 +135,7 @@ storage:
   db_path: data/yt_monitor.db     # 이 파일 기준 상대 경로
   reports_dir: reports            # 수집할 때마다 저장하는 채널 리포트
   outputs_dir: outputs            # 생성한 주제/대본/영상 (outputs/날짜/채널명.md, 제목.mp4)
-  prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt, video_keywords.txt)
+  prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt, video_scenes.txt)
   video_cache_dir: data/video_cache  # 다운로드한 스톡 영상 캐시 (지워도 됨)
 
 schedule:

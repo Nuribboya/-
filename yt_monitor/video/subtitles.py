@@ -139,9 +139,20 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "＼").replace("{", "(").replace("}", ")").replace("\n", "\\N")
 
 
+def hook_display(text: str) -> str:
+    """첫 화면 훅 문구: 영어는 대문자로 (쇼츠에서 흔한 스타일), 끝 마침표 제거."""
+    text = re.sub(r"\s+", " ", text).strip().rstrip(".")
+    return text.upper() if text.isascii() else text
+
+
 def to_ass(cues: list[Cue], *, width: int = 1080, height: int = 1920, font: str = "Malgun Gothic",
-           font_size: int = 72, margin_bottom: int = 320, box_opacity: float = 0.6) -> str:
-    """쇼츠 스타일 ASS: 하단 중앙(Alignment 2), 굵게, 흰 글씨 + 반투명 검은 박스(BorderStyle 3)."""
+           font_size: int = 72, margin_bottom: int = 320, box_opacity: float = 0.6,
+           hook: Cue | None = None, hook_font_size: int = 96) -> str:
+    """쇼츠 스타일 ASS: 하단 중앙(Alignment 2), 굵게, 흰 글씨 + 반투명 검은 박스(BorderStyle 3).
+
+    hook 을 주면 첫 몇 초 동안 화면 위쪽에 큰 노란 글씨(검은 테두리)로 훅 문구를 띄운다.
+    살짝 커졌다가 돌아오는 팝 효과 → 넘기려던 손가락을 멈추게 하는 용도.
+    """
     alpha = f"{round((1 - min(max(box_opacity, 0.0), 1.0)) * 255):02X}"
     box = f"&H{alpha}000000"          # &HAABBGGRR, AA=00 불투명
     pad = max(8, font_size // 4)      # BorderStyle 3에서 Outline 값 = 박스 여백
@@ -157,12 +168,17 @@ YCbCr Matrix: TV.709
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Shorts,{font},{font_size},&H00FFFFFF,&H000000FF,{box},{box},-1,0,0,0,100,100,0,0,3,{pad},0,2,{side},{side},{margin_bottom},1
+Style: Hook,{font},{hook_font_size},&H0000F0FF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,{max(4, hook_font_size // 10)},{max(2, hook_font_size // 30)},8,{side},{side},{int(height * 0.18)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [f"Dialogue: 0,{_ass_time(c.start)},{_ass_time(c.end)},Shorts,,0,0,0,,{_ass_escape(c.text)}"
              for c in cues]
+    if hook is not None and hook.text.strip():
+        pop = r"{\fad(60,250)\fscx80\fscy80\t(0,160,\fscx112\fscy112)\t(160,300,\fscx100\fscy100)}"
+        lines.insert(0, f"Dialogue: 1,{_ass_time(hook.start)},{_ass_time(hook.end)},Hook,,0,0,0,,"
+                        f"{pop}{_ass_escape(hook_display(hook.text))}")
     return head + "\n".join(lines) + "\n"
 
 
@@ -171,7 +187,8 @@ def ass_style_from_config(video_cfg: dict) -> dict:
                 font=str(video_cfg.get("subtitle_font") or "Malgun Gothic"),
                 font_size=int(video_cfg.get("subtitle_font_size") or 72),
                 margin_bottom=int(video_cfg.get("subtitle_margin_bottom") or 0),
-                box_opacity=float(video_cfg.get("subtitle_box_opacity", 0.6)))
+                box_opacity=float(video_cfg.get("subtitle_box_opacity", 0.6)),
+                hook_font_size=int(video_cfg.get("hook_font_size") or 96))
 
 
 def main(argv: list[str] | None = None) -> int:

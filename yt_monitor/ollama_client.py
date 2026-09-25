@@ -109,6 +109,14 @@ class OllamaClient:
         if not st.model_present:
             raise ModelMissing(st.message)
 
+    def unload(self) -> None:
+        """모델을 그래픽카드 메모리에서 바로 내린다 (AI 이미지 생성에 메모리를 넘겨주기 위해)."""
+        try:
+            self.session.post(f"{self.host}/api/generate", json={"model": self.model, "keep_alive": 0},
+                              timeout=15)
+        except requests.RequestException:
+            pass
+
     # ---- 생성 ---------------------------------------------------------------
 
     def chat(self, prompt: str, *, system: str | None = None, json_mode: bool = False,

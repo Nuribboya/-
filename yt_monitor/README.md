@@ -121,6 +121,32 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
   그 뒤에 `config.yaml`에서 직접 바꾼 값(예: 음성)은 그대로 유지됩니다.
 - 영어 대본 길이는 분당 150단어 기준입니다 (쇼츠 50초 ≈ 125단어).
 
+## ⚡ 눈에 띄는 영상 만들기 (효과 · 훅 문구 · Pixabay · AI 이미지)
+
+스톡 영상은 "어디에나 쓸 수 있게" 무난하게 찍혀 있어서 그대로 붙이면 밋밋합니다. 그래서 편집으로 강하게 만듭니다.
+
+| 기능 | 기본값 | 설정 (`config.yaml`) |
+| --- | --- | --- |
+| **첫 화면 큰 훅 문구** — 처음 2.5초 동안 위쪽에 큰 노란 글씨(검은 테두리, 팝 효과). 영어는 대문자 | 제목을 사용 (영상 생성 탭에서 수정, `-` 입력 시 끔) | `video.hook_seconds`, `hook_font_size` |
+| **줌인/줌아웃** — 컷마다 번갈아 천천히 8% | 켜짐 | `video.zoom` (0이면 끔) |
+| **색감 강화** — 대비·채도 | 1.08 / 1.2 | `video.contrast`, `saturation` |
+| **빠른 컷** — 2.5초마다 화면 전환 | 2.5초 | `video.clip_max_seconds` |
+| **강렬한 검색어** — dramatic, close up, slow motion, neon … | 켜짐 | `prompts/video_scenes.txt` |
+| **Pixabay** — Pexels와 번갈아 검색해서 영상 선택 폭 넓히기 | 키를 넣으면 켜짐 | ⚙ 설정 → Pixabay API 키 |
+| **AI 이미지 (ComfyUI)** — 첫 씬(훅)과 스톡 영상을 못 찾은 씬에 AI 이미지 | 꺼짐 | ⚙ 설정 → AI 이미지 생성, `ai_images.mode` (`mix`/`all`) |
+
+### AI 이미지 생성 켜기 (그래픽카드 필요, RTX 5060 8GB면 충분)
+1. <https://www.comfy.org/download>에서 **ComfyUI Desktop**(Windows · NVIDIA)을 설치하고 실행합니다.
+2. SDXL 계열 **Lightning/Turbo 모델**(`.safetensors`, 예: Juggernaut XL Lightning)을 받아
+   ComfyUI의 `models/checkpoints` 폴더에 넣습니다. 모델마다 이용 조건이 다르니 상업적 이용이 가능한지 확인하세요.
+3. 프로그램 **⚙ 설정 → AI 이미지 생성** 체크 → **[연결 확인]**을 눌러 "ComfyUI 준비 완료"가 나오면 끝.
+4. 영상을 만들면 Ollama가 씬마다 영화 같은 장면 묘사를 쓰고, ComfyUI가 768x1344 세로 이미지를 만듭니다.
+   이미지는 줌 효과로 움직이는 영상처럼 들어갑니다. 이미지를 만들기 전에 Ollama 모델을 그래픽카드에서 내리고,
+   다 만든 뒤에는 ComfyUI 메모리도 비워서 8GB로도 돌아가게 했습니다.
+- 일반 SDXL 모델(Lightning이 아닌 것)을 쓰면 `ai_images.steps: 25`, `cfg: 6`으로 바꾸세요.
+- ComfyUI가 꺼져 있으면 경고만 남기고 스톡 영상으로 계속 만듭니다.
+- 단독 테스트: `python -m yt_monitor.video.comfyui --check` / `python -m yt_monitor.video.comfyui "a giant shark under a neon city"`
+
 ## 🔥 유행 쇼츠 분석 → 영상
 
 유튜브는 알고리즘 점수를 공개하지 않으므로, **최근 올라왔는데 조회수가 빠르게 오르는 쇼츠**를 찾아 유행을 추정합니다.
@@ -142,7 +168,7 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 
 | 단계 | 하는 일 | 사용 도구 |
 | --- | --- | --- |
-| 1/6 키워드 추출 | 대본을 문장/씬으로 나누고, 씬마다 영어 검색어 2~3개 추출 | 로컬 Ollama (`prompts/video_keywords.txt`). 꺼져 있으면 대본의 명사로 대신 검색 |
+| 1/6 키워드 추출 | 대본을 문장/씬으로 나누고, 씬마다 영어 검색어 2~3개 추출 | 로컬 Ollama (`prompts/video_scenes.txt`). 꺼져 있으면 대본의 명사로 대신 검색 |
 | 2/6 영상 다운로드 | 검색어로 세로 영상 검색 → 출력 해상도에 맞는 파일 다운로드 (캐시) | Pexels API (시간당 200회 무료) |
 | 3/6 TTS 음성 | 씬마다 음성 합성 + 단어별 타임스탬프 | edge-tts (키 불필요, 한국어/영어) |
 | 4/6 자막 | 타임스탬프로 14자 안팎의 짧은 자막 덩어리 생성 → SRT | 직접 생성 |
@@ -217,7 +243,7 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
   명령줄을 복사해 명령 프롬프트에서 그대로 다시 실행해 볼 수 있습니다. 프로그램 로그는 `logs/yt_monitor.log`.
 - **자막이 네모(□)로 나옴**: `subtitle_font`에 PC에 설치된 한글 폰트 이름을 넣으세요 (예: `NanumGothic`).
 - **TTS 실패**: edge-tts는 인터넷(`speech.platform.bing.com`)이 필요합니다. 회사망이면 `video.tts_proxy`에 프록시 주소를 넣으세요.
-- **영상이 주제와 안 맞음**: `prompts/video_keywords.txt`를 고치거나, 대본에 구체적인 장면(사물·장소·행동)을 넣으면 좋아집니다.
+- **영상이 주제와 안 맞음**: `prompts/video_scenes.txt`를 고치거나, 대본에 구체적인 장면(사물·장소·행동)을 넣으면 좋아집니다.
   Pexels는 영어 검색 결과가 훨씬 많으니 Ollama를 켜 두는 것을 권장합니다.
 
 ## 4. 성장 둔화 판단
@@ -275,7 +301,7 @@ macOS나 Linux에서 같은 명령을 실행하면 해당 OS용 실행 파일이
 YouTube, Ollama, 텔레그램, Pexels, edge-tts는 가짜 서버와 객체로 대체되므로 키나 모델이 없어도 됩니다.
 영상 합성 테스트는 ffmpeg가 설치되어 있을 때만 실행됩니다.
 ```bash
-pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py
+pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py tests/test_yt_monitor_visuals.py
 # 리눅스 서버처럼 화면이 없으면: xvfb-run -a pytest ...
 ```
 

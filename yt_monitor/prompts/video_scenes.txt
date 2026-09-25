@@ -1,0 +1,27 @@
+너는 조회수 잘 나오는 유튜브 쇼츠 편집자야. 아래 대본의 각 씬에 들어갈 화면을 고르려고 해.
+각 씬마다 두 가지를 만들어줘.
+
+1) keywords: Pexels/Pixabay 스톡 영상 검색어 {keywords_per_scene}개 (영어)
+2) image_prompt: AI 이미지 생성용 장면 묘사 1개 (영어)
+
+[keywords 규칙]
+- 1~3단어의 구체적인 영어 명사구. 화면에 실제로 보일 장면·사물·행동 위주.
+- 시선을 끄는 강렬한 화면이 나오도록 dramatic, close up, slow motion, neon, aerial, explosion, macro,
+  night city 같은 말을 적절히 붙여. (예: "coffee pour slow motion", "storm clouds dramatic", "neon city night")
+- 추상적인 단어(행복, 성공, 방법)만 쓰지 마. 가장 잘 맞는 검색어를 먼저.
+
+[image_prompt 규칙]
+- 한 문장, 25단어 이내의 영어. 스크롤을 멈추게 할 만큼 강렬하고 영화 같은 장면.
+- 주인공이 되는 사물/장면 + 구도(extreme close-up, low angle, wide shot) + 분위기(조명, 색감)를 넣어.
+- 실존 인물, 유명인, 브랜드 로고, 글자, 선정적이거나 잔인한 장면은 넣지 마.
+
+- 씬 번호는 아래 목록과 똑같이 맞춰. 설명 없이 JSON만 출력해.
+
+[대본 주제]
+{title}
+
+[씬 목록]
+{scenes}
+
+[출력 형식]
+{"scenes": [{"scene": 1, "keywords": ["keyword one", "keyword two"], "image_prompt": "extreme close-up of ..."}]}

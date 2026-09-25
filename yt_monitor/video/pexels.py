@@ -53,10 +53,15 @@ class Clip:
     author: str
     query: str
     path: Path | None = None
+    source: str = "pexels"          # pexels | pixabay
+
+    @property
+    def key(self) -> tuple[str, int]:
+        return (self.source, self.video_id)
 
     @property
     def credit(self) -> str:
-        return f"{self.author} / Pexels — {self.page_url}"
+        return f"{self.author} / {self.source.capitalize()} — {self.page_url}"
 
 
 def pick_file(video_files: list[dict], target_w: int, target_h: int) -> dict | None:
@@ -148,36 +153,41 @@ class PexelsClient:
         return clips
 
     def download(self, clip: Clip, cache_dir: Path, cancel: threading.Event | None = None) -> Path:
-        """클립을 cache_dir에 받는다. 이미 받은 파일이면 다시 받지 않는다."""
-        cache_dir = Path(cache_dir)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        path = cache_dir / f"pexels_{clip.video_id}_{clip.file_id}.mp4"
-        if path.exists() and path.stat().st_size > 0:
+        return download_clip(self.session, clip, cache_dir, self.timeout, cancel)
+
+
+def download_clip(session: requests.Session, clip: Clip, cache_dir: Path, timeout: float = 60,
+                  cancel: threading.Event | None = None) -> Path:
+    """클립을 cache_dir에 받는다. 이미 받은 파일이면 다시 받지 않는다 (Pexels·Pixabay 공용)."""
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{clip.source}_{clip.video_id}_{clip.file_id}.mp4"
+    if path.exists() and path.stat().st_size > 0:
+        clip.path = path
+        return path
+    tmp = path.with_suffix(".part")
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            with session.get(clip.url, stream=True, timeout=timeout) as resp:
+                resp.raise_for_status()
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_content(1 << 16):
+                        if cancel is not None and cancel.is_set():
+                            raise InterruptedError
+                        f.write(chunk)
+            os.replace(tmp, path)
             clip.path = path
+            log.info("다운로드 완료: %s (%.1f MB)", path.name, path.stat().st_size / 1e6)
             return path
-        tmp = path.with_suffix(".part")
-        last_exc: Exception | None = None
-        for attempt in range(3):
-            try:
-                with self.session.get(clip.url, stream=True, timeout=self.timeout) as resp:
-                    resp.raise_for_status()
-                    with open(tmp, "wb") as f:
-                        for chunk in resp.iter_content(1 << 16):
-                            if cancel is not None and cancel.is_set():
-                                raise InterruptedError
-                            f.write(chunk)
-                os.replace(tmp, path)
-                clip.path = path
-                log.info("다운로드 완료: %s (%.1f MB)", path.name, path.stat().st_size / 1e6)
-                return path
-            except InterruptedError:
-                tmp.unlink(missing_ok=True)
-                raise
-            except (requests.RequestException, OSError) as exc:
-                last_exc = exc
-                tmp.unlink(missing_ok=True)
-                time.sleep(2 ** attempt)
-        raise PexelsError(f"영상 다운로드 실패 ({clip.url}): {last_exc}")
+        except InterruptedError:
+            tmp.unlink(missing_ok=True)
+            raise
+        except (requests.RequestException, OSError) as exc:
+            last_exc = exc
+            tmp.unlink(missing_ok=True)
+            time.sleep(2 ** attempt)
+    raise PexelsError(f"영상 다운로드 실패 ({clip.url}): {last_exc}")
 
 
 def main(argv: list[str] | None = None) -> int:

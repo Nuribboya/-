@@ -373,7 +373,7 @@ def test_pipeline_without_pexels_key_uses_solid_background(tmp_path):
     res = VideoPipeline(cfg, tts=PlaceholderTTS(), offline=False,
                         ollama=OllamaClient("http://127.0.0.1:9", "m")).run("짧은 대본입니다. 두 번째 문장.", "무키")
     assert res.video_path.exists() and res.credits_path is None
-    assert any("Pexels API 키가 없어" in w for w in res.warnings)
+    assert any("Pexels/Pixabay API 키가 없어" in w for w in res.warnings)
 
 
 @needs_ffmpeg

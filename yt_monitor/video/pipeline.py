@@ -32,7 +32,7 @@ from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frame
 from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
 from .scenes import Scene, chars_per_second, extract_keywords, split_scenes
-from .subtitles import ass_style_from_config, cues_for_scene, to_ass, to_srt
+from .subtitles import Cue, ass_style_from_config, cues_for_scene, to_ass, to_srt
 from .tts import EdgeTTS, PlaceholderTTS, save_words
 
 log = logging.getLogger(__name__)
@@ -74,23 +74,42 @@ class VideoPipeline:
     pexels / tts / ollama 를 넘기면 그걸 쓴다 (테스트용). offline=True 면 네트워크를 전혀 쓰지 않는다.
     """
 
-    def __init__(self, cfg, *, pexels=None, tts=None, ollama=None, offline: bool = False):
+    def __init__(self, cfg, *, pexels=None, pixabay=None, tts=None, ollama=None, comfy=None,
+                 offline: bool = False):
         self.cfg = cfg
         self.v = cfg.video
         self.offline = offline
         self._pexels = pexels
+        self._pixabay = pixabay
         self._tts = tts
         self._ollama = ollama
+        self._comfy = comfy
+        self._ollama_used = None
 
     # ---- 의존성 --------------------------------------------------------------------
-    def _make_pexels(self, warn):
-        if self._pexels is not None or self.offline:
-            return self._pexels
-        client = PexelsClient.from_config(self.cfg) if self.cfg.secret(
-            "pexels", "api_key", required=False) else None
-        if client is None:
-            warn("Pexels API 키가 없어 스톡 영상 대신 단색 배경을 사용합니다. (설정에서 키를 넣으세요)")
-        return client
+    def _make_stock(self, warn) -> list:
+        """스톡 영상 소스 목록 (Pexels, Pixabay 중 키가 있는 것)."""
+        if self.offline or self._pexels is not None or self._pixabay is not None:
+            return [c for c in (self._pexels, self._pixabay) if c is not None]
+        out = []
+        if self.cfg.secret("pexels", "api_key", required=False):
+            out.append(PexelsClient.from_config(self.cfg))
+        if self.cfg.secret("pixabay", "api_key", required=False):
+            from .pixabay import PixabayClient
+
+            out.append(PixabayClient.from_config(self.cfg))
+        if not out:
+            warn("Pexels/Pixabay API 키가 없어 스톡 영상 대신 단색 배경을 사용합니다. (설정에서 키를 넣으세요)")
+        return out
+
+    def _make_comfy(self):
+        if self._comfy is not None:
+            return self._comfy
+        if self.offline or not self.cfg.raw.get("ai_images", {}).get("enabled"):
+            return None
+        from .comfyui import ComfyClient
+
+        return ComfyClient.from_config(self.cfg.ai_images)
 
     def _make_tts(self, voice):
         if self._tts is not None:
@@ -110,10 +129,11 @@ class VideoPipeline:
         if not st.ok:
             status(f"Ollama 사용 불가 → 대본 단어로 검색합니다 ({st.message.splitlines()[0]})")
             return None
+        self._ollama_used = client
         return client
 
     # ---- 실행 ---------------------------------------------------------------------
-    def run(self, script: str, title: str = "", *, voice: str | None = None,
+    def run(self, script: str, title: str = "", *, voice: str | None = None, hook_text: str | None = None,
             output_path: Path | None = None, now: datetime | None = None,
             on_progress: Callable[[int, int, str], None] | None = None,
             on_status: Callable[[str], None] | None = None,
@@ -164,52 +184,62 @@ class VideoPipeline:
             raise VideoError("대본에서 읽을 문장을 찾지 못했습니다. 대본을 입력하세요.")
         status(f"씬 {len(scenes)}개로 나눴습니다.")
         o = self.cfg.ollama
-        extract_keywords(scenes, client=self._make_ollama(status), prompts_dir=self.cfg.prompts_dir,
+        ollama = self._make_ollama(status)
+        extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir,
                          title=title, per_scene=int(self.v.get("keywords_per_scene", 3)),
                          options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status)
         for s in scenes:
             status(f"  씬 {s.index}: {', '.join(s.keywords) or '-'}")
 
-        # 2) 스톡 영상 ------------------------------------------------------------------
-        step(2, "스톡 영상 검색 · 다운로드 중…")
-        pexels = self._make_pexels(warn)
-        clip_max = float(self.v.get("clip_max_seconds", 4.0))
+        # 2) 스톡 영상 · AI 이미지 -------------------------------------------------------------
+        comfy = self._make_comfy()
+        step(2, "스톡 영상 검색 · 다운로드 중…" + (" (+ AI 이미지)" if comfy is not None else ""))
+        stock = self._make_stock(warn)
+        clip_max = float(self.v.get("clip_max_seconds", 2.5))
         scene_clips: dict[int, list[Clip]] = {}
-        used: set[int] = set()
-        if pexels is not None:
+        used: set[tuple[str, int]] = set()
+        if stock:
             cache = self.cfg.video_cache_dir
             for s in scenes:
                 check_cancel()
                 est = len(s.text) / chars_per_second(s.text)
                 want = min(MAX_CLIPS_PER_SCENE, max(1, math.ceil(est / clip_max)))
-                picked: list[Clip] = []
+                # 씬마다 시작 소스를 번갈아 → Pexels·Pixabay 영상이 고루 섞이게
+                order = stock[(s.index - 1) % len(stock):] + stock[:(s.index - 1) % len(stock)]
+                picked: list[tuple[object, Clip]] = []
                 for kw in s.keywords:
+                    for provider in order:
+                        if len(picked) >= want:
+                            break
+                        try:
+                            results = provider.search(kw)
+                        except PexelsAuthError:
+                            raise
+                        except PexelsError as exc:
+                            warn(f"'{kw}' 검색 실패: {exc}")
+                            continue
+                        fresh = [c for c in results if c.key not in used] or results[:1]
+                        if fresh:
+                            picked.append((provider, fresh[0]))
+                            used.add(fresh[0].key)
                     if len(picked) >= want:
                         break
-                    try:
-                        results = pexels.search(kw)
-                    except PexelsAuthError:
-                        raise
-                    except PexelsError as exc:
-                        warn(f"'{kw}' 검색 실패: {exc}")
-                        continue
-                    fresh = [c for c in results if c.video_id not in used] or results
-                    for c in fresh[: want - len(picked)]:
-                        picked.append(c)
-                        used.add(c.video_id)
                 good = []
-                for c in picked:
+                for provider, c in picked:
                     check_cancel()
                     try:
-                        pexels.download(c, cache, cancel)
+                        provider.download(c, cache, cancel)
                         good.append(c)
                     except InterruptedError:
                         raise Cancelled("사용자가 영상 생성을 취소했습니다.") from None
                     except PexelsError as exc:
                         warn(str(exc))
                 scene_clips[s.index] = good
-                status(f"  씬 {s.index}: 영상 {len(good)}개" + (" → 단색 배경" if not good else ""))
-            status(f"Pexels 요청 {getattr(pexels, 'requests_made', 0)}회")
+                srcs = ", ".join(sorted({c.source for c in good}))
+                status(f"  씬 {s.index}: 영상 {len(good)}개" + (f" ({srcs})" if good else " → 단색 배경"))
+            status("요청 수: " + ", ".join(f"{type(p).__name__.replace('Client', '')} "
+                                            f"{getattr(p, 'requests_made', 0)}회" for p in stock))
+        scene_images = self._ai_images(comfy, scenes, scene_clips, work, status, warn, cancel) if comfy else {}
 
         # 3) TTS -------------------------------------------------------------------------
         step(3, "TTS 음성 생성 중…")
@@ -241,25 +271,36 @@ class VideoPipeline:
             cues += cues_for_scene(s.text, words, a, b, max_chars)
         srt_work = work / "subtitles.srt"
         srt_work.write_text(to_srt(cues), encoding="utf-8")
+        hook_text = title if hook_text is None else hook_text
+        hook_sec = min(float(self.v.get("hook_seconds", 2.5) or 0), total)
+        hook = Cue(0.0, hook_sec, hook_text) if hook_text and hook_text.strip() and hook_sec > 0 else None
         ass = work / "subtitles.ass"
-        ass.write_text(to_ass(cues, **ass_style_from_config(self.v)), encoding="utf-8")
+        ass.write_text(to_ass(cues, hook=hook, **ass_style_from_config(self.v)), encoding="utf-8")
+        if hook:
+            status(f"첫 화면 훅 문구 ({hook_sec:.1f}초): {hook.text}")
         status(f"자막 {len(cues)}개")
 
         # 5) 클립 이어붙이기 + 음성 --------------------------------------------------------
         step(5, "클립 이어붙이기 · 음성 삽입 중…")
         shots: list[Shot] = []
         for s, frames in zip(scenes, split_frames(bounds, fps, clip_max)):
-            clips = scene_clips.get(s.index) or []
+            # AI 이미지가 있으면 그 씬의 첫 컷으로, 나머지는 스톡 영상
+            sources: list = ([scene_images[s.index]] if s.index in scene_images else []) + \
+                (scene_clips.get(s.index) or [])
             color = BACKGROUND_COLORS[(s.index - 1) % len(BACKGROUND_COLORS)]
             for k, n in enumerate(frames):
-                if not clips:
+                zoom_out = len(shots) % 2 == 1      # 컷마다 줌인/줌아웃 번갈아
+                if not sources:
                     shots.append(Shot(n, None, color=color))
                     continue
-                c = clips[k % len(clips)]
+                src = sources[k % len(sources)]
+                if isinstance(src, Path):
+                    shots.append(Shot(n, src, color=color, zoom_out=zoom_out))
+                    continue
                 # 같은 클립을 다시 쓰면 뒷부분부터 보여준다
-                reuse = k // len(clips)
-                seek = (reuse * n / fps) % c.duration if reuse and c.duration > n / fps else 0.0
-                shots.append(Shot(n, c.path, seek=seek, color=color))
+                reuse = k // len(sources)
+                seek = (reuse * n / fps) % src.duration if reuse and src.duration > n / fps else 0.0
+                shots.append(Shot(n, src.path, seek=seek, color=color, zoom_out=zoom_out))
         self._write_debug(work, scenes, scene_clips, durations, shots)
         shot_paths = comp.prepare_shots(shots, lambda i, n: (check_cancel(),
                                                              status(f"  클립 맞추기 {i}/{n}")))
@@ -280,6 +321,41 @@ class VideoPipeline:
         status(f"완료: {final} ({total:.1f}초)")
         return VideoResult(final, srt, credits, work_kept, total, scenes, warnings)
 
+    # ---- AI 이미지 -------------------------------------------------------------------
+    def _ai_images(self, comfy, scenes, scene_clips, work: Path, status, warn, cancel) -> dict[int, Path]:
+        """mix: 첫 씬(훅) + 스톡 영상을 못 찾은 씬 / all: 모든 씬 → ComfyUI로 세로 이미지 생성."""
+        mode = str(self.cfg.raw.get("ai_images", {}).get("mode", "mix"))
+        targets = [s for s in scenes if mode == "all" or s.index == 1 or not scene_clips.get(s.index)]
+        if not targets:
+            return {}
+        st = comfy.status()
+        if not st.ok:
+            warn("AI 이미지를 건너뜁니다: " + st.message.splitlines()[0])
+            return {}
+        if self._ollama_used is not None:
+            self._ollama_used.unload()        # 그래픽카드 메모리를 이미지 생성에 넘겨준다
+        out: dict[int, Path] = {}
+        from .comfyui import ComfyError
+
+        try:
+            for n, s in enumerate(targets, 1):
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("사용자가 영상 생성을 취소했습니다.")
+                status(f"  AI 이미지 {n}/{len(targets)} (씬 {s.index}): {s.image_prompt}")
+                try:
+                    out[s.index] = comfy.generate(s.image_prompt, work / "ai" / f"scene_{s.index:03d}.png",
+                                                  cancel=cancel)
+                except InterruptedError:
+                    raise Cancelled("사용자가 영상 생성을 취소했습니다.") from None
+                except ComfyError as exc:
+                    warn(f"씬 {s.index} AI 이미지 실패: {exc}")
+                    if not out:                    # 첫 장부터 실패하면 나머지도 실패할 가능성이 높다
+                        break
+        finally:
+            comfy.free_memory()
+        status(f"AI 이미지 {len(out)}장 생성 ({st.checkpoint})")
+        return out
+
     # ---- 기록 ------------------------------------------------------------------------
     @staticmethod
     def _write_debug(work: Path, scenes, scene_clips, durations, shots) -> None:
@@ -294,17 +370,20 @@ class VideoPipeline:
 
     @staticmethod
     def _write_credits(final: Path, scenes, scene_clips) -> Path | None:
-        seen, lines = set(), []
+        """영상 설명란에 붙여넣을 출처 목록 (영어권 시청자 기준으로 영어)."""
+        seen, lines, sources = set(), [], set()
         for s in scenes:
             for c in scene_clips.get(s.index, []):
-                if c.video_id not in seen:
-                    seen.add(c.video_id)
+                if c.key not in seen:
+                    seen.add(c.key)
+                    sources.add(c.source)
                     lines.append(f"- {c.credit}")
         if not lines:
             return None
+        sites = {"pexels": "Pexels (pexels.com)", "pixabay": "Pixabay (pixabay.com)"}
         path = final.with_name(final.stem + "_출처.txt")
-        path.write_text("영상 출처 (Pexels, https://www.pexels.com)\n" + "\n".join(lines) + "\n",
-                        encoding="utf-8")
+        path.write_text("Stock footage: " + ", ".join(sites.get(x, x) for x in sorted(sources)) + "\n"
+                        + "\n".join(lines) + "\n", encoding="utf-8")
         return path
 
 

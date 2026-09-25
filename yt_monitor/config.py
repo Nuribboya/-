@@ -76,7 +76,25 @@ def apply_language(raw: dict, lang: str) -> dict:
     return raw
 
 
+CONFIG_VERSION = 2
+
+
+def upgrade_config(raw: dict, user: dict) -> dict:
+    """예전 버전 config.yaml 을 새 기본값에 맞춘다. 사용자가 바꾼 값은 건드리지 않는다."""
+    version = int(user.get("config_version") or 1)
+    if "language" not in user:
+        # 언어 설정이 생기기 전의 config.yaml (한국어 값이 그대로 저장돼 있음) → 기본 언어 프리셋 적용
+        apply_language(raw, DEFAULTS["language"])
+    if version < 2:
+        # v2: 쇼츠는 컷이 빨라야 한다 → 예전 기본값(4초)이면 2.5초로
+        if float(raw["video"].get("clip_max_seconds") or 0) == 4.0:
+            raw["video"]["clip_max_seconds"] = 2.5
+    raw["config_version"] = CONFIG_VERSION
+    return raw
+
+
 DEFAULTS = {
+    "config_version": CONFIG_VERSION,
     "language": "en",                       # 콘텐츠 언어/시장: en(미국 중심 영어) | ko(한국)
     "youtube": {"api_key": "", "api_key_env": "YOUTUBE_API_KEY", "max_videos_per_channel": 30},
     "channels": [],
@@ -115,7 +133,12 @@ DEFAULTS = {
         "width": 1080,
         "height": 1920,                     # 9:16 세로
         "fps": 30,
-        "clip_max_seconds": 4.0,            # 씬당 클립 길이: 씬이 이보다 길면 클립 여러 개로 나눔
+        "clip_max_seconds": 2.5,            # 씬당 클립 길이: 씬이 이보다 길면 클립 여러 개로 나눔 (쇼츠는 빠른 컷)
+        "zoom": 0.08,                       # 컷마다 천천히 8% 줌인/줌아웃 (0이면 끔)
+        "contrast": 1.08,                   # 대비 (1 = 원본)
+        "saturation": 1.2,                  # 채도 (1 = 원본). 스톡 영상 특유의 밋밋함을 줄임
+        "hook_seconds": 2.5,                # 첫 화면 큰 훅 문구를 보여줄 시간 (0이면 끔)
+        "hook_font_size": 96,
         "min_scene_seconds": 2.5,           # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
         "max_scene_chars": 160,             # 씬 하나에 넣을 최대 글자 수
         "keywords_per_scene": 3,
@@ -132,6 +155,26 @@ DEFAULTS = {
         "crf": 21,                          # 화질 (낮을수록 고화질·큰 파일, 18~28)
         "preset": "veryfast",
         "keep_work_files": True,            # 중간 파일(클립/음성/ffmpeg 로그) 보관 → 디버깅용
+    },
+    "pixabay": {                            # 무료 스톡 영상 추가 소스 (https://pixabay.com/api/docs/)
+        "api_key": "",
+        "api_key_env": "PIXABAY_API_KEY",
+        "per_page": 15,
+    },
+    "ai_images": {                          # 로컬 AI 이미지 생성 (ComfyUI, 그래픽카드 필요)
+        "enabled": False,
+        "host": "http://127.0.0.1:8188",
+        "mode": "mix",                      # mix = 첫 씬(훅) + 스톡 영상을 못 찾은 씬 / all = 모든 씬
+        "checkpoint": "",                   # 비우면 ComfyUI에 있는 첫 번째 모델
+        "width": 768,
+        "height": 1344,                     # 9:16에 가까운 SDXL 해상도
+        "steps": 6,                         # Lightning/Turbo 모델 기준. 일반 SDXL은 25~30
+        "cfg": 2.0,                         # Lightning 기준. 일반 SDXL은 5~7
+        "sampler": "dpmpp_sde",
+        "scheduler": "karras",
+        "style": "cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo",
+        "negative": "text, watermark, logo, blurry, low quality, deformed, ugly, nsfw",
+        "timeout_sec": 300,
     },
     "storage": {
         "video_cache_dir": "data/video_cache",   # 다운로드한 스톡 영상 캐시
@@ -197,6 +240,14 @@ class Config:
     @property
     def language(self) -> str:
         return self.raw.get("language") or "en"
+
+    @property
+    def pixabay(self) -> dict:
+        return self.raw["pixabay"]
+
+    @property
+    def ai_images(self) -> dict:
+        return self.raw["ai_images"]
 
     @property
     def pexels(self) -> dict:
@@ -291,9 +342,8 @@ def read_raw(path: str | Path) -> dict:
         with open(path, encoding="utf-8") as f:
             user = yaml.safe_load(f) or {}
     raw = _merge(DEFAULTS, user)
-    if user and "language" not in user:
-        # 언어 설정이 생기기 전의 config.yaml (한국어 값이 그대로 저장돼 있음) → 기본 언어 프리셋 적용
-        apply_language(raw, DEFAULTS["language"])
+    if user:
+        upgrade_config(raw, user)
     return raw
 
 

@@ -170,6 +170,7 @@ def test_video_tab_flow(root, dialogs, tmp_path, monkeypatch):
         script = app.video_script.get("1.0", "end")
         assert "편의점" in script and "[효과음]" not in script and "#" not in script
         assert app.video_title_var.get() == app.generation.title
+        assert app.hook_var.get() == app.generation.title
 
         app.video_script.delete("1.0", "end")
         app.send_to_video()
@@ -258,6 +259,8 @@ def test_setup_dialog_writes_config(root, dialogs, tmp_path):
     dlg.vars["threshold"].set("25")
     dlg.vars["pexels_key"].set("pexels-key ")
     dlg.vars["language"].set("한국")
+    dlg.vars["pixabay_key"].set(" pix ")
+    dlg.vars["ai_enabled"].set(True)
     dlg._save()
     assert dlg.saved
     cfg = load_config(path, load_env=False)
@@ -265,6 +268,7 @@ def test_setup_dialog_writes_config(root, dialogs, tmp_path):
     assert cfg.schedule["interval_hours"] == 4 and cfg.analysis["drop_threshold_pct"] == 25
     assert cfg.pexels["api_key"] == "pexels-key" and cfg.video["width"] == 1080
     assert cfg.language == "ko"
+    assert cfg.pixabay["api_key"] == "pix" and cfg.ai_images["enabled"] is True
     assert cfg.raw["trends"]["region"] == "KR" and cfg.video["tts_voice"] == "ko-KR-SunHiNeural"
 
     bad = gui.SetupDialog(root, tmp_path / "bad.yaml")

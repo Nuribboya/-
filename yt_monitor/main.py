@@ -101,6 +101,7 @@ def run_cli(argv: list[str]) -> int:
     parser.add_argument("--no-generate", action="store_true", help="둔화 시 자동 생성을 하지 않음")
     parser.add_argument("--title", help="--make-video: 영상 제목(파일 이름). 생략하면 대본 파일 이름")
     parser.add_argument("--voice", help="--make-video: edge-tts 음성 (예: ko-KR-InJoonNeural)")
+    parser.add_argument("--hook", help="--make-video: 첫 화면 큰 훅 문구 (생략하면 제목, '-'면 표시 안 함)")
     parser.add_argument("--with-video", action="store_true", help="--trends: 대본으로 영상까지 생성")
     parser.add_argument("--offline", action="store_true",
                         help="--make-video: 인터넷 없이 무음 + 단색 배경으로 합성만 확인")
@@ -168,6 +169,7 @@ def run_cli(argv: list[str]) -> int:
             try:
                 res = VideoPipeline(cfg, offline=args.offline).run(
                     script.read_text(encoding="utf-8"), args.title or script.stem, voice=args.voice,
+                    hook_text="" if args.hook == "-" else args.hook,
                     on_progress=lambda n, t, m: print(f"[{n}/{t}] {m}", flush=True))
             except Exception as exc:  # ffmpeg/TTS/Pexels 오류 → 메시지(로그 경로 포함)만 보여준다
                 logging.getLogger("yt_monitor").exception("영상 생성 실패")

@@ -173,6 +173,9 @@ class SetupDialog(tk.Toplevel):
             "api_key": tk.StringVar(value=r["youtube"].get("api_key") or ""),
             "bot_token": tk.StringVar(value=r["telegram"].get("bot_token") or ""),
             "pexels_key": tk.StringVar(value=r["pexels"].get("api_key") or ""),
+            "pixabay_key": tk.StringVar(value=r["pixabay"].get("api_key") or ""),
+            "ai_enabled": tk.BooleanVar(value=bool(r["ai_images"].get("enabled"))),
+            "ai_host": tk.StringVar(value=r["ai_images"].get("host") or "http://127.0.0.1:8188"),
             "chat_id": tk.StringVar(value=str(r["telegram"].get("chat_id") or "")),
             "interval": tk.StringVar(value=str(r["schedule"].get("interval_hours") or 6)),
             "model": tk.StringVar(value=r["ollama"]["model"]),
@@ -214,6 +217,14 @@ class SetupDialog(tk.Toplevel):
         field("Pexels API 키", "pexels_key", hint="영상 생성용 (무료)")
         ttk.Button(frm, text="발급 페이지 열기", command=self._open_pexels).grid(
             row=row - 1, column=2, sticky="e", padx=6)
+        field("Pixabay API 키", "pixabay_key", hint="선택 · 영상 소스 추가 (무료)")
+        ttk.Button(frm, text="발급 페이지 열기", command=self._open_pixabay).grid(
+            row=row - 1, column=2, sticky="e", padx=6)
+        ttk.Checkbutton(frm, text="AI 이미지 생성 (ComfyUI · 그래픽카드 필요)", variable=self.vars["ai_enabled"]).grid(
+            row=row, column=1, sticky="w", pady=3)
+        ttk.Button(frm, text="연결 확인", command=self._check_comfy).grid(row=row, column=2, sticky="e", padx=6)
+        row += 1
+        field("ComfyUI 주소", "ai_host", width=32, hint="첫 씬(훅)과 영상 없는 씬에 AI 이미지")
         field("체크 주기(시간)", "interval", width=8)
         field("하락 임계값(%)", "threshold", width=8, hint="최근 영상이 이전보다 이만큼 떨어지면 알림")
         field("Ollama 모델", "model", width=24, hint="기본 qwen2.5:7b")
@@ -236,6 +247,22 @@ class SetupDialog(tk.Toplevel):
 
         webbrowser.open(SIGNUP_URL)
         messagebox.showinfo("Pexels API 키", KEY_HELP, parent=self)
+
+    def _open_pixabay(self):
+        import webbrowser
+
+        from .video.pixabay import KEY_HELP, SIGNUP_URL
+
+        webbrowser.open(SIGNUP_URL)
+        messagebox.showinfo("Pixabay API 키", KEY_HELP, parent=self)
+
+    def _check_comfy(self):
+        from .video.comfyui import ComfyClient
+
+        ai = dict(self.raw["ai_images"], host=self.vars["ai_host"].get().strip() or "http://127.0.0.1:8188")
+        st = ComfyClient.from_config(ai).status()
+        text = st.message + (f"\n\n설치된 모델: {', '.join(st.checkpoints)}" if st.checkpoints else "")
+        (messagebox.showinfo if st.ok else messagebox.showwarning)("ComfyUI", text, parent=self)
 
     def _find_chat_id(self):
         token = self.vars["bot_token"].get().strip()
@@ -296,6 +323,9 @@ class SetupDialog(tk.Toplevel):
         r["telegram"]["bot_token"] = v["bot_token"].strip()
         r["telegram"]["chat_id"] = v["chat_id"].strip()
         r["pexels"]["api_key"] = v["pexels_key"].strip()
+        r["pixabay"]["api_key"] = v["pixabay_key"].strip()
+        r["ai_images"]["enabled"] = bool(v["ai_enabled"])
+        r["ai_images"]["host"] = v["ai_host"].strip() or "http://127.0.0.1:8188"
         r["schedule"]["interval_hours"] = interval
         r["analysis"]["drop_threshold_pct"] = threshold
         r["ollama"]["model"] = v["model"].strip() or "qwen2.5:7b"
@@ -457,6 +487,13 @@ class App:
                                         values=[f"{k}  {v}" for k, v in VOICES.items()])
         self.voice_combo.pack(side="left", padx=4)
         ttk.Button(row1, text="📥 주제/대본 탭에서 가져오기", command=self.import_script).pack(side="right")
+        row_hook = ttk.Frame(tab)
+        row_hook.pack(fill="x")
+        ttk.Label(row_hook, text="첫 화면 훅 문구:").pack(side="left")
+        self.hook_var = tk.StringVar()
+        ttk.Entry(row_hook, textvariable=self.hook_var, width=50).pack(side="left", padx=4)
+        ttk.Label(row_hook, text="처음 2.5초 동안 크게 표시 (비우면 제목, '-' 이면 표시 안 함)",
+                  foreground="#777").pack(side="left")
 
         # 아래쪽 줄(진행/로그/결과)을 먼저 붙여야 창이 작아도 결과 경로와 버튼이 가려지지 않는다
         row3 = ttk.Frame(tab, padding=(0, 6))
@@ -940,6 +977,7 @@ class App:
         self.video_script.insert("1.0", script)
         if title:
             self.video_title_var.set(title)
+            self.hook_var.set(title)
 
     def import_script(self):
         """주제/대본 탭의 결과를 영상 탭으로 가져온다 (생성 결과가 있으면 TTS용으로 정리된 대본)."""
@@ -996,6 +1034,8 @@ class App:
                 return
         title = self.video_title_var.get().strip() or "영상"
         voice = self.voice_var.get().split()[0] if self.voice_var.get().strip() else None
+        hook = self.hook_var.get().strip()
+        hook_text = "" if hook == "-" else (hook or None)
         self.cancel_event = threading.Event()
         cancel = self.cancel_event
         self.video_progress.configure(value=0)
@@ -1007,7 +1047,8 @@ class App:
         self.video_log.configure(state="disabled")
         pipeline = self.video_pipeline_factory(self.cfg)
         self.run_bg("영상 생성 중…",
-                    lambda: pipeline.run(script, title, voice=voice, on_progress=self._on_video_progress,
+                    lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text,
+                                         on_progress=self._on_video_progress,
                                          on_status=self._video_log, cancel=cancel),
                     self._on_video_done, cancellable=True)
 

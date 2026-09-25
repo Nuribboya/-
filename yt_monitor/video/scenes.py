@@ -2,7 +2,7 @@
 
 - 대본은 generator.tts_lines()로 정리한다 (마크다운, [효과음], 이모지 제거 · 한 줄에 한 문장).
 - 문장을 순서대로 모아, 예상 길이가 min_scene_seconds 이상이 될 때까지(단 max_scene_chars 이하) 한 씬으로 묶는다.
-- 키워드는 Ollama에 씬 전체를 한 번에 보내 영어 검색어 JSON으로 받는다 (prompts/video_keywords.txt).
+- 키워드는 Ollama에 씬 전체를 한 번에 보내 영어 검색어 JSON으로 받는다 (prompts/video_scenes.txt).
   Ollama가 꺼져 있거나 응답이 이상하면 대본에서 뽑은 한국어 단어로 대신 검색한다 (결과는 적을 수 있음).
 
 단독 테스트:
@@ -22,7 +22,7 @@ from ..generator import GenerationError, _extract_json, load_template, render_te
 
 log = logging.getLogger(__name__)
 
-KEYWORDS_PROMPT = "video_keywords.txt"
+KEYWORDS_PROMPT = "video_scenes.txt"
 CHARS_PER_SECOND = 5.5 * 1.1   # 한국어 내레이션 ≈ 분당 330자, 쇼츠는 약간 빠르게
 EN_CHARS_PER_SECOND = 15.0     # 영어 내레이션 ≈ 분당 150단어 × 6자
 
@@ -50,6 +50,7 @@ class Scene:
     text: str
     keywords: list[str] = field(default_factory=list)
     keyword_source: str = ""        # ollama | fallback
+    image_prompt: str = ""          # AI 이미지 생성용 장면 묘사 (영어)
 
 
 def split_scenes(script: str, min_seconds: float = 2.5, max_chars: int = 90) -> list[Scene]:
@@ -113,11 +114,33 @@ def parse_keywords(text: str, count: int, per_scene: int) -> dict[int, list[str]
     return out
 
 
+def parse_image_prompts(text: str, count: int) -> dict[int, str]:
+    """같은 응답에서 씬별 image_prompt 를 꺼낸다 (없으면 빈 dict)."""
+    try:
+        data = _extract_json(text)
+    except GenerationError:
+        return {}
+    items = data if isinstance(data, list) else (data.get("scenes") or [])
+    out = {}
+    for pos, it in enumerate(items, 1):
+        if not isinstance(it, dict):
+            continue
+        try:
+            idx = int(it.get("scene") or pos)
+        except (TypeError, ValueError):
+            idx = pos
+        prompt = re.sub(r"\s+", " ", str(it.get("image_prompt") or it.get("prompt") or "")).strip()
+        if 1 <= idx <= count and prompt:
+            out[idx] = prompt[:400]
+    return out
+
+
 def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | None = None,
                      title: str = "", per_scene: int = 3, options: dict | None = None,
                      cancel: threading.Event | None = None, on_status=None) -> list[Scene]:
     """씬마다 keywords 채우기. client(OllamaClient)가 없거나 실패하면 간이 키워드."""
     got: dict[int, list[str]] = {}
+    images: dict[int, str] = {}
     if client is not None and scenes:
         try:
             template = load_template(prompts_dir, KEYWORDS_PROMPT) if prompts_dir else _default_template()
@@ -127,6 +150,7 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             text = client.chat(prompt, json_mode=True, options={"temperature": 0.3, **(options or {})},
                                cancel=cancel)
             got = parse_keywords(text, len(scenes), per_scene)
+            images = parse_image_prompts(text, len(scenes))
             log.info("Ollama 키워드: %d/%d개 씬", len(got), len(scenes))
         except GenerationError as exc:
             log.warning("키워드 응답 해석 실패 → 간이 키워드 사용: %s", exc)
@@ -143,6 +167,8 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             s.keywords, s.keyword_source = got[s.index], "ollama"
         else:
             s.keywords, s.keyword_source = fallback_keywords(s.text, per_scene), "fallback"
+        # 이미지 묘사가 없으면 키워드로 대신 (AI 이미지 생성을 켰을 때만 쓰임)
+        s.image_prompt = images.get(s.index) or (", ".join(s.keywords) + ", cinematic dramatic scene")
     return scenes
 
 
