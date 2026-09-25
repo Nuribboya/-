@@ -306,7 +306,7 @@ def trend_table(videos: list[TrendVideo], now: datetime, tz: ZoneInfo, limit: in
     for i, v in enumerate(videos[:limit], 1):
         mark = "🔥" if v.breakout and v.breakout >= breakout_ratio else "  "
         lines.append(f"{i:>3}. {_compact(v.views_per_hour(now)):>7}  {_compact(v.views):>7}  "
-                     f"{_compact(v.subscribers):>7}  {v.published_at.astimezone(tz):%m-%d %H시}  {mark}{v.title}")
+                     f"{_compact(v.subscribers):>7}  {v.published_at.astimezone(tz):%m-%d %H}시  {mark}{v.title}")
     lines += ["", "시간당 = 게시 후 시간당 평균 조회수 · 🔥 = 구독자 수보다 조회수가 훨씬 많은 '떡상' 영상"]
     return "\n".join(lines)
 

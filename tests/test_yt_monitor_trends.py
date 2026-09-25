@@ -206,3 +206,17 @@ def test_old_config_without_language_switches_to_english(tmp_path):
     raw["video"]["tts_voice"] = "en-US-JennyNeural"
     save_config(raw, path)
     assert read_raw(path)["video"]["tts_voice"] == "en-US-JennyNeural"
+
+
+def test_no_non_ascii_in_strftime_formats():
+    """Windows의 strftime은 형식 문자열에 한글이 있으면 UnicodeEncodeError를 낸다 (실제로 CI에서 발생)."""
+    import re as _re
+
+    root = Path(__file__).resolve().parent.parent / "yt_monitor"
+    bad = []
+    for f in root.rglob("*.py"):
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            for fmt in _re.findall(r":(%[^}]*)}", line) + _re.findall(r"strftime\(\"([^\"]*)\"", line):
+                if not fmt.isascii():
+                    bad.append(f"{f.name}:{n}: {fmt}")
+    assert not bad, bad
