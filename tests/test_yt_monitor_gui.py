@@ -274,8 +274,14 @@ def test_one_click(root, dialogs, tmp_path, monkeypatch, topic):
         app.one_click()
         pump(root, lambda: app.video_result is not None and not app.busy, timeout=120)
         assert not [d for d in dialogs if d[0] in ("showerror", "showwarning", "askyesno")], dialogs
-        summary = [d for d in dialogs if d[0] == "showinfo"]
-        assert len(summary) == 1 and "쇼츠 완성" in summary[0][1][1] and "추천 제목" in summary[0][1][1]
+        assert not [d for d in dialogs if d[0] == "showinfo"]           # 요약은 업로드 정보 창 하나로
+        dlg = app.upload_dialog
+        assert dlg.winfo_exists() and dlg.title_var.get() == app.video_result.upload_title
+        desc = dlg.desc.get("1.0", "end")
+        assert "#Shorts" in desc and "Which one would you try first?" in desc
+        assert dlg.tags_var.get() == "snack hacks, gas station food"
+        dlg.copy(dlg.title_var.get(), "제목")
+        assert root.clipboard_get() == app.video_result.upload_title and "복사됨" in dlg.copied_var.get()
         assert opened == [(app.video_result.video_path, True)]
         assert app.video_result.video_path.exists() and app.video_result.upload_path.exists()
         if topic:

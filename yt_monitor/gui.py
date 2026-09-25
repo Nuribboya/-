@@ -149,6 +149,121 @@ def open_path(path: Path, select: bool = False) -> None:
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(target)])
 
 
+# ---- 업로드 정보 창 ------------------------------------------------------------------
+
+STUDIO_URL = "https://studio.youtube.com"
+
+
+class UploadDialog(tk.Toplevel):
+    """영상이 완성되면 업로드에 필요한 것(제목 · 설명+해시태그 · 태그 · 카테고리)을 한 창에, 항목마다 [복사]."""
+
+    def __init__(self, master, res, warnings: list[str] | None = None):
+        from .upload_meta import CATEGORY_NOTE, category_label
+
+        super().__init__(master)
+        meta = res.upload
+        self.res = res
+        self.title("📋 업로드 정보 — 복사해서 붙여넣기")
+        self.transient(master)
+        frm = ttk.Frame(self, padding=14)
+        frm.pack(fill="both", expand=True)
+        frm.columnconfigure(1, weight=1)
+        self.copied_var = tk.StringVar(value="")
+
+        head = f"✅ 완성: {res.video_path.name} ({res.duration:.0f}초)"
+        ttk.Label(frm, text=head, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        row = 1
+        for w in (warnings or [])[:4]:
+            ttk.Label(frm, text="⚠ " + w, foreground="#b35c00", wraplength=620, justify="left").grid(
+                row=row, column=0, columnspan=3, sticky="w")
+            row += 1
+
+        # 제목 (후보 중 고르거나 직접 수정)
+        titles = [t["title"] for t in meta.titles]
+        self.title_var = tk.StringVar(value=meta.title)
+        ttk.Label(frm, text="제목").grid(row=row, column=0, sticky="w", pady=(10, 2))
+        self.title_combo = ttk.Combobox(frm, textvariable=self.title_var, values=titles, width=60)
+        self.title_combo.grid(row=row, column=1, sticky="ew", pady=(10, 2))
+        ttk.Button(frm, text="복사", command=lambda: self.copy(self.title_var.get(), "제목")).grid(
+            row=row, column=2, padx=(6, 0), pady=(10, 2))
+        row += 1
+        self.why_var = tk.StringVar()
+        ttk.Label(frm, textvariable=self.why_var, foreground="#777", wraplength=560, justify="left").grid(
+            row=row, column=1, sticky="w")
+        row += 1
+
+        def show_why(*_):
+            cur = self.title_var.get()
+            t = next((t for t in meta.titles if t["title"] == cur), None)
+            star = "⭐ 추천 · " if titles and cur == meta.title else ""
+            self.why_var.set(f"{star}{len(cur)}자" + (f" · {t['why']}" if t and t.get("why") else "") +
+                             (" · 40자가 넘으면 휴대폰에서 잘려요" if len(cur) > 40 else ""))
+        self.title_var.trace_add("write", show_why)
+        show_why()
+
+        # 설명 (설명 + 해시태그 + 출처)
+        ttk.Label(frm, text="설명").grid(row=row, column=0, sticky="nw", pady=(8, 2))
+        self.desc = tk.Text(frm, width=64, height=9, wrap="word")
+        self.desc.insert("1.0", res.description)
+        self.desc.grid(row=row, column=1, sticky="nsew", pady=(8, 2))
+        frm.rowconfigure(row, weight=1)
+        ttk.Button(frm, text="복사", command=lambda: self.copy(self.desc.get("1.0", "end-1c"), "설명")).grid(
+            row=row, column=2, sticky="n", padx=(6, 0), pady=(8, 2))
+        row += 1
+        ttk.Label(frm, text="해시태그 · 출처까지 들어 있어요. 통째로 설명란에 붙여넣으면 됩니다.",
+                  foreground="#777").grid(row=row, column=1, sticky="w")
+        row += 1
+
+        # 태그
+        self.tags_var = tk.StringVar(value=", ".join(meta.tags))
+        ttk.Label(frm, text="태그").grid(row=row, column=0, sticky="w", pady=(8, 2))
+        ttk.Entry(frm, textvariable=self.tags_var).grid(row=row, column=1, sticky="ew", pady=(8, 2))
+        ttk.Button(frm, text="복사", command=lambda: self.copy(self.tags_var.get(), "태그")).grid(
+            row=row, column=2, padx=(6, 0), pady=(8, 2))
+        row += 1
+        ttk.Label(frm, text="PC 스튜디오 → 세부정보 → 더보기 → 태그 칸 (휴대폰 앱엔 없음)", foreground="#777").grid(
+            row=row, column=1, sticky="w")
+        row += 1
+
+        # 카테고리 · 음악 · 체크리스트
+        info = [f"카테고리: {category_label(meta.category_id)}" +
+                (f" — {meta.category_reason}" if meta.category_reason else ""),
+                "   " + CATEGORY_NOTE]
+        if getattr(res, "bgm_note", ""):
+            info.append("배경음악: " + res.bgm_note.replace("\n", " "))
+        info += ["체크: AI 이미지가 들어갔다면 '변경되거나 합성된 콘텐츠'를 '예'로 표시하세요."]
+        if meta.source == "fallback":
+            info.append("(Ollama 응답이 없어 기본값으로 채웠어요. 제목/설명을 다듬어 주세요.)")
+        ttk.Label(frm, text="\n".join(info), wraplength=640, justify="left").grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(10, 4))
+        row += 1
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        ttk.Label(btns, textvariable=self.copied_var, foreground="#1a7f37").pack(side="left")
+        ttk.Button(btns, text="닫기", command=self.destroy).pack(side="right")
+        ttk.Button(btns, text="🌐 YouTube 스튜디오", command=self.open_studio).pack(side="right", padx=4)
+        ttk.Button(btns, text="📂 영상 폴더", command=self.open_folder).pack(side="right")
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    def copy(self, text: str, what: str):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.copied_var.set(f"✅ {what} 복사됨 — 붙여넣기(Ctrl+V) 하세요")
+
+    def open_folder(self):
+        try:
+            open_path(self.res.video_path, select=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def open_studio():
+        import webbrowser
+
+        webbrowser.open(STUDIO_URL)
+
+
 # ---- 설정 창 ----------------------------------------------------------------------
 
 class SetupDialog(tk.Toplevel):
@@ -1129,7 +1244,14 @@ class App:
         if getattr(res, "bgm", ""):
             self._video_log(f"🎵 배경음악: {res.bgm}")
         self.status_var.set(f"영상 생성 완료 — {res.video_path}")
-        if one_click:
+        if getattr(res, "upload", None) is not None:
+            if one_click:
+                try:
+                    open_path(res.video_path, select=True)
+                except OSError:
+                    pass
+            self._show_upload_dialog(res, res.warnings)
+        elif one_click:
             self._one_click_summary(res)
         elif res.warnings:
             messagebox.showwarning(APP_TITLE, "영상은 만들어졌지만 확인할 점이 있습니다:\n\n" +
@@ -1169,7 +1291,16 @@ class App:
         except OSError:
             messagebox.showinfo(APP_TITLE, (root / README_NAME).read_text(encoding="utf-8"))
 
+    def _show_upload_dialog(self, res, warnings=None):
+        old = getattr(self, "upload_dialog", None)
+        if old is not None and old.winfo_exists():
+            old.destroy()
+        self.upload_dialog = UploadDialog(self.root, res, warnings)
+
     def _open_upload_info(self):
+        if getattr(self.video_result, "upload", None) is not None:
+            self._show_upload_dialog(self.video_result)
+            return
         path = getattr(self.video_result, "upload_path", None)
         if not path:
             return

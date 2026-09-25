@@ -231,6 +231,15 @@ def generate_upload_meta(client, prompts_dir: Path, *, lang: str, title: str, sc
 
 # ---- 출력 ------------------------------------------------------------------------
 
+def description_body(meta: UploadMeta, credits: str = "") -> str:
+    """설명란에 그대로 붙여넣을 내용: 설명 2줄 + 해시태그 + 출처."""
+    desc = meta.description.strip()
+    body = (desc + ("\n\n" if desc else "") + " ".join(meta.hashtags)).strip()
+    if credits.strip():
+        body += "\n\n" + credits.strip()
+    return body
+
+
 def render_upload_text(meta: UploadMeta, credits: str = "", bgm_note: str = "") -> str:
     """업로드할 때 복사해서 붙여넣기 좋은 텍스트 (.txt / GUI)."""
     lines = ["📋 업로드 정보 (YouTube Shorts)", "", "■ 제목 후보 (⭐ = 추천, 클릭 잘 되는 순)"]
@@ -243,11 +252,7 @@ def render_upload_text(meta: UploadMeta, credits: str = "", bgm_note: str = "") 
     if meta.category_reason:
         lines.append(f"   └ {meta.category_reason}")
     lines.append(f"   {CATEGORY_NOTE}")
-    desc = meta.description.strip()
-    tags_line = " ".join(meta.hashtags)
-    body = (desc + ("\n\n" if desc else "") + tags_line).strip()
-    if credits.strip():
-        body += "\n\n" + credits.strip()
+    body = description_body(meta, credits)
     if bgm_note:
         lines += ["", "■ 배경음악", f"   {bgm_note}"]
     lines += ["", "■ 설명 (그대로 복사)", "-" * 40, body, "-" * 40]

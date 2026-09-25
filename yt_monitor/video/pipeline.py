@@ -29,7 +29,8 @@ from zoneinfo import ZoneInfo
 
 from ..generator import has_hangul, tts_lines
 from ..report import safe_name
-from ..upload_meta import UploadMeta, fallback_meta, generate_upload_meta, render_upload_text
+from ..upload_meta import (UploadMeta, description_body, fallback_meta, generate_upload_meta,
+                           render_upload_text)
 from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frames
 from .ffmpeg import Cancelled, FFmpegError, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
@@ -62,6 +63,9 @@ class VideoResult:
     upload_path: Path | None = None     # <파일명>_업로드정보.txt
     bgm: str = ""                       # 사용한 배경음악 파일 이름
     upload_title: str = ""              # 추천 제목
+    upload: UploadMeta | None = None    # 업로드 정보 (GUI 업로드 정보 창)
+    description: str = ""               # 설명란에 붙여넣을 내용 (설명 + 해시태그 + 출처)
+    bgm_note: str = ""
 
 
 def output_path_for(outputs_dir: Path, title: str, now: datetime, tz: ZoneInfo) -> Path:
@@ -347,12 +351,14 @@ class VideoPipeline:
         shutil.copyfile(srt_work, srt)
         credits = self._write_credits(final, scenes, scene_clips, bgm_credit(bgm_track) if bgm_track else "")
         upload_path = None
+        description = bgm_note = ""
         if upload is not None:
             upload_path = final.with_name(final.stem + "_업로드정보.txt")
             credit_text = credits.read_text(encoding="utf-8") if credits else ""
             bgm_note = (f"사용한 곡: {bgm_track.name}" if bgm_track else
                         f"(bgm/{mood} 폴더가 비어 있어 목소리만 넣었습니다)") + "\n   추천: " + recommend_text(mood)
             upload_path.write_text(render_upload_text(upload, credit_text, bgm_note) + "\n", encoding="utf-8")
+            description = description_body(upload, credit_text)
             status(f"업로드 정보 저장: {upload_path.name} (추천 제목: {upload.title})")
         if not self.v.get("keep_work_files", True):
             shutil.rmtree(work, ignore_errors=True)
@@ -363,7 +369,8 @@ class VideoPipeline:
         return VideoResult(final, srt, credits, work_kept, total, scenes, warnings,
                            mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")),
                            upload_path=upload_path, upload_title=upload.title if upload else "",
-                           bgm=bgm_track.name if bgm_track else "")
+                           bgm=bgm_track.name if bgm_track else "", upload=upload, description=description,
+                           bgm_note=bgm_note)
 
     def _add_bgm(self, comp, narration: Path, total: float, mood: str, status, warn) -> tuple[Path, Path | None]:
         """분위기에 맞는 배경음악을 bgm/ 폴더에서 골라 섞는다. 곡이 없거나 실패하면 목소리만."""
