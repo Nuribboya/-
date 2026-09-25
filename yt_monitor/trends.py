@@ -52,6 +52,13 @@ _STOP = {"shorts", "short", "쇼츠", "숏츠", "youtube", "유튜브", "the", "
 _JOSA = re.compile(r"(으로|에서|에게|까지|부터|처럼|보다|이랑|하고|은|는|이|가|을|를|의|에|도|만|와|과|로)$")
 
 
+REGION_NAMES = {"US": "미국", "KR": "한국", "GB": "영국", "CA": "캐나다", "AU": "호주", "JP": "일본", "IN": "인도"}
+
+
+def region_name(code: str) -> str:
+    return f"{REGION_NAMES.get(code, code)}({code})"
+
+
 def title_matches(title: str, lang: str) -> bool:
     """제목 언어 필터. en: 한글/한자/가나가 없고 글자의 대부분이 라틴 문자, ko: 한글 포함."""
     if lang == "ko":
@@ -178,14 +185,15 @@ class TrendCollector:
 
         raw: dict[str, dict] = {}
         sources: dict[str, set[str]] = {}
-        status("한국 인기 급상승 목록 가져오는 중…")
+        where = region_name(self.s["region"])
+        status(f"{where} 인기 급상승 목록 가져오는 중…")
         for vid, it in self._popular().items():
             raw[vid] = it
             sources.setdefault(vid, set()).add("popular")
         search_ids: list[str] = []
         for q in self.s["search_queries"]:
             check()
-            status(f"최근 {self.s['lookback_days']}일 인기 쇼츠 검색 중… ({q or '전체'})")
+            status(f"{where} 최근 {self.s['lookback_days']}일 인기 쇼츠 검색 중… ({q or '전체'})")
             for vid in self._search_ids(q, now):
                 search_ids.append(vid)
                 sources.setdefault(vid, set()).add(f"search:{q or '전체'}")
@@ -223,7 +231,7 @@ class TrendCollector:
                 v.subscribers = subs.get(v.channel_id)
                 v.category = cats.get(v.category, v.category)
         vids.sort(key=lambda v: v.views_per_hour(now), reverse=True)
-        status(f"유행 쇼츠 {len(vids)}개 (쿼터 약 {self.units} unit 사용)")
+        status(f"{where} 유행 쇼츠 {len(vids)}개 (쿼터 약 {self.units} unit 사용)")
         return vids
 
 

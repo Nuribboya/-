@@ -876,7 +876,9 @@ class App:
     def _apply_language_ui(self):
         t = self.cfg.raw.get("trends", {})
         self.trend_auto_var.set(bool(t.get("auto_video", False)))
-        self.trend_hint.configure(text=f"최근 {t.get('lookback_days', 3)}일 {t.get('region', 'US')}에서 조회수가 "
+        from .trends import region_name
+
+        self.trend_hint.configure(text=f"최근 {t.get('lookback_days', 3)}일 {region_name(t.get('region', 'US'))}에서 조회수가 "
                                        f"빠르게 오른 쇼츠 → 주제 추천 → 쇼츠 대본 "
                                        f"({LANGUAGE_LABELS.get(self.cfg.language, '')})")
 

@@ -178,8 +178,11 @@ def test_run_trends_english_us(tmp_path):
     try:
         cfg = make_cfg(tmp_path, url, lang="en")
         assert cfg.language == "en" and cfg.video["tts_voice"].startswith("en-US")
-        res = run_trends(cfg, service=FakeUSTrends(), now=NOW)
+        statuses = []
+        res = run_trends(cfg, service=FakeUSTrends(), now=NOW, on_status=statuses.append)
         assert [v.video_id for v in res.videos] == ["e1", "e2", "u1"]
+        assert statuses[0] == "미국(US) 인기 급상승 목록 가져오는 중…"
+        assert not any("한국" in m for m in statuses)
         assert "Shorts ranked by views per hour" in res.context and "3.0M" in res.context
         assert "breakout videos from small channels" in res.context
         prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
