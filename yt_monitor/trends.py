@@ -40,6 +40,8 @@ log = logging.getLogger(__name__)
 
 TREND_CHANNEL_ID = "trend"
 TREND_TITLE = "트렌드"
+ONE_CLICK_CHANNEL_ID = "oneclick"
+ONE_CLICK_TITLE = "원클릭"
 TREND_TOPICS_PROMPT = "trend_topics.txt"
 SHORTS_SCRIPT_PROMPT = "shorts_script.txt"
 
@@ -370,6 +372,32 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
         record_generation(db, g)
     result.generation = g
     return result
+
+
+def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
+              on_status: Callable[[str], None] | None = None, on_token: Callable[[str], None] | None = None,
+              cancel: threading.Event | None = None) -> TrendResult:
+    """원클릭(주제 직접 입력): 유행 수집 없이 그 주제로 쇼츠 대본 + 업로드 정보 → outputs/날짜/원클릭.md"""
+    from .db import Database
+    from .generator import Generation, ScriptGenerator, ensure_prompts, record_generation, save_generation
+
+    topic = topic.strip()
+    if not topic:
+        raise TrendError("주제를 입력하세요.")
+    now = now or utcnow()
+    tz = ZoneInfo(cfg.schedule["timezone"])
+    settings = {**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})}
+    ensure_prompts(cfg)
+    gen = generator or ScriptGenerator.from_config(cfg)
+    context = f"(No trend data. The creator picked this topic: {topic})"
+    g = Generation(ONE_CLICK_CHANNEL_ID, ONE_CLICK_TITLE, now, "manual", gen.model, context,
+                   [{"topic": topic, "reason": "직접 입력한 주제", "titles": [topic]}], 0,
+                   script_prompt=SHORTS_SCRIPT_PROMPT, script_minutes=float(settings["script_seconds"]) / 60)
+    gen.write_script(g, 0, on_status=on_status, on_token=on_token, cancel=cancel)
+    save_generation(g, cfg.outputs_dir, tz)
+    with Database(cfg.db_path) as db:
+        record_generation(db, g)
+    return TrendResult([], context, f"직접 입력한 주제: {topic}\n(유행 분석은 건너뛰었습니다)", generation=g)
 
 
 def main(argv: list[str] | None = None) -> int:

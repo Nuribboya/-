@@ -241,6 +241,55 @@ def test_trend_flow_with_auto_video(root, dialogs, tmp_path, monkeypatch):
         server.shutdown()
 
 
+@pytest.mark.parametrize("topic", ["", "Why cats knock things off tables"])
+def test_one_click(root, dialogs, tmp_path, monkeypatch, topic):
+    """🚀 원클릭: (주제 없으면 유행 분석 →) 대본 · 업로드 정보 → 영상 → 폴더 열기 + 요약 한 번."""
+    from fake_video_services import FakeEdgeTTS
+    from test_yt_monitor_trends import NOW, FakeTrendYouTube
+    from yt_monitor import collector, trends
+    from yt_monitor.video.ffmpeg import check_ffmpeg
+    from yt_monitor.video.pipeline import VideoPipeline
+
+    if not check_ffmpeg().ok:
+        pytest.skip("ffmpeg 없음")
+    yt_calls = []
+    monkeypatch.setattr(collector, "build_youtube_service", lambda key: yt_calls.append(1) or FakeTrendYouTube())
+    monkeypatch.setattr(trends, "utcnow", lambda: NOW)
+    opened = []
+    monkeypatch.setattr(gui, "open_path", lambda p, select=False: opened.append((p, select)))
+    server, url, _ = start_fake_ollama()
+    try:
+        path = make_config(tmp_path, url)
+        raw = read_raw(path)
+        raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
+                            subtitle_font_size=20, subtitle_margin_bottom=40)
+        raw["pexels"]["api_key"] = "fake"
+        raw["trends"].update(popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
+        save_config(raw, path)
+        app = gui.App(root, path, check_ollama_on_start=False)
+        app.video_pipeline_factory = lambda c: VideoPipeline(c, pexels=None, tts=FakeEdgeTTS(retry_delay=0),
+                                                             offline=True)
+        assert app.trend_auto_var.get() is False          # 자동 영상 체크 없이도 원클릭은 영상까지
+        app.oneclick_topic.set(topic)
+        app.one_click()
+        pump(root, lambda: app.video_result is not None and not app.busy, timeout=120)
+        assert not [d for d in dialogs if d[0] in ("showerror", "showwarning", "askyesno")], dialogs
+        summary = [d for d in dialogs if d[0] == "showinfo"]
+        assert len(summary) == 1 and "쇼츠 완성" in summary[0][1][1] and "추천 제목" in summary[0][1][1]
+        assert opened == [(app.video_result.video_path, True)]
+        assert app.video_result.video_path.exists() and app.video_result.upload_path.exists()
+        if topic:
+            assert not yt_calls and app.generation.channel_id == "oneclick"
+            assert topic in app.generation.topics[0]["topic"]
+        else:
+            assert yt_calls and app.generation.trigger == "trend"
+        # 원클릭이 끝나면 다음 일반 유행 분석은 영상까지 가지 않는다
+        assert app._one_click is False
+        app.close()
+    finally:
+        server.shutdown()
+
+
 def test_missing_model_closes_app(root, dialogs, tmp_path):
     server, url, _ = start_fake_ollama()
     try:

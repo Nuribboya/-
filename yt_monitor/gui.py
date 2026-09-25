@@ -420,6 +420,18 @@ class App:
         self.ollama_label = ttk.Label(top, text="Ollama 확인 중…", foreground="#777")
         self.ollama_label.pack(side="right", padx=10)
 
+        one = ttk.Frame(self.root, padding=(10, 0, 10, 6))
+        one.pack(fill="x")
+        self.btn_oneclick = ttk.Button(one, text="🚀 원클릭 쇼츠 만들기", command=self.one_click)
+        self.btn_oneclick.pack(side="left", ipady=4)
+        ttk.Label(one, text="주제(선택):").pack(side="left", padx=(12, 4))
+        self.oneclick_topic = tk.StringVar()
+        topic_entry = ttk.Entry(one, textvariable=self.oneclick_topic, width=36)
+        topic_entry.pack(side="left")
+        topic_entry.bind("<Return>", lambda _e: self.one_click())
+        ttk.Label(one, text="비우면 요즘 유행에서 주제를 골라 → 대본 · 제목 · 영상까지 한 번에",
+                  foreground="#777").pack(side="left", padx=8)
+
         # 상태 표시줄은 먼저 아래에 붙여야 창이 작아져도 가려지지 않는다
         status = ttk.Frame(self.root, padding=(10, 4))
         status.pack(side="bottom", fill="x")
@@ -575,7 +587,7 @@ class App:
         self.busy = busy
         state = "disabled" if busy else "normal"
         for b in (self.btn_check, self.btn_generate, self.btn_rescript, self.btn_video, self.btn_trend,
-                  self.btn_trend2):
+                  self.btn_trend2, self.btn_oneclick):
             b.configure(state=state)
         for b in (self.btn_cancel, self.btn_video_cancel):
             b.configure(state="normal" if busy and cancellable else "disabled")
@@ -950,11 +962,30 @@ class App:
         self.trend_box.insert("1.0", text)
         self.trend_box.configure(state="disabled")
 
-    def trend_now(self):
-        """최근 유행 쇼츠 수집 → 주제 추천 → 쇼츠 대본 (→ 체크돼 있으면 영상까지)."""
-        from .ollama_client import OllamaClient
-        from .trends import run_trends
+    def one_click(self):
+        """🚀 원클릭: (주제가 없으면 유행 분석 →) 주제 → 대본 · 업로드 정보 → 영상 → 결과 열기."""
+        if self.busy:
+            messagebox.showinfo(APP_TITLE, "다른 작업이 진행 중입니다. 끝난 뒤 다시 시도하세요.")
+            return
+        from .video.ffmpeg import check_ffmpeg
+        from .video.pexels import KEY_HELP
 
+        ff = check_ffmpeg(self.cfg.video.get("ffmpeg_path"))
+        if not ff.ok:
+            messagebox.showerror(APP_TITLE, ff.message)
+            return
+        stock = self.cfg.secret("pexels", "api_key", required=False) or \
+            self.cfg.secret("pixabay", "api_key", required=False)
+        if not stock and not messagebox.askyesno(APP_TITLE, KEY_HELP + "\n\n지금은 키 없이 단색 배경으로 만들까요?"):
+            return
+        self.trend_now(one_click=True, topic=self.oneclick_topic.get().strip())
+
+    def trend_now(self, one_click: bool = False, topic: str = ""):
+        """최근 유행 쇼츠 수집 → 주제 추천 → 쇼츠 대본 (→ 체크돼 있거나 원클릭이면 영상까지)."""
+        from .ollama_client import OllamaClient
+        from .trends import run_topic, run_trends
+
+        self._one_click = one_click
         o = self.cfg.ollama
         st = OllamaClient(o["host"], o["model"]).status()
         if not st.ok:
@@ -964,13 +995,20 @@ class App:
             return
         self.cancel_event = threading.Event()
         cancel = self.cancel_event
-        self._set_trend_text("유행 쇼츠 수집 중…")
-        self._stream_start(f"🔥 최근 유행 쇼츠를 분석해서 {o['model']}로 주제/대본 생성 중… "
-                           "(PC 사양에 따라 수 분 걸릴 수 있습니다)")
         status = self._on_gen_status
-
-        self.run_bg("유행 쇼츠 분석 중…",
-                    lambda: run_trends(self.cfg, on_status=status, on_token=self._on_token, cancel=cancel),
+        prefix = "🚀 원클릭 1/2 — " if one_click else ""
+        if topic:
+            self._set_trend_text(f"직접 입력한 주제: {topic}")
+            self._stream_start(f"{prefix}'{topic}' 주제로 {o['model']}가 쇼츠 대본 · 업로드 정보 작성 중…")
+            work = lambda: run_topic(self.cfg, topic, on_status=status, on_token=self._on_token,  # noqa: E731
+                                     cancel=cancel)
+        else:
+            self._set_trend_text("유행 쇼츠 수집 중…")
+            self._stream_start(f"{prefix}🔥 최근 유행 쇼츠를 분석해서 {o['model']}로 주제/대본 생성 중… "
+                               "(PC 사양에 따라 수 분 걸릴 수 있습니다)")
+            work = lambda: run_trends(self.cfg, on_status=status, on_token=self._on_token,  # noqa: E731
+                                      cancel=cancel)
+        self.run_bg("🚀 원클릭: 대본 만드는 중…" if one_click else "유행 쇼츠 분석 중…", work,
                     self._on_trend_done, cancellable=True)
 
     def _on_trend_done(self, res):
@@ -980,9 +1018,10 @@ class App:
         self._fill_video_script(g.script, g.title or "")
         self.status_var.set(f"유행 쇼츠 {len(res.videos)}개 분석 · 대본 저장됨: {g.output_path} "
                             f"(쿼터 약 {res.units} 사용)")
-        if self.trend_auto_var.get():
+        one_click, self._one_click = getattr(self, "_one_click", False), False
+        if one_click or self.trend_auto_var.get():
             self.nb.select(self.video_tab)
-            self.make_video()
+            self.make_video(one_click=one_click)
 
     # ---- 영상 생성 ----------------------------------------------------------------------
 
@@ -1036,7 +1075,7 @@ class App:
         self.ui(apply)
         self._video_log(f"▶ {text}")
 
-    def make_video(self):
+    def make_video(self, one_click: bool = False):
         from .video.ffmpeg import check_ffmpeg
         from .video.pexels import KEY_HELP
 
@@ -1048,7 +1087,7 @@ class App:
         if not ff.ok:
             messagebox.showerror(APP_TITLE, ff.message)
             return
-        if not self.cfg.secret("pexels", "api_key", required=False):
+        if not one_click and not self.cfg.secret("pexels", "api_key", required=False):
             if not messagebox.askyesno(APP_TITLE, KEY_HELP + "\n\n지금은 키 없이 단색 배경으로 만들까요?"):
                 return
         title = self.video_title_var.get().strip() or "영상"
@@ -1070,13 +1109,13 @@ class App:
         self.video_log.delete("1.0", "end")
         self.video_log.configure(state="disabled")
         pipeline = self.video_pipeline_factory(self.cfg)
-        self.run_bg("영상 생성 중…",
+        self.run_bg("🚀 원클릭 2/2 — 영상 만드는 중…" if one_click else "영상 생성 중…",
                     lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text, upload_meta=upload,
                                          on_progress=self._on_video_progress,
                                          on_status=self._video_log, cancel=cancel),
-                    self._on_video_done, cancellable=True)
+                    lambda res: self._on_video_done(res, one_click=one_click), cancellable=True)
 
-    def _on_video_done(self, res):
+    def _on_video_done(self, res, one_click: bool = False):
         self.video_result = res
         self.video_progress.configure(value=self.video_progress["maximum"])
         self.video_step_var.set(f"✅ 완료 ({res.duration:.1f}초)" +
@@ -1090,9 +1129,35 @@ class App:
         if getattr(res, "bgm", ""):
             self._video_log(f"🎵 배경음악: {res.bgm}")
         self.status_var.set(f"영상 생성 완료 — {res.video_path}")
-        if res.warnings:
+        if one_click:
+            self._one_click_summary(res)
+        elif res.warnings:
             messagebox.showwarning(APP_TITLE, "영상은 만들어졌지만 확인할 점이 있습니다:\n\n" +
                                    "\n".join(f"· {w}" for w in res.warnings[:8]))
+
+    def _one_click_summary(self, res):
+        """원클릭 완료: 영상이 있는 폴더를 열고(파일 선택), 업로드에 필요한 것만 한눈에."""
+        from .upload_meta import UploadMeta, category_label
+
+        try:
+            open_path(res.video_path, select=True)
+        except OSError:
+            pass
+        g = self.generation
+        meta = UploadMeta.from_dict(g.upload) if g is not None and g.upload else None
+        lines = ["✅ 쇼츠 완성!", "", f"파일: {res.video_path.name} ({res.duration:.0f}초)"]
+        if res.upload_title:
+            lines.append(f"추천 제목: {res.upload_title}")
+        if meta:
+            lines.append(f"카테고리: {category_label(meta.category_id)}")
+            lines.append(f"해시태그: {' '.join(meta.hashtags)}")
+        if getattr(res, "bgm", ""):
+            lines.append(f"배경음악: {res.bgm}")
+        if getattr(res, "upload_path", None):
+            lines += ["", "제목 후보 · 설명 · 출처는 영상 옆 '_업로드정보.txt'에 있어요 ([📋 업로드 정보] 버튼)."]
+        if res.warnings:
+            lines += ["", "참고:"] + [f"· {w}" for w in res.warnings[:6]]
+        messagebox.showinfo(APP_TITLE, "\n".join(lines))
 
     def _open_bgm_dir(self):
         """배경음악 폴더(분위기별 하위 폴더 + 안내 파일)를 만들고 연다."""
