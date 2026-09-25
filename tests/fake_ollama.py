@@ -22,6 +22,7 @@ TOPICS_JSON = {
 }
 
 KEYWORDS_JSON = {
+    "mood": "dramatic",
     "scenes": [
         {"scene": 1, "keywords": ["convenience store", "snack shelf", "night street"],
          "image_prompt": "neon convenience store at night, low angle, rain reflections"},

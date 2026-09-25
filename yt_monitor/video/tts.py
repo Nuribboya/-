@@ -36,6 +36,45 @@ VOICES = {
 }
 TICKS = 10_000_000  # edge-tts 시간 단위: 100ns
 
+# 대본 분위기 → 음성 자동 선택. 무료 edge-tts는 감정 스타일(외침, 속삭임 등)을 못 쓰므로
+# 음성 · 말하기 속도 · 음높이 조합으로 분위기를 맞춘다.
+MOODS = {
+    "energetic": "신나고 빠른 (랭킹, 꿀팁, 챌린지)",
+    "dramatic": "긴장감 있는 (반전, 충격 사실, 미스터리한 사건)",
+    "mysterious": "으스스하고 낮은 (괴담, 미스터리, 공포)",
+    "calm": "차분한 정보 전달 (설명, 과학, 역사)",
+    "playful": "유쾌하고 가벼운 (웃긴 이야기, 동물, 음식)",
+    "emotional": "따뜻하고 감성적인 (감동, 공감, 인생 이야기)",
+}
+DEFAULT_MOOD = "energetic"
+MOOD_VOICES = {
+    "en": {
+        "energetic": {"voice": "en-US-GuyNeural", "rate": "+12%", "pitch": "+2Hz"},
+        "dramatic": {"voice": "en-US-ChristopherNeural", "rate": "+2%", "pitch": "-3Hz"},
+        "mysterious": {"voice": "en-US-ChristopherNeural", "rate": "-6%", "pitch": "-6Hz"},
+        "calm": {"voice": "en-US-EricNeural", "rate": "+0%", "pitch": "+0Hz"},
+        "playful": {"voice": "en-US-AriaNeural", "rate": "+10%", "pitch": "+3Hz"},
+        "emotional": {"voice": "en-US-JennyNeural", "rate": "-4%", "pitch": "+0Hz"},
+    },
+    "ko": {
+        "energetic": {"voice": "ko-KR-InJoonNeural", "rate": "+12%", "pitch": "+2Hz"},
+        "dramatic": {"voice": "ko-KR-HyunsuMultilingualNeural", "rate": "+2%", "pitch": "-3Hz"},
+        "mysterious": {"voice": "ko-KR-InJoonNeural", "rate": "-6%", "pitch": "-6Hz"},
+        "calm": {"voice": "ko-KR-SunHiNeural", "rate": "+0%", "pitch": "+0Hz"},
+        "playful": {"voice": "ko-KR-SunHiNeural", "rate": "+10%", "pitch": "+3Hz"},
+        "emotional": {"voice": "ko-KR-SunHiNeural", "rate": "-4%", "pitch": "+0Hz"},
+    },
+}
+
+
+def voice_for_mood(mood: str | None, lang: str = "en", overrides: dict | None = None) -> dict:
+    """분위기 → {"voice", "rate", "pitch", "mood"}. overrides = config video.mood_voices (선택)."""
+    lang = "ko" if lang == "ko" else "en"
+    mood = mood if mood in MOODS else DEFAULT_MOOD
+    preset = dict(MOOD_VOICES[lang][mood])
+    preset.update(((overrides or {}).get(lang) or {}).get(mood) or {})
+    return {**preset, "mood": mood}
+
 
 class TTSError(RuntimeError):
     pass
@@ -68,11 +107,12 @@ class EdgeTTS:
         self.timeout = timeout
 
     @classmethod
-    def from_config(cls, video_cfg: dict, voice: str | None = None) -> "EdgeTTS":
+    def from_config(cls, video_cfg: dict, voice: str | None = None, *, rate: str | None = None,
+                    pitch: str | None = None) -> "EdgeTTS":
         return cls(voice or video_cfg.get("tts_voice") or "ko-KR-SunHiNeural",
-                   rate=str(video_cfg.get("tts_rate") or "+0%"),
+                   rate=str(rate or video_cfg.get("tts_rate") or "+0%"),
                    volume=str(video_cfg.get("tts_volume") or "+0%"),
-                   pitch=str(video_cfg.get("tts_pitch") or "+0Hz"),
+                   pitch=str(pitch or video_cfg.get("tts_pitch") or "+0Hz"),
                    proxy=video_cfg.get("tts_proxy") or None)
 
     def _communicate(self, text: str):

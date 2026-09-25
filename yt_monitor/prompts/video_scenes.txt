@@ -15,6 +15,11 @@
 - 주인공이 되는 사물/장면 + 구도(extreme close-up, low angle, wide shot) + 분위기(조명, 색감)를 넣어.
 - 실존 인물, 유명인, 브랜드 로고, 글자, 선정적이거나 잔인한 장면은 넣지 마.
 
+[mood 규칙]
+- 대본 전체 분위기를 아래 중 하나로 골라 mood 에 적어. (내레이션 목소리를 고르는 데 쓴다)
+  energetic(신나고 빠름: 랭킹, 꿀팁) / dramatic(긴장감: 반전, 충격 사실) / mysterious(으스스: 괴담, 미스터리)
+  calm(차분한 설명: 과학, 역사) / playful(유쾌함: 웃긴 이야기, 동물) / emotional(따뜻함: 감동, 공감)
+
 - 씬 번호는 아래 목록과 똑같이 맞춰. 설명 없이 JSON만 출력해.
 
 [대본 주제]
@@ -24,4 +29,4 @@
 {scenes}
 
 [출력 형식]
-{"scenes": [{"scene": 1, "keywords": ["keyword one", "keyword two"], "image_prompt": "extreme close-up of ..."}]}
+{"mood": "energetic", "scenes": [{"scene": 1, "keywords": ["keyword one", "keyword two"], "image_prompt": "extreme close-up of ..."}]}

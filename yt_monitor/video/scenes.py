@@ -114,6 +114,36 @@ def parse_keywords(text: str, count: int, per_scene: int) -> dict[int, list[str]
     return out
 
 
+_MOOD_WORDS = {
+    "mysterious": r"horror|creepy|scary|ghost|haunted|mystery|mysterious|unexplained|curse|괴담|공포|귀신|미스터리|소름",
+    "dramatic": r"shocking|secret|truth|never|banned|dangerous|warning|twist|충격|비밀|진실|반전|위험|경고",
+    "emotional": r"heartwarming|love|mom|dad|grandma|tears|lonely|kindness|감동|사랑|엄마|아빠|눈물|위로",
+    "playful": r"funny|hilarious|cute|dog|cat|prank|lol|weird|웃긴|귀여운|강아지|고양이|황당",
+    "calm": r"history|science|explained|how does|study|research|역사|과학|원리|연구",
+}
+
+
+def guess_mood(text: str) -> str:
+    """Ollama 없이 대본 단어로 분위기 추정. 아무것도 안 걸리면 쇼츠 기본값 energetic."""
+    from .tts import DEFAULT_MOOD
+
+    lower = text.lower()
+    scores = {m: len(re.findall(p, lower)) for m, p in _MOOD_WORDS.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else DEFAULT_MOOD
+
+
+def parse_mood(text: str) -> str | None:
+    from .tts import MOODS
+
+    try:
+        data = _extract_json(text)
+    except GenerationError:
+        return None
+    mood = str(data.get("mood") or "").strip().lower() if isinstance(data, dict) else ""
+    return mood if mood in MOODS else None
+
+
 def parse_image_prompts(text: str, count: int) -> dict[int, str]:
     """같은 응답에서 씬별 image_prompt 를 꺼낸다 (없으면 빈 dict)."""
     try:
@@ -137,9 +167,14 @@ def parse_image_prompts(text: str, count: int) -> dict[int, str]:
 
 def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | None = None,
                      title: str = "", per_scene: int = 3, options: dict | None = None,
-                     cancel: threading.Event | None = None, on_status=None) -> list[Scene]:
-    """씬마다 keywords 채우기. client(OllamaClient)가 없거나 실패하면 간이 키워드."""
+                     cancel: threading.Event | None = None, on_status=None,
+                     meta: dict | None = None) -> list[Scene]:
+    """씬마다 keywords 채우기. client(OllamaClient)가 없거나 실패하면 간이 키워드.
+
+    meta 에 dict를 넘기면 대본 분위기를 meta["mood"], 출처를 meta["mood_source"]에 담는다.
+    """
     got: dict[int, list[str]] = {}
+    mood = None
     images: dict[int, str] = {}
     if client is not None and scenes:
         try:
@@ -151,6 +186,7 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
                                cancel=cancel)
             got = parse_keywords(text, len(scenes), per_scene)
             images = parse_image_prompts(text, len(scenes))
+            mood = parse_mood(text)
             log.info("Ollama 키워드: %d/%d개 씬", len(got), len(scenes))
         except GenerationError as exc:
             log.warning("키워드 응답 해석 실패 → 간이 키워드 사용: %s", exc)
@@ -169,6 +205,9 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             s.keywords, s.keyword_source = fallback_keywords(s.text, per_scene), "fallback"
         # 이미지 묘사가 없으면 키워드로 대신 (AI 이미지 생성을 켰을 때만 쓰임)
         s.image_prompt = images.get(s.index) or (", ".join(s.keywords) + ", cinematic dramatic scene")
+    if meta is not None:
+        meta["mood"] = mood or guess_mood(title + " " + " ".join(s.text for s in scenes))
+        meta["mood_source"] = "ollama" if mood else "guess"
     return scenes
 
 

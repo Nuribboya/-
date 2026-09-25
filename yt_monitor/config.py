@@ -142,6 +142,8 @@ DEFAULTS = {
         "min_scene_seconds": 2.5,           # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
         "max_scene_chars": 160,             # 씬 하나에 넣을 최대 글자 수
         "keywords_per_scene": 3,
+        "voice_mode": "auto",               # auto = 대본 분위기에 맞춰 음성·속도·톤 자동 선택 / fixed = tts_voice 고정
+        "mood_voices": {},                  # 분위기별 음성 바꾸기 (선택), 예: {en: {calm: {voice: en-US-JennyNeural}}}
         "tts_voice": "en-US-GuyNeural",     # edge-tts 음성 (en-US-JennyNeural = 여성, ko-KR-SunHiNeural = 한국어)
         "tts_rate": "+5%",                  # 말하기 속도 (쇼츠는 약간 빠르게)
         "tts_volume": "+0%",

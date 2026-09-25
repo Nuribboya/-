@@ -33,7 +33,7 @@ from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
 from .scenes import Scene, chars_per_second, extract_keywords, split_scenes
 from .subtitles import Cue, ass_style_from_config, cues_for_scene, to_ass, to_srt
-from .tts import EdgeTTS, PlaceholderTTS, save_words
+from .tts import MOODS, EdgeTTS, PlaceholderTTS, save_words, voice_for_mood
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,8 @@ class VideoResult:
     duration: float
     scenes: list[Scene]
     warnings: list[str] = field(default_factory=list)
+    mood: str = ""
+    voice: str = ""
 
 
 def output_path_for(outputs_dir: Path, title: str, now: datetime, tz: ZoneInfo) -> Path:
@@ -111,10 +113,21 @@ class VideoPipeline:
 
         return ComfyClient.from_config(self.cfg.ai_images)
 
-    def _make_tts(self, voice):
+    def _make_tts(self, voice: str | None, mood: str, status):
+        """직접 고른 음성 > (voice_mode=auto면) 분위기별 음성 > 설정의 tts_voice."""
         if self._tts is not None:
             return self._tts
-        return PlaceholderTTS() if self.offline else EdgeTTS.from_config(self.v, voice)
+        if self.offline:
+            return PlaceholderTTS()
+        if voice:
+            status(f"음성: {voice} (직접 선택)")
+            return EdgeTTS.from_config(self.v, voice)
+        if str(self.v.get("voice_mode", "auto")) == "auto":
+            pick = voice_for_mood(mood, self.cfg.language, self.v.get("mood_voices"))
+            status(f"분위기: {mood} ({MOODS.get(mood, '')}) → 음성 {pick['voice']}, "
+                   f"속도 {pick['rate']}, 음높이 {pick['pitch']}")
+            return EdgeTTS.from_config(self.v, pick["voice"], rate=pick["rate"], pitch=pick["pitch"])
+        return EdgeTTS.from_config(self.v)
 
     def _make_ollama(self, status):
         if self._ollama is not None or self.offline:
@@ -185,7 +198,8 @@ class VideoPipeline:
         status(f"씬 {len(scenes)}개로 나눴습니다.")
         o = self.cfg.ollama
         ollama = self._make_ollama(status)
-        extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir,
+        meta: dict = {}
+        extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir, meta=meta,
                          title=title, per_scene=int(self.v.get("keywords_per_scene", 3)),
                          options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status)
         for s in scenes:
@@ -243,7 +257,7 @@ class VideoPipeline:
 
         # 3) TTS -------------------------------------------------------------------------
         step(3, "TTS 음성 생성 중…")
-        tts = self._make_tts(voice)
+        tts = self._make_tts(voice, meta.get("mood", ""), status)
         tts_dir = work / "tts"
         tts_dir.mkdir()
         wavs, scene_words, durations = [], [], []
@@ -319,7 +333,8 @@ class VideoPipeline:
         else:
             work_kept = work
         status(f"완료: {final} ({total:.1f}초)")
-        return VideoResult(final, srt, credits, work_kept, total, scenes, warnings)
+        return VideoResult(final, srt, credits, work_kept, total, scenes, warnings,
+                           mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")))
 
     # ---- AI 이미지 -------------------------------------------------------------------
     def _ai_images(self, comfy, scenes, scene_clips, work: Path, status, warn, cancel) -> dict[int, Path]:

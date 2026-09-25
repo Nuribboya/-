@@ -217,3 +217,63 @@ def test_pipeline_continues_when_comfy_is_down(tmp_path):
     assert res.video_path.exists()
     assert any("AI 이미지를 건너뜁니다" in w for w in res.warnings)
     assert ",Hook," not in (res.work_dir / "subtitles.ass").read_text(encoding="utf-8")   # hook_text="" → 없음
+
+
+
+# ---- 분위기별 음성 자동 선택 -----------------------------------------------------------
+
+def test_voice_for_mood_presets_and_overrides():
+    from yt_monitor.video.tts import MOOD_VOICES, MOODS, VOICES, voice_for_mood
+
+    assert set(MOOD_VOICES["en"]) == set(MOODS) == set(MOOD_VOICES["ko"])
+    for lang in ("en", "ko"):
+        for preset in MOOD_VOICES[lang].values():
+            assert preset["voice"] in VOICES                      # GUI 목록에 있는 음성만 사용
+            assert preset["voice"].startswith("en-" if lang == "en" else "ko-")
+    assert voice_for_mood("mysterious", "en")["pitch"].startswith("-")
+    assert voice_for_mood("없는분위기", "en")["mood"] == "energetic"
+    over = voice_for_mood("calm", "en", {"en": {"calm": {"voice": "en-GB-RyanNeural"}}})
+    assert over["voice"] == "en-GB-RyanNeural" and over["rate"] == MOOD_VOICES["en"]["calm"]["rate"]
+
+
+def test_guess_mood_without_ollama():
+    from yt_monitor.video.scenes import guess_mood
+
+    assert guess_mood("The haunted lighthouse nobody explains") == "mysterious"
+    assert guess_mood("This cute dog did the funniest thing") == "playful"
+    assert guess_mood("5 snacks ranked") == "energetic"
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("chosen, expect_voice, expect_rate", [
+    (None, "en-US-ChristopherNeural", "+2%"),          # 가짜 Ollama가 mood=dramatic → 긴장감 있는 목소리
+    ("en-US-JennyNeural", "en-US-JennyNeural", None),   # 직접 고르면 그 음성
+])
+def test_pipeline_picks_voice_by_mood(tmp_path, monkeypatch, chosen, expect_voice, expect_rate):
+    from yt_monitor.video import pipeline as pl
+
+    made = []
+
+    class RecordingTTS(FakeEdgeTTS):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.retry_delay = 0
+            made.append(self)
+
+    monkeypatch.setattr(pl, "EdgeTTS", RecordingTTS)
+    ol, ol_url, _ = start_fake_ollama()
+    try:
+        cfg = make_cfg(tmp_path)
+        cfg.raw["ai_images"]["enabled"] = False
+        statuses = []
+        res = VideoPipeline(cfg, ollama=OllamaClient(ol_url, "qwen2.5:7b")).run(
+            "Nobody knows why this happened. The truth is shocking.", "t", voice=chosen, hook_text="",
+            on_status=statuses.append)
+        assert made[0].voice == expect_voice and res.voice == expect_voice and res.mood == "dramatic"
+        if expect_rate:
+            assert made[0].rate == expect_rate and made[0].pitch == "-3Hz"
+            assert any("분위기: dramatic" in m for m in statuses)
+        else:
+            assert any("직접 선택" in m for m in statuses)
+    finally:
+        ol.shutdown()

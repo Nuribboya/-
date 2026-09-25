@@ -117,6 +117,9 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   min_scene_seconds: 2.5          # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
   max_scene_chars: 160            # 씬 하나에 넣을 최대 글자 수
   keywords_per_scene: 3           # Ollama가 뽑을 씬별 검색 키워드 수 (앞에서부터 검색)
+  voice_mode: auto                # auto = 대본 분위기(신남/긴장/미스터리/차분/유쾌/감성)에 맞춰 음성 자동 선택
+                                  # fixed = 아래 tts_voice 고정. 영상 생성 탭에서 음성을 고르면 그 음성 사용
+  mood_voices: {}                 # 분위기별 음성 바꾸기 (선택). 예: {en: {calm: {voice: en-US-JennyNeural, rate: "+0%"}}}
   tts_voice: en-US-GuyNeural      # 남성. 여성: en-US-JennyNeural, en-US-AriaNeural / 한국어: ko-KR-SunHiNeural
   tts_rate: "+5%"                 # 말하기 속도
   tts_volume: "+0%"

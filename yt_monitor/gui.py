@@ -30,6 +30,7 @@ from .report import fduration, fnum, fpct, pattern_lines, status_text
 log = logging.getLogger(__name__)
 
 APP_TITLE = "YouTube 채널 성과 모니터"
+AUTO_VOICE = "자동 (분위기에 맞게)"
 SPARK = "▁▂▃▄▅▆▇█"
 
 
@@ -482,9 +483,9 @@ class App:
         self.video_title_var = tk.StringVar()
         ttk.Entry(row1, textvariable=self.video_title_var, width=34).pack(side="left", padx=4)
         ttk.Label(row1, text="음성:").pack(side="left", padx=(8, 0))
-        self.voice_var = tk.StringVar()
-        self.voice_combo = ttk.Combobox(row1, textvariable=self.voice_var, width=30,
-                                        values=[f"{k}  {v}" for k, v in VOICES.items()])
+        self.voice_var = tk.StringVar(value=AUTO_VOICE)
+        self.voice_combo = ttk.Combobox(row1, textvariable=self.voice_var, width=30, state="readonly",
+                                        values=[AUTO_VOICE] + [f"{k}  {v}" for k, v in VOICES.items()])
         self.voice_combo.pack(side="left", padx=4)
         ttk.Button(row1, text="📥 주제/대본 탭에서 가져오기", command=self.import_script).pack(side="right")
         row_hook = ttk.Frame(tab)
@@ -1033,7 +1034,8 @@ class App:
             if not messagebox.askyesno(APP_TITLE, KEY_HELP + "\n\n지금은 키 없이 단색 배경으로 만들까요?"):
                 return
         title = self.video_title_var.get().strip() or "영상"
-        voice = self.voice_var.get().split()[0] if self.voice_var.get().strip() else None
+        choice = self.voice_var.get().strip()
+        voice = choice.split()[0] if choice and choice != AUTO_VOICE else None
         hook = self.hook_var.get().strip()
         hook_text = "" if hook == "-" else (hook or None)
         self.cancel_event = threading.Event()
@@ -1055,7 +1057,8 @@ class App:
     def _on_video_done(self, res):
         self.video_result = res
         self.video_progress.configure(value=self.video_progress["maximum"])
-        self.video_step_var.set(f"✅ 완료 ({res.duration:.1f}초)")
+        self.video_step_var.set(f"✅ 완료 ({res.duration:.1f}초)" +
+                                (f" · 분위기 {res.mood} · {res.voice}" if res.mood else ""))
         self.video_path_var.set(str(res.video_path))
         self.btn_open_folder.configure(state="normal")
         self.btn_open_video.configure(state="normal")

@@ -135,6 +135,23 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 | **Pixabay** — Pexels와 번갈아 검색해서 영상 선택 폭 넓히기 | 키를 넣으면 켜짐 | ⚙ 설정 → Pixabay API 키 |
 | **AI 이미지 (ComfyUI)** — 첫 씬(훅)과 스톡 영상을 못 찾은 씬에 AI 이미지 | 꺼짐 | ⚙ 설정 → AI 이미지 생성, `ai_images.mode` (`mix`/`all`) |
 
+### 🎙 분위기에 맞는 음성 자동 선택
+영상 생성 탭의 음성이 **"자동 (분위기에 맞게)"**(기본값)이면, 키워드를 뽑을 때 Ollama가 대본 분위기도 함께 판단해서
+음성 · 말하기 속도 · 음높이를 고릅니다. (Ollama가 꺼져 있으면 대본 단어로 추정)
+
+| 분위기 | 이런 대본 | 영어 음성 (속도 / 음높이) | 한국어 음성 |
+| --- | --- | --- | --- |
+| energetic | 랭킹, 꿀팁, 챌린지 | Guy (+12% / +2Hz) | 인준 |
+| dramatic | 반전, 충격 사실 | Christopher (+2% / -3Hz) | 현수 |
+| mysterious | 괴담, 미스터리 | Christopher (-6% / -6Hz) | 인준 (낮게) |
+| calm | 과학, 역사 설명 | Eric (기본) | 선희 |
+| playful | 웃긴 이야기, 동물 | Aria (+10% / +3Hz) | 선희 (밝게) |
+| emotional | 감동, 공감 | Jenny (-4%) | 선희 (천천히) |
+
+- 음성을 직접 고르면 그 음성을 씁니다. 항상 같은 음성을 쓰려면 `video.voice_mode: fixed`.
+- 분위기별 음성은 `video.mood_voices`로 바꿀 수 있습니다. 예: `{en: {calm: {voice: en-US-JennyNeural}}}`
+- 무료 edge-tts는 외침·속삭임 같은 감정 스타일은 지원하지 않아서, 음성 · 속도 · 음높이 조합으로 분위기를 맞춥니다.
+
 ### AI 이미지 생성 켜기 (그래픽카드 필요, RTX 5060 8GB면 충분)
 1. <https://www.comfy.org/download>에서 **ComfyUI Desktop**(Windows · NVIDIA)을 설치하고 실행합니다.
 2. SDXL 계열 **Lightning/Turbo 모델**(`.safetensors`, 예: Juggernaut XL Lightning)을 받아
