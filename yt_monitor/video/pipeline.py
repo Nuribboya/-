@@ -157,7 +157,7 @@ class VideoPipeline:
 
     # ---- 실행 ---------------------------------------------------------------------
     def run(self, script: str, title: str = "", *, voice: str | None = None, hook_text: str | None = None,
-            output_path: Path | None = None, now: datetime | None = None, upload_meta=None,
+            output_path: Path | None = None, now: datetime | None = None, upload_meta=None, visual_hint: str = "",
             on_progress: Callable[[int, int, str], None] | None = None,
             on_status: Callable[[str], None] | None = None,
             cancel: threading.Event | None = None) -> VideoResult:
@@ -218,7 +218,8 @@ class VideoPipeline:
         meta: dict = {}
         extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir, meta=meta,
                          title=title, per_scene=int(self.v.get("keywords_per_scene", 3)),
-                         options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status)
+                         options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status,
+                         visual_hint=visual_hint)
         for s in scenes:
             status(f"  씬 {s.index}: {', '.join(s.keywords) or '-'}")
         upload = self._upload_meta(upload_meta, scenes, title, ollama, status, cancel)

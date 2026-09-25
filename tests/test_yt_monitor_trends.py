@@ -133,7 +133,7 @@ def test_run_trends_generates_shorts_script(tmp_path):
         assert "최근 유행 쇼츠 분석" in md and "편의점 라면 꿀조합" in md
         prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
         assert "최근 며칠 동안 한국에서 조회수가 가장 빠르게 오른 쇼츠" in prompts[0]   # trend_topics.txt
-        assert "쇼츠 내레이션 대본" in prompts[1] and "약 50초" in prompts[1]            # shorts_script.txt
+        assert "쇼츠 내레이션 대본" in prompts[1] and "약 40초" in prompts[1]   # 잘 뜬 영상 길이(40초)에 맞춤
         assert (tmp_path / "prompts" / "trend_topics.txt").exists()
         with Database(cfg.db_path) as db:
             n = db.conn.execute("SELECT COUNT(*) FROM generations WHERE channel_id='trend'").fetchone()[0]
@@ -188,7 +188,7 @@ def test_run_trends_english_us(tmp_path):
         prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
         assert "Shorts strategist for the US market" in prompts[0]           # trend_topics_en.txt
         assert "한국어로" in prompts[0]                                         # 추천 이유는 한국어
-        assert "American English" in prompts[1] and "about 125 words" in prompts[1]   # 50초 ≈ 125단어
+        assert "American English" in prompts[1] and "about 100 words" in prompts[1]   # 40초 ≈ 100단어
         assert (tmp_path / "prompts" / "shorts_script_en.txt").exists()
         assert "No Korean" in prompts[1]                                     # 코드에서 덧붙이는 영어 전용 지시
         assert res.generation.script_lines[0] == "You won't believe these gas station snack hacks."

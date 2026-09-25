@@ -43,6 +43,9 @@ SCRIPT_TEXT = """# 대본
 구독과 좋아요 부탁드려요.
 """
 
+THUMB_JSON = {"text_on_screen": "DON'T EAT THIS", "subject": "chocolate croissant", "face": "one face close-up",
+              "emotion": "shocked", "shot": "extreme close-up", "colors": "brown, yellow", "hook": "huge bite reaction"}
+
 UPLOAD_JSON = {
     "titles": [{"title": "편의점 조합 TOP5", "why": "숫자가 있어 궁금함"},
                {"title": "Gas Station Snack Hacks That Work", "why": "구체적인 약속"},
@@ -99,7 +102,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": f"model '{payload['model']}' not found"})
         prompt = payload["messages"][-1]["content"]
         if payload.get("format") == "json":
-            if "category_id" in prompt:
+            if payload["messages"][-1].get("images"):          # 비전 모델 (썸네일 분석)
+                data = THUMB_JSON
+            elif "category_id" in prompt:
                 data = UPLOAD_JSON
             else:
                 data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON

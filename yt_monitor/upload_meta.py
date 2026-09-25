@@ -112,6 +112,7 @@ class UploadMeta:
     hashtags: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     source: str = "ollama"                              # ollama | fallback
+    upload_times: list[str] = field(default_factory=list)   # 유행 분석으로 본 추천 업로드 시간
 
     @property
     def title(self) -> str:
@@ -258,6 +259,8 @@ def render_upload_text(meta: UploadMeta, credits: str = "", bgm_note: str = "") 
     lines += ["", "■ 설명 (그대로 복사)", "-" * 40, body, "-" * 40]
     if meta.tags:
         lines += ["", "■ 태그 (고급 설정 → 태그 칸, 쉼표로 구분)", ", ".join(meta.tags)]
+    if meta.upload_times:
+        lines += ["", "■ 추천 업로드 시간 (요즘 잘 뜬 영상들이 올라온 시간)", *[f"   {t}" for t in meta.upload_times]]
     lines += ["", "■ 업로드 체크리스트",
               "- 제목은 40자 안쪽이 휴대폰에서 잘리지 않아요.",
               "- AI 이미지가 들어갔다면 '변경되거나 합성된 콘텐츠' 항목을 '예'로 표시하세요.",
@@ -276,5 +279,7 @@ def render_upload_md(meta: UploadMeta) -> list[str]:
     out.append(f"- 해시태그: {' '.join(meta.hashtags)}")
     if meta.tags:
         out.append(f"- 태그: {', '.join(meta.tags)}")
+    if meta.upload_times:
+        out.append(f"- 추천 업로드 시간: {' · '.join(meta.upload_times)}")
     out += ["", "설명:", "", "```text", meta.description or "-", "```", "", CATEGORY_NOTE, ""]
     return out

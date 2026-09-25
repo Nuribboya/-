@@ -46,8 +46,15 @@ DEFAULT_TRENDS = {  # 최근 유행 쇼츠 분석 (trends.py)
     "top_n": 30,                   # Ollama에 넘길 상위 영상 수
     "breakout_ratio": 3.0,         # 조회수 ≥ 구독자 × 이 값이면 '떡상'
     "min_views": 50000,
-    "script_seconds": 50,          # 쇼츠 대본 목표 길이(초)
+    "script_seconds": 50,          # 쇼츠 대본 목표 길이(초) — auto_optimize면 분석 결과로 대체
     "auto_video": False,           # GUI: 대본 생성 후 영상까지 자동으로 만들기
+    "auto_optimize": True,         # 분석 결과(잘 뜬 영상 길이 · 제목 패턴 · 업로드 시간)를 자동 반영
+    "min_script_seconds": 20,      # 자동 길이의 하한/상한
+    "max_script_seconds": 58,
+    "cache_hours": 3,              # 이 시간 안에 수집한 결과는 원클릭에서 다시 사용 (쿼터 0)
+    "vision": True,                # 상위 영상 썸네일(첫 화면) 분석 (Ollama 비전 모델, 없으면 건너뜀)
+    "vision_model": "qwen2.5vl:7b",
+    "vision_limit": 8,             # 분석할 썸네일 수
 }
 
 # 콘텐츠 언어/시장별 기본값. 설정 창에서 언어를 바꾸면 이 값들이 한꺼번에 들어간다.

@@ -121,15 +121,17 @@ class OllamaClient:
 
     def chat(self, prompt: str, *, system: str | None = None, json_mode: bool = False,
              options: dict | None = None, on_token: Callable[[str], None] | None = None,
-             cancel: threading.Event | None = None) -> str:
+             cancel: threading.Event | None = None, images: list[str] | None = None) -> str:
         """프롬프트 1개를 보내고 전체 응답 텍스트를 돌려준다.
 
         on_token 을 주면 스트리밍으로 받으면서 조각마다 호출한다.
         cancel 이벤트가 set 되면 GenerationCancelled 를 던진다.
+        images: base64 이미지 목록 (비전 모델용, 예: qwen2.5vl)
         """
-        messages = ([{"role": "system", "content": system}] if system else []) + [
-            {"role": "user", "content": prompt}
-        ]
+        user = {"role": "user", "content": prompt}
+        if images:
+            user["images"] = list(images)
+        messages = ([{"role": "system", "content": system}] if system else []) + [user]
         payload = {"model": self.model, "messages": messages, "stream": on_token is not None,
                    "options": options or {}}
         if json_mode:

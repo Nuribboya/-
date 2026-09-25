@@ -231,6 +231,8 @@ class UploadDialog(tk.Toplevel):
                 "   " + CATEGORY_NOTE]
         if getattr(res, "bgm_note", ""):
             info.append("배경음악: " + res.bgm_note.replace("\n", " "))
+        if meta.upload_times:
+            info.append("추천 업로드 시간: " + " · ".join(meta.upload_times) + " (요즘 잘 뜬 영상들이 올라온 시간)")
         info += ["체크: AI 이미지가 들어갔다면 '변경되거나 합성된 콘텐츠'를 '예'로 표시하세요."]
         if meta.source == "fallback":
             info.append("(Ollama 응답이 없어 기본값으로 채웠어요. 제목/설명을 다듬어 주세요.)")
@@ -1121,8 +1123,9 @@ class App:
             self._set_trend_text("유행 쇼츠 수집 중…")
             self._stream_start(f"{prefix}🔥 최근 유행 쇼츠를 분석해서 {o['model']}로 주제/대본 생성 중… "
                                "(PC 사양에 따라 수 분 걸릴 수 있습니다)")
+            # 원클릭은 몇 시간 안에 수집한 결과를 다시 쓴다 (쿼터 0), [🔥 유행 쇼츠 분석]은 항상 새로 수집
             work = lambda: run_trends(self.cfg, on_status=status, on_token=self._on_token,  # noqa: E731
-                                      cancel=cancel)
+                                      cancel=cancel, use_cache=one_click)
         self.run_bg("🚀 원클릭: 대본 만드는 중…" if one_click else "유행 쇼츠 분석 중…", work,
                     self._on_trend_done, cancellable=True)
 
@@ -1219,13 +1222,16 @@ class App:
         self.btn_upload_info.configure(state="disabled")
         g = self.generation
         # 주제/대본 단계에서 만든 업로드 정보는 대본을 그대로 쓸 때만 (직접 바꾼 대본이면 영상 만들 때 새로 생성)
-        upload = g.upload if g is not None and g.upload and g.script.strip() == script else None
+        same = g is not None and g.script.strip() == script
+        upload = g.upload if same and g.upload else None
+        visual_hint = g.visual_hint if same else ""
         self.video_log.configure(state="normal")
         self.video_log.delete("1.0", "end")
         self.video_log.configure(state="disabled")
         pipeline = self.video_pipeline_factory(self.cfg)
         self.run_bg("🚀 원클릭 2/2 — 영상 만드는 중…" if one_click else "영상 생성 중…",
                     lambda: pipeline.run(script, title, voice=voice, hook_text=hook_text, upload_meta=upload,
+                                         visual_hint=visual_hint,
                                          on_progress=self._on_video_progress,
                                          on_status=self._video_log, cancel=cancel),
                     lambda res: self._on_video_done(res, one_click=one_click), cancellable=True)

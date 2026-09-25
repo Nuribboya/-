@@ -92,6 +92,7 @@ class TrendVideo:
     subscribers: int | None = None
     category: str = ""
     category_id: str = ""
+    thumbnail: str = ""
     tags: list[str] = field(default_factory=list)
     sources: set[str] = field(default_factory=set)   # popular | search:<검색어>
 
@@ -109,6 +110,14 @@ class TrendVideo:
     @property
     def url(self) -> str:
         return f"https://youtube.com/shorts/{self.video_id}"
+
+
+def _thumb_url(snippet: dict) -> str:
+    th = snippet.get("thumbnails") or {}
+    for key in ("maxres", "standard", "high", "medium", "default"):
+        if (th.get(key) or {}).get("url"):
+            return th[key]["url"]
+    return ""
 
 
 def _int(v) -> int | None:
@@ -224,7 +233,8 @@ class TrendCollector:
             vids.append(TrendVideo(vid, title, sn.get("channelId", ""), sn.get("channelTitle", ""),
                                    published, duration, views, _int(st.get("likeCount")),
                                    _int(st.get("commentCount")), category=sn.get("categoryId", ""),
-                                   category_id=sn.get("categoryId", ""), tags=list(sn.get("tags") or [])[:8], sources=sources.get(vid, set())))
+                                   category_id=sn.get("categoryId", ""), thumbnail=_thumb_url(sn),
+                                   tags=list(sn.get("tags") or [])[:8], sources=sources.get(vid, set())))
         check()
         if vids:
             status(f"채널 {len({v.channel_id for v in vids})}개 구독자 수 확인 중…")
@@ -331,27 +341,93 @@ class TrendResult:
     table: str
     generation: object | None = None     # generator.Generation
     units: int = 0
+    insights: object | None = None       # trend_insights.Insights
+    cached_at: datetime | None = None    # 캐시를 다시 쓴 경우 수집 시각
+
+
+def trend_cache_path(cfg) -> Path:
+    return Path(cfg.db_path).parent / "trend_cache.json"
+
+
+def _collect(cfg, settings: dict, now: datetime, *, service, use_cache: bool, status, cancel):
+    """(videos, thumbs 캐시, 쿼터 사용량, 캐시 수집 시각 | None)"""
+    from .collector import build_youtube_service
+    from .trend_insights import load_cache
+
+    path = trend_cache_path(cfg)
+    hours = float(settings.get("cache_hours", 3))
+    if use_cache:
+        hit = load_cache(path, settings, now, hours)
+        if hit and hit[0]:
+            videos, thumbs, at = hit
+            mins = max(0, int((now - at).total_seconds() // 60))
+            status(f"{mins}분 전에 수집한 유행 쇼츠 {len(videos)}개를 다시 씁니다 (쿼터 0 · "
+                   f"새로 모으려면 [🔥 유행 쇼츠 분석])")
+            return videos, thumbs, 0, at
+    old = load_cache(path, settings, now, 24 * 30)            # 썸네일 분석 결과는 영상 ID로 계속 재사용
+    thumbs = old[1] if old else {}
+    collector = TrendCollector(service or build_youtube_service(cfg.youtube_api_key), settings)
+    return collector.collect(now, status, cancel), thumbs, collector.units, None
+
+
+def _analyze(cfg, settings: dict, videos, now: datetime, tz: ZoneInfo, thumbs: dict, *, vision: bool,
+             status, cancel):
+    from .trend_insights import analyze, run_vision, summarize_thumbs
+
+    ins = analyze(videos, now, region=settings.get("region", "US"), local_tz=tz,
+                  min_seconds=int(settings.get("min_script_seconds", 20)),
+                  max_seconds=int(settings.get("max_script_seconds", 58)), top_n=int(settings["top_n"]))
+    if vision:
+        run_vision(cfg, ins, videos, cache=thumbs, cancel=cancel, on_status=status)
+    elif thumbs:                                   # 이미 분석해 둔 썸네일만 사용
+        ins.thumbs = [thumbs[v.video_id] for v in videos[:int(settings.get("vision_limit", 8))]
+                      if v.video_id in thumbs]
+        ins.visual_summary_en, ins.visual_summary_ko = summarize_thumbs(ins.thumbs)
+    return ins
+
+
+def _script_seconds(settings: dict, ins) -> float:
+    if ins is not None and settings.get("auto_optimize", True) and ins.recommended_seconds:
+        return float(ins.recommended_seconds)
+    return float(settings["script_seconds"])
+
+
+def _apply_insights(g, ins) -> None:
+    """분석 결과를 생성 결과에 붙인다: 추천 업로드 시간 · 첫 화면 스타일."""
+    if ins is None:
+        return
+    if g.upload is not None and ins.upload_times:
+        g.upload["upload_times"] = list(ins.upload_times)
+    g.visual_hint = ins.visual_summary_en
 
 
 def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now: datetime | None = None,
                on_status: Callable[[str], None] | None = None, on_token: Callable[[str], None] | None = None,
-               cancel: threading.Event | None = None) -> TrendResult:
-    """유행 쇼츠 수집 → (generate=True면) 주제/쇼츠 대본 생성 + outputs/날짜/트렌드.md 저장."""
-    from .collector import build_youtube_service
+               cancel: threading.Event | None = None, use_cache: bool = True) -> TrendResult:
+    """유행 쇼츠 수집(캐시) → 숫자 · 제목 · 시간 · 썸네일 분석 → (generate=True면) 분석에 맞춘 주제/쇼츠 대본
+    + 업로드 정보 → outputs/날짜/트렌드.md 저장."""
     from .generator import ScriptGenerator, ensure_prompts, record_generation, save_generation
+    from .trend_insights import prompt_text, report_ko, save_cache, title_hint
 
     now = now or utcnow()
     tz = ZoneInfo(cfg.schedule["timezone"])
     settings = {**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})}
     status = on_status or log.info
-    collector = TrendCollector(service or build_youtube_service(cfg.youtube_api_key), settings)
-    videos = collector.collect(now, status, cancel)
+    videos, thumbs, units, cached_at = _collect(cfg, settings, now, service=service, use_cache=use_cache,
+                                                status=status, cancel=cancel)
     if not videos:
         raise TrendError("조건에 맞는 최근 유행 쇼츠를 찾지 못했습니다. config.yaml 의 trends 설정"
                          "(lookback_days, min_views 등)을 넓혀 보세요.")
-    context = trend_context(videos, now, tz, settings)
+    ins = _analyze(cfg, settings, videos, now, tz, thumbs, vision=generate, status=status, cancel=cancel)
+    try:
+        save_cache(trend_cache_path(cfg), settings, videos, thumbs, cached_at or now)
+    except OSError as exc:
+        log.warning("유행 캐시 저장 실패: %s", exc)
+    context = "\n\n".join(x for x in (trend_context(videos, now, tz, settings), prompt_text(ins, cfg.language)) if x)
     table = trend_table(videos, now, tz, breakout_ratio=float(settings["breakout_ratio"]))
-    result = TrendResult(videos, context, table, units=collector.units)
+    report = report_ko(ins)
+    result = TrendResult(videos, context, (report + "\n\n" + table) if report else table, units=units,
+                         insights=ins, cached_at=cached_at)
     if not generate:
         return result
 
@@ -359,12 +435,16 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
     from .upload_meta import category_hint, category_stats
 
     stats = category_stats(videos, now, int(settings["top_n"]))
+    seconds = _script_seconds(settings, ins)
+    if seconds != float(settings["script_seconds"]):
+        status(f"분석 결과에 맞춰 대본 목표 길이를 {seconds:.0f}초로 합니다")
     gen = generator or ScriptGenerator.from_config(cfg)
+    hint = "\n\n".join(x for x in (category_hint(stats, cfg.language), title_hint(ins, cfg.language)) if x)
     g = gen.generate(channel_id=TREND_CHANNEL_ID, channel_title=TREND_TITLE, context=context, now=now,
                      trigger="trend", topics_prompt=TREND_TOPICS_PROMPT, script_prompt=SHORTS_SCRIPT_PROMPT,
-                     script_minutes=float(settings["script_seconds"]) / 60,
-                     upload_hint=category_hint(stats, cfg.language), upload_stats=stats,
+                     script_minutes=seconds / 60, upload_hint=hint, upload_stats=stats,
                      on_status=on_status, on_token=on_token, cancel=cancel)
+    _apply_insights(g, ins)
     save_generation(g, cfg.outputs_dir, tz)
     from .db import Database
 
@@ -381,23 +461,37 @@ def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
     from .db import Database
     from .generator import Generation, ScriptGenerator, ensure_prompts, record_generation, save_generation
 
+    from .trend_insights import load_cache, prompt_text, title_hint
+
     topic = topic.strip()
     if not topic:
         raise TrendError("주제를 입력하세요.")
     now = now or utcnow()
     tz = ZoneInfo(cfg.schedule["timezone"])
     settings = {**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})}
+    # 최근에 유행 분석을 했다면 그 결과(길이 · 제목 패턴 · 업로드 시간 · 첫 화면 스타일)를 그대로 활용 (쿼터 0)
+    ins = None
+    hit = load_cache(trend_cache_path(cfg), settings, now, float(settings.get("cache_hours", 3)) * 4)
+    if hit and hit[0]:
+        ins = _analyze(cfg, settings, hit[0], now, tz, hit[1], vision=False, status=on_status or log.info,
+                       cancel=cancel)
     ensure_prompts(cfg)
     gen = generator or ScriptGenerator.from_config(cfg)
-    context = f"(No trend data. The creator picked this topic: {topic})"
+    context = f"(The creator picked this topic: {topic})"
+    if ins is not None:
+        context += "\n\n" + prompt_text(ins, cfg.language)
     g = Generation(ONE_CLICK_CHANNEL_ID, ONE_CLICK_TITLE, now, "manual", gen.model, context,
                    [{"topic": topic, "reason": "직접 입력한 주제", "titles": [topic]}], 0,
-                   script_prompt=SHORTS_SCRIPT_PROMPT, script_minutes=float(settings["script_seconds"]) / 60)
+                   script_prompt=SHORTS_SCRIPT_PROMPT, script_minutes=_script_seconds(settings, ins) / 60,
+                   upload_hint=title_hint(ins, cfg.language) if ins is not None else "")
     gen.write_script(g, 0, on_status=on_status, on_token=on_token, cancel=cancel)
+    _apply_insights(g, ins)
     save_generation(g, cfg.outputs_dir, tz)
     with Database(cfg.db_path) as db:
         record_generation(db, g)
-    return TrendResult([], context, f"직접 입력한 주제: {topic}\n(유행 분석은 건너뛰었습니다)", generation=g)
+    note = "최근 유행 분석 결과를 길이 · 제목 · 업로드 시간에 반영했습니다" if ins is not None else \
+        "유행 분석은 건너뛰었습니다 (먼저 [🔥 유행 쇼츠 분석]을 해 두면 그 결과를 반영합니다)"
+    return TrendResult([], context, f"직접 입력한 주제: {topic}\n({note})", generation=g, insights=ins)
 
 
 def main(argv: list[str] | None = None) -> int:

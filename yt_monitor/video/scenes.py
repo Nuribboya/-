@@ -168,7 +168,7 @@ def parse_image_prompts(text: str, count: int) -> dict[int, str]:
 def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | None = None,
                      title: str = "", per_scene: int = 3, options: dict | None = None,
                      cancel: threading.Event | None = None, on_status=None,
-                     meta: dict | None = None) -> list[Scene]:
+                     meta: dict | None = None, visual_hint: str = "") -> list[Scene]:
     """씬마다 keywords 채우기. client(OllamaClient)가 없거나 실패하면 간이 키워드.
 
     meta 에 dict를 넘기면 대본 분위기를 meta["mood"], 출처를 meta["mood_source"]에 담는다.
@@ -182,6 +182,9 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             prompt = render_template(template, {
                 "title": title or "(제목 없음)", "keywords_per_scene": per_scene,
                 "scenes": "\n".join(f"{s.index}. {s.text}" for s in scenes)})
+            if visual_hint:          # 요즘 뜨는 쇼츠의 첫 화면(썸네일) 스타일 → 첫 씬 이미지에 반영
+                prompt += ("\n\n[요즘 조회수 높은 쇼츠의 첫 화면 스타일]\n" + visual_hint +
+                           "\n→ 1번 씬의 image_prompt는 이 스타일을 따라 스크롤을 멈추게 만들어.")
             text = client.chat(prompt, json_mode=True, options={"temperature": 0.3, **(options or {})},
                                cancel=cancel)
             got = parse_keywords(text, len(scenes), per_scene)
@@ -204,7 +207,7 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
         else:
             s.keywords, s.keyword_source = fallback_keywords(s.text, per_scene), "fallback"
         # 이미지 묘사가 없으면 키워드로 대신 (AI 이미지 생성을 켰을 때만 쓰임)
-        s.image_prompt = images.get(s.index) or (", ".join(s.keywords) + ", cinematic dramatic scene")
+        s.image_prompt = images.get(s.index) or (", ".join(s.keywords) + ", candid photo")
     if meta is not None:
         meta["mood"] = mood or guess_mood(title + " " + " ".join(s.text for s in scenes))
         meta["mood_source"] = "ollama" if mood else "guess"

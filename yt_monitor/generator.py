@@ -221,6 +221,7 @@ class Generation:
     upload: dict | None = None                # 업로드 정보 (upload_meta.UploadMeta.to_dict())
     upload_hint: str = ""                     # 유행 쇼츠의 카테고리 통계 (업로드 정보 프롬프트용)
     upload_stats: list = field(default_factory=list)
+    visual_hint: str = ""                     # 요즘 뜨는 쇼츠의 첫 화면(썸네일) 스타일 → 첫 씬 AI 이미지
 
     @property
     def script(self) -> str:

@@ -74,8 +74,15 @@ trends:                           # 🔥 최근 유행 쇼츠 분석 → 주제/
   top_n: 30                       # Ollama에 넘길 상위 영상 수
   breakout_ratio: 3               # 조회수가 구독자의 N배 이상이면 '떡상' 표시
   min_views: 50000
-  script_seconds: 50              # 쇼츠 대본 목표 길이(초)
+  script_seconds: 50              # 쇼츠 대본 목표 길이(초) — auto_optimize면 분석 결과로 자동 조정
   auto_video: false               # true면 대본 생성 후 영상까지 자동으로 만듦 (GUI 체크박스와 같음)
+  auto_optimize: true             # 잘 뜬 영상의 길이 · 제목 패턴 · 업로드 시간 · 첫 화면 스타일을 자동 반영
+  min_script_seconds: 20          # 자동 길이 하한/상한(초)
+  max_script_seconds: 58
+  cache_hours: 3                  # 이 시간 안에 수집한 유행은 원클릭에서 다시 사용 (쿼터 0 · 빠름)
+  vision: true                    # 상위 쇼츠 썸네일(첫 화면)을 비전 모델로 분석 (모델 없으면 건너뜀)
+  vision_model: qwen2.5vl:7b      # 먼저: ollama pull qwen2.5vl:7b  (약 6GB)
+  vision_limit: 8                 # 분석할 썸네일 수
 
 pexels:                           # 무료 스톡 영상 API — https://www.pexels.com/api/ 가입하면 즉시 발급
   api_key: ""
