@@ -43,6 +43,14 @@ SCRIPT_TEXT = """# 대본
 구독과 좋아요 부탁드려요.
 """
 
+# 영어 프롬프트에는 qwen이 실제로 돌려준 모양대로 (머리말 · 한국어 제목 섞임)
+SCRIPT_TEXT_EN = """Sure, here is the voice-over script for your YouTube Shorts video:
+편의점 꿀조합
+You won't believe these gas station snack hacks.
+Number one is chips dipped in chocolate.
+The last one is wild. Which one would you try?
+"""
+
 
 class _Handler(BaseHTTPRequestHandler):
     models = ["qwen2.5:7b", "llama3:latest"]
@@ -78,6 +86,8 @@ class _Handler(BaseHTTPRequestHandler):
         if payload.get("format") == "json":
             data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON
             content = json.dumps(data, ensure_ascii=False)
+        elif "American English" in prompt:
+            content = SCRIPT_TEXT_EN
         else:
             content = SCRIPT_TEXT
         if not payload.get("stream"):

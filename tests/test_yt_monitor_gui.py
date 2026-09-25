@@ -81,6 +81,7 @@ def pump(root, cond, timeout=10.0):
 
 def make_config(tmp_path, url, model="qwen2.5:7b"):
     raw = read_raw(tmp_path / "config.yaml")
+    raw["language"] = "ko"              # 가짜 Ollama/대본이 한국어
     raw["channels"] = [{"handle": "@test", "name": "테스트채널"}]
     raw["youtube"]["api_key"] = "fake"
     raw["telegram"]["enabled"] = False

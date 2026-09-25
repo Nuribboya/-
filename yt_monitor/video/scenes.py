@@ -53,8 +53,8 @@ class Scene:
     image_prompt: str = ""          # AI 이미지 생성용 장면 묘사 (영어)
 
 
-def split_scenes(script: str, min_seconds: float = 2.5, max_chars: int = 90) -> list[Scene]:
-    sentences = tts_lines(script)
+def split_scenes(script: str, min_seconds: float = 2.5, max_chars: int = 90, lang: str | None = None) -> list[Scene]:
+    sentences = tts_lines(script, lang)
     cps = chars_per_second(" ".join(sentences))
     scenes: list[str] = []
     cur = ""

@@ -38,6 +38,7 @@ def ollama_config(tmp_path, url, model="qwen2.5:7b"):
     cfg = load_config(write_config(tmp_path), load_env=False)
     cfg.raw["ollama"].update(host=url, model=model)
     cfg.raw["storage"]["prompts_dir"] = str(PROMPTS)
+    cfg.raw["language"] = "ko"          # 가짜 Ollama가 한국어 대본을 돌려준다
     return cfg
 
 
@@ -228,3 +229,38 @@ def test_scheduler_interval_hours(tmp_path):
     scheduler, _ = build_scheduler(cfg, blocking=False, job=lambda: None)
     assert "3:00:00" in str(scheduler.get_jobs()[0].trigger)
     assert describe_schedule(cfg) == "3시간마다"
+
+
+# ---- 영어 모드: 모델 머리말 · 한국어 줄 · 제목 반복 걸러내기 ------------------------------
+
+QWEN_EN_OUTPUT = """Sure, here is the voice-over script for your YouTube Shorts video on 90s nostalgia memories:
+90s 추억, 기억해?
+90s Childhood, Do You Remember?
+What do you remember from the 90s?
+Back then, we wore flip flops and listened to grunge music.
+The last one is wild—what's your favorite 90s memory?
+"""
+
+
+def test_tts_lines_english_drops_preamble_korean_and_title():
+    from yt_monitor.generator import tts_lines
+
+    lines = tts_lines(QWEN_EN_OUTPUT, "en", ["90s Childhood, Do You Remember?"])
+    assert lines == ["What do you remember from the 90s?",
+                     "Back then, we wore flip flops and listened to grunge music.",
+                     "The last one is wild—what's your favorite 90s memory?"]
+    # 한국어 모드는 한글 문장을 그대로 둔다
+    assert "90s 추억, 기억해?" in tts_lines(QWEN_EN_OUTPUT, "ko")
+    # 대본 중간에 제목과 같은 문장이 나오면 (훅으로 쓴 경우) 지우지 않는다
+    assert tts_lines("Hook line!\nTitle Here\n", "en", ["Title Here"]) == ["Hook line!", "Title Here"]
+    # 평범한 "Here's" 문장은 머리말이 아니다
+    assert tts_lines("Here's the crazy part.\n", "en") == ["Here's the crazy part."]
+
+
+def test_pick_title_prefers_english_in_english_mode():
+    from yt_monitor.generator import pick_title
+
+    t = {"topic": "90s nostalgia", "titles": ["90s 추억, 기억해?", "90s Kids Remember This?"]}
+    assert pick_title(t, "en") == "90s Kids Remember This?"
+    assert pick_title(t, "ko") == "90s 추억, 기억해?"
+    assert pick_title({"topic": "90s nostalgia", "titles": ["90s 추억"]}, "en") == "90s nostalgia"

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from ..generator import has_hangul, tts_lines
 from ..report import safe_name
 from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frames
 from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
@@ -191,10 +192,17 @@ class VideoPipeline:
 
         # 1) 씬 분리 · 키워드 --------------------------------------------------------
         step(1, "씬 분리 · 키워드 추출 중…")
+        lang = self.cfg.language
         scenes = split_scenes(script, float(self.v.get("min_scene_seconds", 2.5)),
-                              int(self.v.get("max_scene_chars", 90)))
+                              int(self.v.get("max_scene_chars", 90)), lang)
         if not scenes:
+            if lang == "en" and has_hangul(script):
+                raise VideoError("영어 모드인데 대본에 영어 문장이 없습니다. 영어 대본을 넣거나 "
+                                 "설정에서 콘텐츠 언어를 '한국'으로 바꾸세요.")
             raise VideoError("대본에서 읽을 문장을 찾지 못했습니다. 대본을 입력하세요.")
+        dropped = [ln for ln in tts_lines(script) if has_hangul(ln)] if lang == "en" else []
+        if dropped:
+            status(f"영어 모드라 한국어 문장 {len(dropped)}개는 읽지 않고 뺐습니다: " + " / ".join(dropped[:3]))
         status(f"씬 {len(scenes)}개로 나눴습니다.")
         o = self.cfg.ollama
         ollama = self._make_ollama(status)
@@ -285,7 +293,10 @@ class VideoPipeline:
             cues += cues_for_scene(s.text, words, a, b, max_chars)
         srt_work = work / "subtitles.srt"
         srt_work.write_text(to_srt(cues), encoding="utf-8")
-        hook_text = title if hook_text is None else hook_text
+        if hook_text is None:
+            hook_text = title
+            if lang == "en" and has_hangul(title):     # 영어 영상에 한국어 제목이 뜨지 않게 → 첫 문장
+                hook_text = scenes[0].text.split(". ")[0]
         hook_sec = min(float(self.v.get("hook_seconds", 2.5) or 0), total)
         hook = Cue(0.0, hook_sec, hook_text) if hook_text and hook_text.strip() and hook_sec > 0 else None
         ass = work / "subtitles.ass"

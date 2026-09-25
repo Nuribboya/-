@@ -190,6 +190,9 @@ def test_run_trends_english_us(tmp_path):
         assert "한국어로" in prompts[0]                                         # 추천 이유는 한국어
         assert "American English" in prompts[1] and "about 125 words" in prompts[1]   # 50초 ≈ 125단어
         assert (tmp_path / "prompts" / "shorts_script_en.txt").exists()
+        assert "No Korean" in prompts[1]                                     # 코드에서 덧붙이는 영어 전용 지시
+        assert res.generation.script_lines[0] == "You won't believe these gas station snack hacks."
+        assert not any("편의점" in s or "Sure" in s for s in res.generation.script_lines)
     finally:
         server.shutdown()
 

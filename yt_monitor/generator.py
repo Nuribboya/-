@@ -24,7 +24,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from .ollama_client import OllamaClient
@@ -151,14 +151,38 @@ _META_RE = re.compile(r"^(제목|주제|대본|영상 제목|기획 의도|목�
                       re.IGNORECASE)
 
 
-def tts_lines(text: str) -> list[str]:
-    """대본을 TTS에 바로 넣을 수 있게 정리: 한 줄에 한 문장, 읽으면 안 되는 기호 제거."""
+# "Sure, here is the voice-over script for …:" 같은 모델의 머리말
+_PREAMBLE_RE = re.compile(r"^(sure|okay|ok|certainly|absolutely|of course|here|below|다음은|아래는)\b.*"
+                          r"(script|voice-?over|narration|대본|내레이션)", re.IGNORECASE)
+_HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+
+def has_hangul(text: str) -> bool:
+    return bool(_HANGUL_RE.search(text or ""))
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text).casefold()
+
+
+def tts_lines(text: str, lang: str | None = None, skip: Iterable[str] = ()) -> list[str]:
+    """대본을 TTS에 바로 넣을 수 있게 정리: 한 줄에 한 문장, 읽으면 안 되는 기호 제거.
+
+    lang="en"이면 한글이 섞인 문장을 뺀다 (영어 음성이 한국어를 읽지 않게).
+    skip: 모델이 대본 맨 앞에 다시 적은 제목/주제 (첫 내레이션 전에 그대로 나오면 뺀다).
+    """
+    skip_norm = {_norm(s) for s in skip if s and _norm(s)}
     out: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("```") or re.fullmatch(r"[-=*_~#]{3,}", line):
             continue
         if re.match(r"^#{1,6}\s", line) or _META_RE.match(line.replace("*", "")):
+            continue
+        plain = line.replace("*", "").strip()
+        if _PREAMBLE_RE.match(plain) or (plain.endswith((":", "：")) and len(plain) > 1):
+            continue
+        if not out and skip_norm and _norm(plain) in skip_norm:
             continue
         line = line.replace("**", "").replace("__", "").replace("`", "")
         line = re.sub(r"^[-*•·>]\s+|^\d+[.)]\s+", "", line)
@@ -168,6 +192,8 @@ def tts_lines(text: str) -> list[str]:
         line = re.sub(r"\s+", " ", line).strip()
         for sentence in re.split(r"(?<=[.!?…])\s+", line):
             sentence = sentence.strip()
+            if lang == "en" and has_hangul(sentence):
+                continue
             if re.search(r"[0-9A-Za-z가-힣]", sentence):
                 out.append(sentence)
     return out
@@ -266,6 +292,16 @@ def save_generation(g: Generation, outputs_dir: Path, tz: ZoneInfo) -> Path:
 
 # ---- 생성기 -----------------------------------------------------------------
 
+def pick_title(topic: dict, lang: str) -> str:
+    """영어 모드에서 7B 모델이 제목을 한국어로 쓰는 경우가 있어, 한글 없는 제목을 먼저 고른다."""
+    titles = [t for t in topic.get("titles") or [] if t] or [topic.get("topic", "")]
+    if lang == "en":
+        for t in [*titles, topic.get("topic", "")]:
+            if t and not has_hangul(t):
+                return t
+    return titles[0]
+
+
 class ScriptGenerator:
     def __init__(self, client: OllamaClient, prompts_dir: Path, settings: dict, lang: str = "ko"):
         self.client = client
@@ -311,8 +347,12 @@ class ScriptGenerator:
             "script_minutes": f"{minutes:g}", "script_chars": int(minutes * cpm),
             "script_seconds": int(round(minutes * 60)), "script_words": int(minutes * WORDS_PER_MINUTE),
         })
+        if self.lang == "en":
+            # 사용자 폴더의 예전 프롬프트 파일에도 적용되게 코드에서 덧붙인다
+            prompt += ("\n\nOutput ONLY the spoken lines, all in English. No Korean, no title line, "
+                       "and no introduction such as \"Sure, here is the script\". Start with the hook.")
         text = self.client.chat(prompt, options=self._options(), on_token=on_token, cancel=cancel)
-        lines = tts_lines(text)
+        lines = tts_lines(text, self.lang, [title, topic.get("topic", ""), *topic.get("titles", [])])
         if not lines:
             raise GenerationError("모델이 빈 대본을 돌려줬습니다.")
         return lines
@@ -339,7 +379,7 @@ class ScriptGenerator:
                      cancel: threading.Event | None = None) -> Generation:
         """g.topics[index] 주제로 대본을 (다시) 쓴다. GUI의 '선택한 주제로 대본 생성'에서도 사용."""
         topic = g.topics[index]
-        title = topic["titles"][0]
+        title = pick_title(topic, self.lang)
         if on_status:
             on_status(f"[{g.channel_title}] 대본 작성 중: {topic['topic']}")
         g.script_lines = self.generate_script(g.channel_title, g.context, topic, title,

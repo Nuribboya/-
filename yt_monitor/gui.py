@@ -988,7 +988,7 @@ class App:
             return True
         from .generator import tts_lines
 
-        lines = tts_lines(self.result_box.get("1.0", "end"))
+        lines = tts_lines(self.result_box.get("1.0", "end"), self.cfg.language if self.cfg else None)
         if not lines:
             messagebox.showinfo(APP_TITLE, "가져올 대본이 없습니다. [✨ 새 주제/대본 생성]을 먼저 하거나 "
                                 "대본을 직접 붙여넣으세요.")

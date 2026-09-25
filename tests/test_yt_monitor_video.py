@@ -307,8 +307,9 @@ def test_compose_steps(tmp_path):
 
 # ---- 전체 파이프라인 ------------------------------------------------------------------
 
-def make_cfg(tmp_path, **video) -> Config:
+def make_cfg(tmp_path, lang="ko", **video) -> Config:
     raw = read_raw(tmp_path / "config.yaml")
+    raw["language"] = lang
     raw["video"].update(width=180, height=320, fps=15, crf=30, preset="ultrafast", clip_max_seconds=1.5,
                         subtitle_font_size=20, subtitle_margin_bottom=40, **video)
     raw["pexels"]["api_key"] = "fake-key"
@@ -395,6 +396,23 @@ def test_pipeline_rejects_empty_script(tmp_path):
 
     with pytest.raises(VideoError, match="대본"):
         VideoPipeline(make_cfg(tmp_path), offline=True).run("# 제목만\n[효과음]", "빈 대본")
+
+
+@needs_ffmpeg
+def test_pipeline_english_mode_skips_korean_lines(tmp_path):
+    """영어 모드: 한국어 줄은 읽지 않고, 한국어 제목 대신 첫 문장을 훅으로 쓴다."""
+    statuses = []
+    script = ("Sure, here is the voice-over script for your Short:\n90s 추억, 기억해?\n"
+              "What do you remember from the 90s? Back then, we all had a Walkman.\n")
+    res = VideoPipeline(make_cfg(tmp_path, lang="en"), offline=True).run(
+        script, "90s 추억, 기억해?", on_status=statuses.append)
+    text = " ".join(s.text for s in res.scenes)
+    assert "추억" not in text and "Sure" not in text and text.startswith("What do you remember")
+    assert any("한국어 문장 1개" in m for m in statuses)
+    assert any("훅 문구" in m and "What do you remember from the 90s?" in m for m in statuses)
+    from yt_monitor.video.pipeline import VideoError
+    with pytest.raises(VideoError, match="영어 대본"):
+        VideoPipeline(make_cfg(tmp_path, lang="en"), offline=True).run("한국어 대본만 있어요.", "x")
 
 
 def test_output_path_for(tmp_path):
