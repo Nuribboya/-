@@ -131,6 +131,7 @@ DEFAULTS = {
         "enabled": True,
         "host": "http://localhost:11434",
         "model": "qwen2.5:7b",
+        "auto_start": True,                 # 꺼져 있으면 `ollama serve`를 창 없이 자동 실행
         "auto_generate_on_slowdown": True,  # 둔화 감지 시 주제/대본 자동 생성
         "num_topics": 5,                    # 주제 후보 수 (3~5 권장)
         "num_titles": 3,                    # 주제별 제목 후보 수 (2~3 권장)

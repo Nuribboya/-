@@ -293,3 +293,31 @@ def test_short_script_is_extended():
     finally:
         handler.extend_ok = True
         server.shutdown()
+
+
+def test_ollama_auto_start(tmp_path):
+    """꺼져 있으면 `ollama serve`를 백그라운드로 켜고 뜰 때까지 기다린다."""
+    import socket
+    import sys as _sys
+
+    from yt_monitor.ollama_client import start_ollama_server
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    # 가짜 ollama 실행 파일: "serve"로 불리면 가짜 Ollama 서버를 연다
+    tests = Path(__file__).resolve().parent
+    fake = tmp_path / "ollama"
+    fake.write_text(f"#!{_sys.executable}\nimport sys, time\nsys.path[:0] = [{str(tests)!r}, {str(tests.parent)!r}]\n"
+                    f"assert sys.argv[1] == 'serve'\nfrom fake_ollama import start_fake_ollama\n"
+                    f"start_fake_ollama({port})\ntime.sleep(20)\n", encoding="utf-8")
+    fake.chmod(0o755)
+    client = OllamaClient(f"http://127.0.0.1:{port}", "qwen2.5:7b")
+    assert not client.status().server_up
+    if _sys.platform == "win32":
+        pytest.skip("셸 스크립트 실행 파일은 Windows에서 못 씀")
+    assert start_ollama_server(lambda: client.status().server_up, timeout=15, exe=str(fake))
+    assert client.status().ok
+    assert not start_ollama_server(lambda: False, timeout=0.5, exe=str(tmp_path / "없음"))
+    # 원격 주소면 켜지 않는다
+    assert OllamaClient("http://192.0.2.1:9", "m", timeout=1).status_or_start(True, timeout=1).server_up is False

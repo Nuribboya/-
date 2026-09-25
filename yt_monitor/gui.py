@@ -791,10 +791,24 @@ class App:
         o = self.cfg.ollama
 
         def work():
-            st = OllamaClient(o["host"], o["model"]).status()
+            client = OllamaClient(o["host"], o["model"])
+            if not client.status().server_up and o.get("auto_start", True):
+                self.set_status("Ollama가 꺼져 있어 백그라운드로 켜는 중…")
+            st = client.status_or_start(o.get("auto_start", True))
             self.ui(lambda: self._on_ollama_status(st, startup))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _ollama_status_or_start(self, client):
+        """버튼을 눌렀을 때 Ollama가 꺼져 있으면 백그라운드로 켜 본다 (최대 30초)."""
+        st = client.status()
+        if not st.server_up and self.cfg.ollama.get("auto_start", True):
+            self.status_var.set("Ollama가 꺼져 있어 백그라운드로 켜는 중… (최대 30초)")
+            self.root.update_idletasks()
+            st = client.status_or_start(True)
+            if st.server_up:
+                self._on_ollama_status(st, startup=False)
+        return st
 
     def _on_ollama_status(self, st, startup: bool):
         self.ollama_ok = st.ok
@@ -972,7 +986,7 @@ class App:
 
         o = self.cfg.ollama
         client = OllamaClient(o["host"], o["model"], timeout=o["timeout_sec"])
-        st = client.status()
+        st = self._ollama_status_or_start(client)
         if not st.ok:
             self._on_ollama_status(st, startup=False)
             if not st.server_up:
@@ -1104,7 +1118,7 @@ class App:
 
         self._one_click = one_click
         o = self.cfg.ollama
-        st = OllamaClient(o["host"], o["model"]).status()
+        st = self._ollama_status_or_start(OllamaClient(o["host"], o["model"]))
         if not st.ok:
             self._on_ollama_status(st, startup=False)
             if not st.server_up:

@@ -54,6 +54,7 @@ ollama:                           # 로컬 LLM (https://ollama.com) — API 비�
   enabled: true
   host: http://localhost:11434
   model: qwen2.5:7b               # 먼저: ollama pull qwen2.5:7b
+  auto_start: true                # Ollama가 꺼져 있으면 창 없이 자동으로 켜기
   auto_generate_on_slowdown: true # 둔화 감지 시 주제/제목/대본 자동 생성
   num_topics: 5                   # 주제 후보 수 (3~5)
   num_titles: 3                   # 주제별 제목 후보 수 (2~3)

@@ -12,7 +12,13 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import sys
 import threading
+import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -109,6 +115,15 @@ class OllamaClient:
         if not st.model_present:
             raise ModelMissing(st.message)
 
+    def status_or_start(self, auto_start: bool = True, timeout: float = 30) -> "OllamaStatus":
+        """꺼져 있으면 Ollama를 창 없이 켜 보고 상태를 돌려준다 (로컬 주소일 때만)."""
+        st = self.status()
+        if st.server_up or not auto_start or not _is_local(self.host):
+            return st
+        if start_ollama_server(lambda: self.status().server_up, timeout=timeout):
+            return self.status()
+        return st
+
     def unload(self) -> None:
         """모델을 그래픽카드 메모리에서 바로 내린다 (AI 이미지 생성에 메모리를 넘겨주기 위해)."""
         try:
@@ -171,6 +186,45 @@ class OllamaClient:
                 if data.get("done"):
                     break
             return "".join(parts)
+
+
+def _is_local(host: str) -> bool:
+    return any(h in host for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]"))
+
+
+def find_ollama_exe() -> str | None:
+    """PATH → Windows 기본 설치 위치(%LOCALAPPDATA%\\Programs\\Ollama) 순."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    local = os.environ.get("LOCALAPPDATA")
+    for cand in ([Path(local) / "Programs" / "Ollama" / "ollama.exe"] if local else []) + \
+            [Path("C:/Program Files/Ollama/ollama.exe")]:
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def start_ollama_server(is_up: Callable[[], bool], timeout: float = 30, exe: str | None = None) -> bool:
+    """`ollama serve`를 창 없이 백그라운드로 실행하고 켜질 때까지 기다린다. 프로그램을 닫아도 계속 켜져 있다."""
+    exe = exe or find_ollama_exe()
+    if not exe:
+        return False
+    kw: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x08000000 | 0x00000008       # CREATE_NO_WINDOW | DETACHED_PROCESS
+    else:
+        kw["start_new_session"] = True
+    try:
+        subprocess.Popen([exe, "serve"], **kw)
+    except OSError:
+        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if is_up():
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
