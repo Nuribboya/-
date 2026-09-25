@@ -368,7 +368,7 @@ class VideoPipeline:
             return None
         script = "\n".join(s.text for s in scenes)
         if ollama is None:
-            return fallback_meta(title, None, [], self.cfg.language)
+            return fallback_meta(title, None, [], self.cfg.language, script)
         status("업로드 정보(제목 후보 · 카테고리 · 해시태그) 만드는 중…")
         o = self.cfg.ollama
         return generate_upload_meta(ollama, self.cfg.prompts_dir, lang=self.cfg.language, title=title,

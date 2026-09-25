@@ -184,9 +184,13 @@ def parse_upload_meta(data, *, lang: str, fallback_titles: list[str], max_title:
                       desc, hashtags, tags[:15])
 
 
-def fallback_meta(title: str, topic: dict | None, stats: list[CategoryStat], lang: str) -> UploadMeta:
+def fallback_meta(title: str, topic: dict | None, stats: list[CategoryStat], lang: str,
+                  script: str = "") -> UploadMeta:
+    first = re.split(r"(?<=[.!?])\s+", script.strip().splitlines()[0])[0] if script.strip() else ""
     titles = [title, *((topic or {}).get("titles") or [])]
     meta = parse_upload_meta({}, lang=lang, fallback_titles=[t for t in titles if t])
+    if not meta.titles and first:             # 영어 모드인데 제목이 한국어뿐 → 대본 첫 문장
+        meta.titles = [{"title": first[:70], "why": ""}]
     if stats:
         meta.category_id = stats[0].category_id
         meta.category_reason = f"유행 쇼츠에서 가장 많이 보인 카테고리 ({stats[0].count}개)"
@@ -222,7 +226,7 @@ def generate_upload_meta(client, prompts_dir: Path, *, lang: str, title: str, sc
         raise
     except Exception as exc:  # 업로드 정보는 부가 기능 → 실패해도 대본/영상은 계속
         log.warning("업로드 정보 생성 실패 (기본값 사용): %s", exc)
-        return fallback_meta(title, topic, stats, lang)
+        return fallback_meta(title, topic, stats, lang, script)
 
 
 # ---- 출력 ------------------------------------------------------------------------

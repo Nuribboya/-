@@ -69,6 +69,10 @@ def test_generate_upload_meta_with_ollama_and_fallback():
                               script="s", topic={"topic": "t", "titles": ["Alt Title"]}, stats=stats)
     assert fb.source == "fallback" and [t["title"] for t in fb.titles] == ["My Title", "Alt Title"]
     assert fb.category_id == "27"
+    # 영어 모드인데 제목이 한국어뿐이면 대본 첫 문장을 제목 후보로
+    fb2 = generate_upload_meta(OllamaClient("http://127.0.0.1:9", "m"), PROMPTS, lang="en", title="한국어 제목",
+                               script="You won't believe this. Second one.\nNext line.")
+    assert fb2.title == "You won't believe this."
 
 
 def test_render_upload_text():
