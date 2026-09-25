@@ -360,6 +360,7 @@ def test_pipeline_end_to_end(tmp_path, services):
     assert len(debug["scenes"]) == len(res.scenes)
     assert sum(s["frames"] for s in debug["shots"]) == round(res.duration * 15)
     assert (res.work_dir / "logs").is_dir() and not res.warnings
+    assert res.bgm == "" and any("배경음악 없음" in m for m in statuses)
     up = res.upload_path.read_text(encoding="utf-8")
     assert res.upload_path.name == "편의점_꿀조합_업로드정보.txt" and "노하우/스타일" in up
     assert "#Shorts" in up and "Stock footage: Pexels" in up and res.upload_title
@@ -367,6 +368,31 @@ def test_pipeline_end_to_end(tmp_path, services):
     # 같은 제목으로 또 만들면 덮어쓰지 않는다
     res2 = make_pipeline(make_cfg(tmp_path, keep_work_files=False), services).run(SCRIPT, "편의점 꿀조합", now=now)
     assert res2.video_path != res.video_path and res2.video_path.exists() and res2.work_dir is None
+
+
+@needs_ffmpeg
+def test_pipeline_background_music(tmp_path, services):
+    """분위기(가짜 Ollama = dramatic) 폴더의 곡을 깔고, 곡 옆 .txt를 출처에 붙인다."""
+    from yt_monitor.video.bgm import README_NAME, pick_bgm
+
+    music = tmp_path / "bgm" / "dramatic"
+    music.mkdir(parents=True)
+    (music / "epic.wav").write_bytes(tone_wav(3.0))
+    (music / "epic.txt").write_text("Epic Song by Someone (YouTube Audio Library)", encoding="utf-8")
+    (tmp_path / "bgm" / "calm").mkdir()
+    (tmp_path / "bgm" / "calm" / "soft.wav").write_bytes(tone_wav(1.0))
+    statuses = []
+    res = make_pipeline(make_cfg(tmp_path), services).run(SCRIPT, "브금", on_status=statuses.append)
+    assert res.bgm == "epic.wav" and any("배경음악 (dramatic): epic.wav" in m for m in statuses)
+    assert "Music: Epic Song by Someone" in res.credits_path.read_text(encoding="utf-8")
+    up = res.upload_path.read_text(encoding="utf-8")
+    assert "사용한 곡: epic.wav" in up and "Dramatic" in up and "Music: Epic Song" in up
+    assert probe(FF.path, res.video_path).has_audio and not res.warnings
+    assert (res.work_dir / "narration_bgm.wav").exists()
+    # 분위기 폴더가 비면 bgm/ 바로 아래 → 다른 분위기 폴더 순
+    assert pick_bgm(tmp_path / "bgm", "mysterious").name in ("epic.wav", "soft.wav")
+    assert pick_bgm(tmp_path / "none", "calm") is None
+    assert (tmp_path / "bgm" / README_NAME).exists() and (tmp_path / "bgm" / "playful").is_dir()
 
 
 @needs_ffmpeg

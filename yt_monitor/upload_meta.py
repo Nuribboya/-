@@ -231,7 +231,7 @@ def generate_upload_meta(client, prompts_dir: Path, *, lang: str, title: str, sc
 
 # ---- 출력 ------------------------------------------------------------------------
 
-def render_upload_text(meta: UploadMeta, credits: str = "") -> str:
+def render_upload_text(meta: UploadMeta, credits: str = "", bgm_note: str = "") -> str:
     """업로드할 때 복사해서 붙여넣기 좋은 텍스트 (.txt / GUI)."""
     lines = ["📋 업로드 정보 (YouTube Shorts)", "", "■ 제목 후보 (⭐ = 추천, 클릭 잘 되는 순)"]
     for i, t in enumerate(meta.titles):
@@ -248,6 +248,8 @@ def render_upload_text(meta: UploadMeta, credits: str = "") -> str:
     body = (desc + ("\n\n" if desc else "") + tags_line).strip()
     if credits.strip():
         body += "\n\n" + credits.strip()
+    if bgm_note:
+        lines += ["", "■ 배경음악", f"   {bgm_note}"]
     lines += ["", "■ 설명 (그대로 복사)", "-" * 40, body, "-" * 40]
     if meta.tags:
         lines += ["", "■ 태그 (고급 설정 → 태그 칸, 쉼표로 구분)", ", ".join(meta.tags)]

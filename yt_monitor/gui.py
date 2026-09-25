@@ -506,6 +506,7 @@ class App:
         self.btn_upload_info = ttk.Button(row3, text="📋 업로드 정보", state="disabled",
                                           command=self._open_upload_info)
         self.btn_upload_info.pack(side="right")
+        ttk.Button(row3, text="🎵 BGM 폴더", command=self._open_bgm_dir).pack(side="right")
         self.btn_open_video = ttk.Button(row3, text="▶ 영상 열기", state="disabled",
                                          command=lambda: self._open_result(select=False))
         self.btn_open_video.pack(side="right")
@@ -1072,10 +1073,22 @@ class App:
         if getattr(res, "upload_path", None):
             self.btn_upload_info.configure(state="normal")
             self._video_log(f"📋 추천 제목: {res.upload_title}  → [📋 업로드 정보]에서 제목·카테고리·설명·해시태그 확인")
+        if getattr(res, "bgm", ""):
+            self._video_log(f"🎵 배경음악: {res.bgm}")
         self.status_var.set(f"영상 생성 완료 — {res.video_path}")
         if res.warnings:
             messagebox.showwarning(APP_TITLE, "영상은 만들어졌지만 확인할 점이 있습니다:\n\n" +
                                    "\n".join(f"· {w}" for w in res.warnings[:8]))
+
+    def _open_bgm_dir(self):
+        """배경음악 폴더(분위기별 하위 폴더 + 안내 파일)를 만들고 연다."""
+        from .video.bgm import README_NAME, ensure_bgm_dirs
+
+        root = ensure_bgm_dirs(self.cfg.bgm_dir)
+        try:
+            open_path(root)
+        except OSError:
+            messagebox.showinfo(APP_TITLE, (root / README_NAME).read_text(encoding="utf-8"))
 
     def _open_upload_info(self):
         path = getattr(self.video_result, "upload_path", None)

@@ -159,6 +159,9 @@ DEFAULTS = {
         "preset": "veryfast",
         "keep_work_files": True,            # 중간 파일(클립/음성/ffmpeg 로그) 보관 → 디버깅용
         "upload_meta": True,                # 영상 옆에 <이름>_업로드정보.txt
+        "bgm_enabled": True,                # bgm/<분위기>/ 폴더의 곡을 배경음악으로 (없으면 목소리만)
+        "bgm_volume": 0.15,                 # 배경음악 크기 (0.1 = 작게 ~ 0.3 = 크게)
+        "bgm_duck": True,                   # 목소리가 나올 때 음악을 자동으로 줄이기
     },
     "pixabay": {                            # 무료 스톡 영상 추가 소스 (https://pixabay.com/api/docs/)
         "api_key": "",
@@ -182,6 +185,7 @@ DEFAULTS = {
     },
     "storage": {
         "video_cache_dir": "data/video_cache",   # 다운로드한 스톡 영상 캐시
+        "bgm_dir": "bgm",                        # 배경음악 폴더 (분위기별 하위 폴더)
         "db_path": "data/yt_monitor.db",
         "reports_dir": "reports",
         "outputs_dir": "outputs",
@@ -292,6 +296,10 @@ class Config:
     @property
     def video_cache_dir(self) -> Path:
         return self.storage_path("video_cache_dir")
+
+    @property
+    def bgm_dir(self) -> Path:
+        return self.storage_path("bgm_dir")
 
     def secret(self, section: str, key: str, required: bool = True) -> str | None:
         """환경변수(<key>_env에 적힌 이름) → config.yaml의 <key> 순으로 찾는다."""

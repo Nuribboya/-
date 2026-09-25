@@ -152,6 +152,20 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 - 분위기별 음성은 `video.mood_voices`로 바꿀 수 있습니다. 예: `{en: {calm: {voice: en-US-JennyNeural}}}`
 - 무료 edge-tts는 외침·속삭임 같은 감정 스타일은 지원하지 않아서, 음성 · 속도 · 음높이 조합으로 분위기를 맞춥니다.
 
+### 🎵 배경음악(BGM) — 분위기에 맞게 자동으로
+
+음악은 저작권 때문에 인터넷에서 자동으로 받지 않고, **직접 넣어 둔 무료 곡**을 분위기에 맞게 골라 씁니다.
+
+1. 영상 생성 탭의 **[🎵 BGM 폴더]** → exe 옆에 `bgm/` 과 분위기 폴더 6개가 생깁니다.
+   `energetic`(신나는) · `dramatic`(웅장/긴장) · `mysterious`(미스터리) · `calm`(잔잔) · `playful`(코믹) · `emotional`(감성)
+2. **YouTube 스튜디오 → 오디오 보관함**에서 분위기/장르 필터로 곡을 받아 알맞은 폴더에 넣습니다 (YouTube 업로드용 무료 · 저작권 걱정 없음).
+3. 영상을 만들 때 대본 분위기에 맞는 폴더에서 한 곡을 무작위로 골라, **목소리가 나올 때는 음악을 자동으로 줄여서**(더킹) 깝니다.
+   - 폴더가 비어 있으면 목소리만 넣고, `_업로드정보.txt`에 분위기별 **추천 곡 스타일 · 오디오 보관함 필터**를 적어 줍니다.
+   - '저작자 표시 필요' 곡은 곡과 같은 이름의 `.txt`(예: `song.mp3` + `song.txt`)에 표시 문구를 적으면 출처에 자동으로 붙습니다.
+4. 크기 조절: `config.yaml` → `video.bgm_volume` (기본 0.15, 0.1 작게 ~ 0.3 크게), 끄려면 `bgm_enabled: false`.
+
+> ⚠ 유명 가요/팝송은 넣지 마세요. Content ID 저작권 신고로 수익이 원곡자에게 가거나 영상이 막힐 수 있습니다.
+
 ### AI 이미지 생성 켜기 (그래픽카드 필요, RTX 5060 8GB면 충분)
 1. <https://www.comfy.org/download>에서 **ComfyUI Desktop**(Windows · NVIDIA)을 설치하고 실행합니다.
 2. SDXL 계열 **Lightning/Turbo 모델**(`.safetensors`, 예: Juggernaut XL Lightning)을 받아

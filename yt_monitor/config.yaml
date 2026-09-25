@@ -135,6 +135,9 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   preset: veryfast                # 인코딩 속도 (ultrafast ~ slow)
   keep_work_files: true           # 중간 파일(클립, 음성, ffmpeg 로그)을 <이름>_work/ 에 보관
   upload_meta: true               # 영상 옆에 <이름>_업로드정보.txt (제목 후보 · 카테고리 · 설명 · 해시태그 · 출처)
+  bgm_enabled: true               # bgm/<분위기>/ 폴더에 넣은 곡을 분위기에 맞게 골라 깔기 (폴더가 비면 목소리만)
+  bgm_volume: 0.15                # 배경음악 크기 (0.1 작게 ~ 0.3 크게)
+  bgm_duck: true                  # 목소리가 나올 때 음악 자동으로 줄이기
 
 storage:
   db_path: data/yt_monitor.db     # 이 파일 기준 상대 경로
@@ -142,6 +145,7 @@ storage:
   outputs_dir: outputs            # 생성한 주제/대본/영상 (outputs/날짜/채널명.md, 제목.mp4)
   prompts_dir: prompts            # 프롬프트 템플릿 (topics.txt, script_gen.txt, video_scenes.txt)
   video_cache_dir: data/video_cache  # 다운로드한 스톡 영상 캐시 (지워도 됨)
+  bgm_dir: bgm                    # 배경음악 폴더: bgm/energetic, dramatic, mysterious, calm, playful, emotional
 
 schedule:
   interval_hours: null            # 숫자를 넣으면 N시간 간격 (설정 창의 '체크 주기')

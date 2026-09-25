@@ -31,11 +31,12 @@ from ..generator import has_hangul, tts_lines
 from ..report import safe_name
 from ..upload_meta import UploadMeta, fallback_meta, generate_upload_meta, render_upload_text
 from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frames
-from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
+from .ffmpeg import Cancelled, FFmpegError, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
 from .scenes import Scene, chars_per_second, extract_keywords, split_scenes
 from .subtitles import Cue, ass_style_from_config, cues_for_scene, to_ass, to_srt
-from .tts import MOODS, EdgeTTS, PlaceholderTTS, save_words, voice_for_mood
+from .bgm import MOOD_BGM, bgm_credit, ensure_bgm_dirs, pick_bgm, recommend_text
+from .tts import DEFAULT_MOOD, MOODS, EdgeTTS, PlaceholderTTS, save_words, voice_for_mood
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class VideoResult:
     mood: str = ""
     voice: str = ""
     upload_path: Path | None = None     # <파일명>_업로드정보.txt
+    bgm: str = ""                       # 사용한 배경음악 파일 이름
     upload_title: str = ""              # 추천 제목
 
 
@@ -285,6 +287,8 @@ class VideoPipeline:
         narration = work / "narration.wav"
         total = concat_wavs(wavs, narration)
         status(f"전체 음성 {total:.1f}초 ({getattr(tts, 'voice', '')})")
+        mood = meta.get("mood") if meta.get("mood") in MOODS else DEFAULT_MOOD
+        audio, bgm_track = self._add_bgm(comp, narration, total, mood, status, warn)
 
         # 4) 자막 -------------------------------------------------------------------------
         step(4, "자막 생성 중…")
@@ -334,19 +338,21 @@ class VideoPipeline:
         shot_paths = comp.prepare_shots(shots, lambda i, n: (check_cancel(),
                                                              status(f"  클립 맞추기 {i}/{n}")))
         v1 = comp.concat(shot_paths)
-        v2 = comp.add_audio(v1, narration, total)
+        v2 = comp.add_audio(v1, audio, total)
 
         # 6) 자막 번인 · 저장 -----------------------------------------------------------------
         step(6, "자막 입히기 · 저장 중…")
         comp.burn_subtitles(v2, ass, final)
         srt = final.with_suffix(".srt")
         shutil.copyfile(srt_work, srt)
-        credits = self._write_credits(final, scenes, scene_clips)
+        credits = self._write_credits(final, scenes, scene_clips, bgm_credit(bgm_track) if bgm_track else "")
         upload_path = None
         if upload is not None:
             upload_path = final.with_name(final.stem + "_업로드정보.txt")
             credit_text = credits.read_text(encoding="utf-8") if credits else ""
-            upload_path.write_text(render_upload_text(upload, credit_text) + "\n", encoding="utf-8")
+            bgm_note = (f"사용한 곡: {bgm_track.name}" if bgm_track else
+                        f"(bgm/{mood} 폴더가 비어 있어 목소리만 넣었습니다)") + "\n   추천: " + recommend_text(mood)
+            upload_path.write_text(render_upload_text(upload, credit_text, bgm_note) + "\n", encoding="utf-8")
             status(f"업로드 정보 저장: {upload_path.name} (추천 제목: {upload.title})")
         if not self.v.get("keep_work_files", True):
             shutil.rmtree(work, ignore_errors=True)
@@ -356,7 +362,30 @@ class VideoPipeline:
         status(f"완료: {final} ({total:.1f}초)")
         return VideoResult(final, srt, credits, work_kept, total, scenes, warnings,
                            mood=meta.get("mood", ""), voice=str(getattr(tts, "voice", "")),
-                           upload_path=upload_path, upload_title=upload.title if upload else "")
+                           upload_path=upload_path, upload_title=upload.title if upload else "",
+                           bgm=bgm_track.name if bgm_track else "")
+
+    def _add_bgm(self, comp, narration: Path, total: float, mood: str, status, warn) -> tuple[Path, Path | None]:
+        """분위기에 맞는 배경음악을 bgm/ 폴더에서 골라 섞는다. 곡이 없거나 실패하면 목소리만."""
+        if not self.v.get("bgm_enabled", True):
+            return narration, None
+        root = self.cfg.bgm_dir
+        try:
+            ensure_bgm_dirs(root)
+        except OSError:
+            pass
+        track = pick_bgm(root, mood)
+        if track is None:
+            status(f"배경음악 없음 → {root / mood} 폴더에 무료 곡을 넣으면 자동으로 깔립니다. "
+                   f"추천: {MOOD_BGM.get(mood, MOOD_BGM['energetic'])['ko']}")
+            return narration, None
+        status(f"배경음악 ({mood}): {track.name}")
+        try:
+            return comp.mix_bgm(narration, track, total, volume=float(self.v.get("bgm_volume", 0.15)),
+                                duck=bool(self.v.get("bgm_duck", True))), track
+        except FFmpegError as exc:
+            warn(f"배경음악 '{track.name}'을(를) 넣지 못해 목소리만 넣었습니다: {str(exc).splitlines()[0]}")
+            return narration, None
 
     def _upload_meta(self, given, scenes, title, ollama, status, cancel) -> UploadMeta | None:
         """주제/대본 단계에서 만든 업로드 정보가 있으면 그대로, 없으면 여기서 만든다."""
@@ -422,7 +451,7 @@ class VideoPipeline:
         (work / "scenes.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
 
     @staticmethod
-    def _write_credits(final: Path, scenes, scene_clips) -> Path | None:
+    def _write_credits(final: Path, scenes, scene_clips, music: str = "") -> Path | None:
         """영상 설명란에 붙여넣을 출처 목록 (영어권 시청자 기준으로 영어)."""
         seen, lines, sources = set(), [], set()
         for s in scenes:
@@ -431,12 +460,17 @@ class VideoPipeline:
                     seen.add(c.key)
                     sources.add(c.source)
                     lines.append(f"- {c.credit}")
-        if not lines:
+        if not lines and not music:
             return None
         sites = {"pexels": "Pexels (pexels.com)", "pixabay": "Pixabay (pixabay.com)"}
+        text = ""
+        if lines:
+            text = ("Stock footage: " + ", ".join(sites.get(x, x) for x in sorted(sources)) + "\n"
+                    + "\n".join(lines) + "\n")
+        if music:
+            text += ("\n" if text else "") + "Music: " + music + "\n"
         path = final.with_name(final.stem + "_출처.txt")
-        path.write_text("Stock footage: " + ", ".join(sites.get(x, x) for x in sorted(sources)) + "\n"
-                        + "\n".join(lines) + "\n", encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
         return path
 
 

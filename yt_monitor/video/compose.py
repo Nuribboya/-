@@ -175,6 +175,24 @@ class Composer:
                          "-movflags", "+faststart", out], "음성 삽입")
         return out
 
+    def mix_bgm(self, narration: Path, music: Path, duration: float, *, volume: float = 0.15,
+                duck: bool = True, out: Path | None = None) -> Path:
+        """내레이션 + 배경음악. 음악은 반복 · 페이드 인/아웃, 목소리가 나올 때 자동으로 줄인다(더킹)."""
+        out = out or self.work / "narration_bgm.wav"
+        fade_out = min(1.5, duration / 3)
+        music_chain = (f"[1:a]aresample=48000,aformat=channel_layouts=stereo,volume={volume:.3f},"
+                       f"afade=t=in:d=0.5,afade=t=out:st={max(0.0, duration - fade_out):.3f}:d={fade_out:.3f}")
+        voice = "[0:a]aresample=48000,aformat=channel_layouts=stereo"
+        if duck:
+            graph = (f"{voice},asplit=2[n1][n2];{music_chain}[m];"
+                     "[m][n1]sidechaincompress=threshold=0.02:ratio=6:attack=20:release=400[md];"
+                     "[n2][md]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]")
+        else:
+            graph = f"{voice}[n];{music_chain}[m];[n][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
+        self.runner.run(["-i", narration, "-stream_loop", "-1", "-i", music, "-filter_complex", graph,
+                         "-map", "[a]", "-t", f"{duration:.3f}", "-ar", "48000", out], "배경음악")
+        return out
+
     # 4) 자막 번인 --------------------------------------------------------------------
     def burn_subtitles(self, video: Path, ass_path: Path, out: Path) -> Path:
         """ass 필터 경로는 Windows 드라이브 문자(C:) 이스케이프 문제가 있어서,
