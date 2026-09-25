@@ -2,12 +2,13 @@
 
 유튜브는 알고리즘 점수를 공개하지 않으므로 "최근 올라왔는데 조회수가 빠르게 오르는 영상"으로 추정한다.
 - 수집: YouTube Data API
-    videos.list(chart=mostPopular, regionCode=KR)          한국 인기 급상승 (페이지당 1 unit)
+    videos.list(chart=mostPopular, regionCode=US|KR)       인기 급상승 (페이지당 1 unit)
     search.list(order=viewCount, publishedAfter=N일 전,     최근 N일 조회수 상위 짧은 영상
-                videoDuration=short, regionCode=KR)          (검색 1회 100 unit)
+                videoDuration=short, regionCode=US|KR)       (검색 1회 100 unit)
     videos.list / channels.list                              조회수·길이 / 구독자 수 (50개당 1 unit)
   → 기본 설정으로 1회 약 210 unit (무료 쿼터 하루 10,000)
-- 필터: 쇼츠 길이(shorts_max_seconds 이하), 최근 lookback_days 이내, 한국어 제목(선택)
+- 필터: 쇼츠 길이(shorts_max_seconds 이하), 최근 lookback_days 이내, 제목 언어(title_language)
+- 언어: config 의 language (en = 미국 중심 영어, ko = 한국)에 따라 지역·프롬프트가 바뀐다
 - 점수: 시간당 조회수 = 조회수 ÷ 게시 후 경과 시간
         떡상 = 조회수가 구독자 수의 breakout_ratio 배 이상 (작은 채널이 알고리즘을 탄 경우)
 - 결과: 유행 목록 + 반복 키워드 → prompts/trend_topics.txt → 주제 후보
@@ -44,8 +45,24 @@ SHORTS_SCRIPT_PROMPT = "shorts_script.txt"
 
 _STOP = {"shorts", "short", "쇼츠", "숏츠", "youtube", "유튜브", "the", "and", "for", "you", "with",
          "진짜", "정말", "이거", "그냥", "오늘", "영상", "ㅋㅋ", "ㅋㅋㅋ", "ㅎㅎ", "shortsvideo", "viral",
-         "fyp", "trending", "funny", "구독", "좋아요", "shortvideo", "reels"}
+         "fyp", "trending", "funny", "구독", "좋아요", "shortvideo", "reels", "this", "that", "what", "how",
+         "why", "when", "your", "are", "was", "his", "her", "they", "from", "have", "just", "can", "will",
+         "not", "but", "all", "out", "get", "one", "its", "into", "about", "who", "did", "does", "don",
+         "tiktok", "subscribe", "like"}
 _JOSA = re.compile(r"(으로|에서|에게|까지|부터|처럼|보다|이랑|하고|은|는|이|가|을|를|의|에|도|만|와|과|로)$")
+
+
+def title_matches(title: str, lang: str) -> bool:
+    """제목 언어 필터. en: 한글/한자/가나가 없고 글자의 대부분이 라틴 문자, ko: 한글 포함."""
+    if lang == "ko":
+        return bool(re.search(r"[가-힣]", title))
+    if lang == "en":
+        if re.search(r"[가-힣\u3040-\u30ff\u4e00-\u9fff\u0400-\u04ff\u0600-\u06ff\u0900-\u097f]", title):
+            return False
+        letters = [c for c in title if c.isalpha()]
+        latin = [c for c in letters if c.isascii()]
+        return len(latin) >= 3 and len(latin) >= 0.8 * len(letters)
+    return True
 
 
 class TrendError(RuntimeError):
@@ -191,7 +208,7 @@ class TrendCollector:
             if views < int(self.s["min_views"]):
                 continue
             title = sn.get("title", "")
-            if self.s["korean_only"] and not re.search(r"[가-힣]", title):
+            if not title_matches(title, self.s.get("title_language", "any")):
                 continue
             vids.append(TrendVideo(vid, title, sn.get("channelId", ""), sn.get("channelTitle", ""),
                                    published, duration, views, _int(st.get("likeCount")),
@@ -212,9 +229,14 @@ class TrendCollector:
 
 # ---- 분석 텍스트 -------------------------------------------------------------------
 
-def _compact(n: float | None) -> str:
+def _compact(n: float | None, lang: str = "ko") -> str:
     if n is None:
         return "-"
+    if lang == "en":
+        for div, unit in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+            if n >= div:
+                return f"{n / div:.1f}{unit}"
+        return fnum(n)
     if n >= 1e8:
         return f"{n / 1e8:.1f}억"
     if n >= 1e4:
@@ -237,31 +259,43 @@ def hot_keywords(videos: list[TrendVideo], n: int = 15) -> list[tuple[str, int]]
     return [(w, c) for w, c in counter.most_common(n) if c >= 2]
 
 
+_LABELS = {
+    "ko": dict(head="분석 시각: {t} / 지역: {r} / 최근 {d}일 / 쇼츠({m}초 이하) {n}개 중 상위 {k}개",
+               top="[시간당 조회수 상위 쇼츠]", views="조회", vph="시간당", subs="구독자",
+               breakout=" (구독자의 {b:.0f}배 → 떡상)", sec="초", kw="[여러 영상에 반복되는 키워드]",
+               cat="[카테고리 분포]", cat_n="{c} {n}개", small="[작은 채널인데 알고리즘을 탄 영상 {n}개]"),
+    "en": dict(head="Analyzed: {t} / Region: {r} / Last {d} days / Top {k} of {n} Shorts (<= {m}s)",
+               top="[Shorts ranked by views per hour]", views="views", vph="per hour", subs="subs",
+               breakout=" ({b:.0f}x subs -> breakout)", sec="s", kw="[Keywords repeated across videos]",
+               cat="[Categories]", cat_n="{c} {n}", small="[{n} breakout videos from small channels]"),
+}
+
+
 def trend_context(videos: list[TrendVideo], now: datetime, tz: ZoneInfo, settings: dict | None = None) -> str:
+    """Ollama 프롬프트에 넣을 유행 요약 (영어 모드면 영어로)."""
     s = {**DEFAULT_TRENDS, **(settings or {})}
+    lang = "en" if s.get("language") == "en" else "ko"
+    L = _LABELS[lang]
+    c = lambda n: _compact(n, lang)  # noqa: E731
+    ratio = float(s["breakout_ratio"])
     top = videos[: int(s["top_n"])]
-    breakout = [v for v in top if v.breakout and v.breakout >= float(s["breakout_ratio"])]
-    lines = [
-        f"분석 시각: {now.astimezone(tz):%Y-%m-%d %H:%M} / 지역: {s['region']} / "
-        f"최근 {s['lookback_days']}일 / 쇼츠({s['shorts_max_seconds']}초 이하) {len(videos)}개 중 상위 {len(top)}개",
-        "",
-        "[시간당 조회수 상위 쇼츠]",
-    ]
+    lines = [L["head"].format(t=f"{now.astimezone(tz):%Y-%m-%d %H:%M}", r=s["region"], d=s["lookback_days"],
+                              m=s["shorts_max_seconds"], n=len(videos), k=len(top)), "", L["top"]]
     for i, v in enumerate(top, 1):
         b = v.breakout
-        sub = f"구독자 {_compact(v.subscribers)}" + (f" (구독자의 {b:.0f}배 → 떡상)" if b and b >= float(
-            s["breakout_ratio"]) else "")
+        sub = f"{L['subs']} {c(v.subscribers)}" + (L["breakout"].format(b=b) if b and b >= ratio else "")
         tags = " ".join("#" + t for t in v.tags[:4])
-        lines.append(f"{i}. {v.title} | 조회 {_compact(v.views)} | 시간당 {_compact(v.views_per_hour(now))} | "
-                     f"{sub} | {v.category or '-'} | {v.duration}초" + (f" | {tags}" if tags else ""))
+        lines.append(f"{i}. {v.title} | {L['views']} {c(v.views)} | {L['vph']} {c(v.views_per_hour(now))} | "
+                     f"{sub} | {v.category or '-'} | {v.duration}{L['sec']}" + (f" | {tags}" if tags else ""))
     kws = hot_keywords(top)
     if kws:
-        lines += ["", "[여러 영상에 반복되는 키워드]", ", ".join(f"{w}({c})" for w, c in kws)]
+        lines += ["", L["kw"], ", ".join(f"{w}({n})" for w, n in kws)]
     cats = Counter(v.category or "-" for v in top).most_common(5)
-    lines += ["", "[카테고리 분포]", ", ".join(f"{c} {n}개" for c, n in cats)]
+    lines += ["", L["cat"], ", ".join(L["cat_n"].format(c=cat, n=n) for cat, n in cats)]
+    breakout = [v for v in top if v.breakout and v.breakout >= ratio]
     if breakout:
-        lines += ["", f"[작은 채널인데 알고리즘을 탄 영상 {len(breakout)}개]"]
-        lines += [f"- {v.title} (구독자 {_compact(v.subscribers)}, 조회 {_compact(v.views)})" for v in breakout[:8]]
+        lines += ["", L["small"].format(n=len(breakout))]
+        lines += [f"- {v.title} ({L['subs']} {c(v.subscribers)}, {L['views']} {c(v.views)})" for v in breakout[:8]]
     return "\n".join(lines)
 
 

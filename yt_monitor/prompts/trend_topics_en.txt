@@ -1,0 +1,17 @@
+You are a YouTube Shorts strategist for the US market. Below are the Shorts whose views grew the fastest in the last few days in the US.
+Analyze them and propose new Shorts topics that can ride what the algorithm is pushing right now.
+
+[Trending Shorts data]
+{channel_data}
+
+[Requirements]
+- Find patterns shared by several trending videos (subject, meme, format, title style) and propose {num_topics} Shorts topics that ride those trends.
+- Topics must be makeable with stock footage + voice-over + captions only (skip anything that needs a specific celebrity's face, gameplay footage, or filming yourself).
+- Prefer formats like facts, tips, rankings, "things you didn't know", surprising twists, relatable moments.
+- For each topic, {num_titles} scroll-stopping English titles (max 60 characters each, curiosity-driven but not misleading).
+- "reason": explain in KOREAN (한국어로) in one sentence which trending videos' common point this topic rides, so a Korean creator can understand it.
+- Put the number of the most promising topic in "best" (1-based).
+- "topic" and "titles" must be in English.
+- Answer ONLY with JSON in exactly this format. No explanations.
+
+{"topics": [{"topic": "topic in English", "reason": "한국어 추천 이유", "titles": ["Title 1", "Title 2"]}], "best": 1}

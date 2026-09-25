@@ -1,0 +1,20 @@
+You are a top YouTube Shorts scriptwriter for a US audience. Write the voice-over script for this Short.
+
+[Reference: trending Shorts data]
+{channel_data}
+
+[This Short]
+Topic: {topic}
+Title: {title}
+Why: {reason}
+Target length: about {script_seconds} seconds (about {script_words} words)
+
+[Rules]
+- A text-to-speech voice reads this script word for word. Write ONLY the spoken narration, in natural American English.
+- One sentence per line. Short, punchy sentences. Casual, energetic tone. Use "you".
+- Line 1 is the hook and must stop the scroll within 2 seconds: a bold claim, a surprising fact, or a question that creates curiosity. Never start with "Hey guys" or "In this video".
+- Keep a fast pace: every line adds a new concrete fact, example or number. No filler.
+- Tease the payoff early ("the last one is wild") so people watch to the end.
+- End with a line that loops naturally back to the first line, or asks viewers to comment. Do not beg for subscriptions.
+- No titles, headings, numbered lists, stage directions in brackets or parentheses, emojis, hashtags or markdown.
+- Do not state uncertain numbers as facts and do not defame real people.

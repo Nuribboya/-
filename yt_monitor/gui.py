@@ -23,7 +23,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .analyzer import ChannelAnalysis, analyze_channel, value_at
-from .config import Config, ConfigError, load_config, read_raw, save_config
+from .config import LANGUAGE_LABELS, Config, ConfigError, apply_language, load_config, read_raw, save_config
 from .db import Database, from_iso, utcnow
 from .report import fduration, fnum, fpct, pattern_lines, status_text
 
@@ -179,6 +179,7 @@ class SetupDialog(tk.Toplevel):
             "host": tk.StringVar(value=r["ollama"]["host"]),
             "threshold": tk.StringVar(value=f"{r['analysis']['drop_threshold_pct']:g}"),
             "auto_gen": tk.BooleanVar(value=bool(r["ollama"].get("auto_generate_on_slowdown", True))),
+            "language": tk.StringVar(value=LANGUAGE_LABELS.get(r.get("language", "en"), LANGUAGE_LABELS["en"])),
         }
         row = 1
 
@@ -192,6 +193,12 @@ class SetupDialog(tk.Toplevel):
             row += 1
             return e
 
+        ttk.Label(frm, text="콘텐츠 언어/시장").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Combobox(frm, textvariable=self.vars["language"], values=list(LANGUAGE_LABELS.values()),
+                     state="readonly", width=20).grid(row=row, column=1, sticky="w", pady=3)
+        ttk.Label(frm, text="유행 분석 지역 · 대본 언어 · 음성 · 자막 폰트가 함께 바뀜",
+                  foreground="#777").grid(row=row, column=2, sticky="w", padx=6)
+        row += 1
         field("YouTube API 키 *", "api_key")
         ttk.Label(frm, text="채널 목록 *").grid(row=row, column=0, sticky="nw", pady=3)
         self.channels_text = tk.Text(frm, width=48, height=5)
@@ -281,6 +288,9 @@ class SetupDialog(tk.Toplevel):
             merged.append(prev)
 
         r = self.raw
+        lang = next((k for k, label in LANGUAGE_LABELS.items() if label == v["language"]), "en")
+        if lang != r.get("language"):
+            apply_language(r, lang)
         r["channels"] = merged
         r["youtube"]["api_key"] = v["api_key"].strip()
         r["telegram"]["bot_token"] = v["bot_token"].strip()
@@ -332,7 +342,7 @@ class App:
         if self._load_or_setup():
             self.refresh_channels()
             self._apply_auto_check(self.cfg.raw.get("gui", {}).get("auto_check", False))
-            self.trend_auto_var.set(bool(self.cfg.raw.get("trends", {}).get("auto_video", False)))
+            self._apply_language_ui()
             if check_ollama_on_start:
                 self.check_ollama(startup=True)
 
@@ -422,8 +432,8 @@ class App:
         self.trend_auto_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(bar, text="대본 생성 후 영상까지 자동으로 만들기", variable=self.trend_auto_var,
                         command=self._save_trend_auto).pack(side="left", padx=10)
-        ttk.Label(bar, text="최근 며칠 한국에서 조회수가 빠르게 오른 쇼츠 → 주제 추천 → 쇼츠 대본",
-                  foreground="#777").pack(side="left")
+        self.trend_hint = ttk.Label(bar, foreground="#777")
+        self.trend_hint.pack(side="left")
         self.trend_box = scrolledtext.ScrolledText(tab, wrap="none", font=self.text_font)
         self.trend_box.insert("1.0", "[🔥 유행 쇼츠 분석]을 누르면 최근 유행하는 쇼츠 목록이 여기에 표시됩니다.\n"
                               "(YouTube API 쿼터를 1회 약 200 사용합니다. 무료 쿼터는 하루 10,000)")
@@ -583,6 +593,7 @@ class App:
         self.root.wait_window(dlg)
         if dlg.saved:
             self.cfg = load_config(self.config_path)
+            self._apply_language_ui()
             self._apply_auto_check(self.auto_var.get())   # 주기가 바뀌었을 수 있음
             self.refresh_channels()
             self.check_ollama()
@@ -861,6 +872,13 @@ class App:
             messagebox.showinfo(APP_TITLE, f"출력 폴더: {out}")
 
     # ---- 유행 쇼츠 분석 ------------------------------------------------------------------
+
+    def _apply_language_ui(self):
+        t = self.cfg.raw.get("trends", {})
+        self.trend_auto_var.set(bool(t.get("auto_video", False)))
+        self.trend_hint.configure(text=f"최근 {t.get('lookback_days', 3)}일 {t.get('region', 'US')}에서 조회수가 "
+                                       f"빠르게 오른 쇼츠 → 주제 추천 → 쇼츠 대본 "
+                                       f"({LANGUAGE_LABELS.get(self.cfg.language, '')})")
 
     def _save_trend_auto(self):
         raw = read_raw(self.config_path)

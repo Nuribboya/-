@@ -36,21 +36,48 @@ DEFAULT_ANALYSIS = {
 }
 
 DEFAULT_TRENDS = {  # 최근 유행 쇼츠 분석 (trends.py)
-    "region": "KR",
-    "language": "ko",
+    "region": "US",
+    "language": "en",
     "lookback_days": 3,            # 최근 며칠 안에 올라온 영상만
     "shorts_max_seconds": 180,     # 쇼츠 최대 길이 (유튜브 쇼츠는 최대 3분)
     "search_queries": ["", "#shorts"],   # 빈 문자열 = 검색어 없이 전체 조회수 상위
     "popular_pages": 4,            # 인기 급상승 목록 페이지 수 (50개씩)
-    "korean_only": True,           # 제목에 한글이 있는 영상만
+    "title_language": "en",        # en = 영어 제목만, ko = 한글 제목만, any = 전부
     "top_n": 30,                   # Ollama에 넘길 상위 영상 수
     "breakout_ratio": 3.0,         # 조회수 ≥ 구독자 × 이 값이면 '떡상'
-    "min_views": 10000,
+    "min_views": 50000,
     "script_seconds": 50,          # 쇼츠 대본 목표 길이(초)
     "auto_video": False,           # GUI: 대본 생성 후 영상까지 자동으로 만들기
 }
 
+# 콘텐츠 언어/시장별 기본값. 설정 창에서 언어를 바꾸면 이 값들이 한꺼번에 들어간다.
+LANGUAGE_PRESETS = {
+    "en": {  # 영어권 (미국 중심) — 광고 단가가 높고 시청자가 많다
+        "trends": {"region": "US", "language": "en", "title_language": "en", "min_views": 50000},
+        "video": {"tts_voice": "en-US-GuyNeural", "tts_rate": "+5%", "subtitle_font": "Arial Black",
+                  "subtitle_font_size": 76, "subtitle_max_chars": 18, "max_scene_chars": 160},
+    },
+    "ko": {
+        "trends": {"region": "KR", "language": "ko", "title_language": "ko", "min_views": 10000},
+        "video": {"tts_voice": "ko-KR-SunHiNeural", "tts_rate": "+10%", "subtitle_font": "Malgun Gothic",
+                  "subtitle_font_size": 72, "subtitle_max_chars": 14, "max_scene_chars": 90},
+    },
+}
+LANGUAGE_LABELS = {"en": "영어권 (미국)", "ko": "한국"}
+
+
+def apply_language(raw: dict, lang: str) -> dict:
+    """raw 설정에 언어 프리셋을 덮어쓴다 (유행 분석 지역, 음성, 자막 폰트 등)."""
+    if lang not in LANGUAGE_PRESETS:
+        raise ConfigError(f"language 는 {', '.join(LANGUAGE_PRESETS)} 중 하나여야 합니다.")
+    raw["language"] = lang
+    for section, values in LANGUAGE_PRESETS[lang].items():
+        raw.setdefault(section, {}).update(values)
+    return raw
+
+
 DEFAULTS = {
+    "language": "en",                       # 콘텐츠 언어/시장: en(미국 중심 영어) | ko(한국)
     "youtube": {"api_key": "", "api_key_env": "YOUTUBE_API_KEY", "max_videos_per_channel": 30},
     "channels": [],
     "analysis": DEFAULT_ANALYSIS,
@@ -90,16 +117,16 @@ DEFAULTS = {
         "fps": 30,
         "clip_max_seconds": 4.0,            # 씬당 클립 길이: 씬이 이보다 길면 클립 여러 개로 나눔
         "min_scene_seconds": 2.5,           # 이보다 짧은 문장은 다음 문장과 합쳐 한 씬으로
-        "max_scene_chars": 90,              # 씬 하나에 넣을 최대 글자 수
+        "max_scene_chars": 160,             # 씬 하나에 넣을 최대 글자 수
         "keywords_per_scene": 3,
-        "tts_voice": "ko-KR-SunHiNeural",   # edge-tts 음성 (ko-KR-InJoonNeural = 남성)
-        "tts_rate": "+10%",                 # 말하기 속도 (쇼츠는 약간 빠르게)
+        "tts_voice": "en-US-GuyNeural",     # edge-tts 음성 (en-US-JennyNeural = 여성, ko-KR-SunHiNeural = 한국어)
+        "tts_rate": "+5%",                  # 말하기 속도 (쇼츠는 약간 빠르게)
         "tts_volume": "+0%",
         "tts_pitch": "+0Hz",
         "tts_proxy": "",                    # 회사망 등에서 필요할 때만 (예: http://proxy:8080)
-        "subtitle_font": "Malgun Gothic",   # 맑은 고딕 (Windows 기본 한글 폰트)
-        "subtitle_font_size": 72,           # 1080x1920 기준 픽셀
-        "subtitle_max_chars": 14,           # 자막 한 덩어리 최대 글자 수
+        "subtitle_font": "Arial Black",     # 영어 쇼츠용 굵은 폰트 (한국어는 Malgun Gothic)
+        "subtitle_font_size": 76,           # 1080x1920 기준 픽셀
+        "subtitle_max_chars": 18,           # 자막 한 덩어리 최대 글자 수
         "subtitle_margin_bottom": 320,      # 화면 아래에서 자막까지 거리(px). 쇼츠 UI에 안 가리게
         "subtitle_box_opacity": 0.6,        # 자막 뒤 검은 박스 불투명도 (0~1)
         "crf": 21,                          # 화질 (낮을수록 고화질·큰 파일, 18~28)
@@ -166,6 +193,10 @@ class Config:
     @property
     def ollama(self) -> dict:
         return self.raw["ollama"]
+
+    @property
+    def language(self) -> str:
+        return self.raw.get("language") or "en"
 
     @property
     def pexels(self) -> dict:
@@ -259,7 +290,11 @@ def read_raw(path: str | Path) -> dict:
     if path.exists():
         with open(path, encoding="utf-8") as f:
             user = yaml.safe_load(f) or {}
-    return _merge(DEFAULTS, user)
+    raw = _merge(DEFAULTS, user)
+    if user and "language" not in user:
+        # 언어 설정이 생기기 전의 config.yaml (한국어 값이 그대로 저장돼 있음) → 기본 언어 프리셋 적용
+        apply_language(raw, DEFAULTS["language"])
+    return raw
 
 
 def load_config(path: str | Path, load_env: bool = True) -> Config:

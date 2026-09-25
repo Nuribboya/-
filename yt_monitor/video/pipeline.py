@@ -31,7 +31,7 @@ from ..report import safe_name
 from .compose import BACKGROUND_COLORS, Composer, Shot, concat_wavs, split_frames
 from .ffmpeg import Cancelled, FFmpegNotFound, FFmpegRunner, check_ffmpeg
 from .pexels import Clip, PexelsAuthError, PexelsClient, PexelsError
-from .scenes import CHARS_PER_SECOND, Scene, extract_keywords, split_scenes
+from .scenes import Scene, chars_per_second, extract_keywords, split_scenes
 from .subtitles import ass_style_from_config, cues_for_scene, to_ass, to_srt
 from .tts import EdgeTTS, PlaceholderTTS, save_words
 
@@ -180,7 +180,7 @@ class VideoPipeline:
             cache = self.cfg.video_cache_dir
             for s in scenes:
                 check_cancel()
-                est = len(s.text) / CHARS_PER_SECOND
+                est = len(s.text) / chars_per_second(s.text)
                 want = min(MAX_CLIPS_PER_SCENE, max(1, math.ceil(est / clip_max)))
                 picked: list[Clip] = []
                 for kw in s.keywords:

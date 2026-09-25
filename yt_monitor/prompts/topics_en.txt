@@ -1,0 +1,14 @@
+You are a YouTube channel strategist for the US market. Look at the channel data below and propose the next video topics.
+
+[Channel data]
+{channel_data}
+
+[Requirements]
+- Keep what works in the top-performing videos (topic, title style, format), but propose {num_topics} NEW topics that don't overlap with recent uploads.
+- For each topic, {num_titles} English titles people would want to click (max 60 characters, following the channel's title style).
+- "reason": explain in KOREAN (한국어로) in one sentence why this topic should help views recover.
+- Put the number of the most promising topic in "best" (1-based).
+- "topic" and "titles" must be in English.
+- Answer ONLY with JSON in exactly this format. No explanations.
+
+{"topics": [{"topic": "topic in English", "reason": "한국어 추천 이유", "titles": ["Title 1", "Title 2"]}], "best": 1}

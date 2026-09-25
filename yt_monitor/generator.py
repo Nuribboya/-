@@ -34,6 +34,8 @@ from .report import safe_name
 log = logging.getLogger(__name__)
 
 CHARS_PER_MINUTE = 330  # 한국어 내레이션 기준 대략적인 분당 글자 수
+WORDS_PER_MINUTE = 150  # 영어 내레이션 기준 분당 단어 수
+EN_CHARS_PER_MINUTE = 900
 
 TOPICS_PROMPT = "topics.txt"
 SCRIPT_PROMPT = "script_gen.txt"
@@ -44,6 +46,16 @@ class GenerationError(RuntimeError):
 
 
 # ---- 프롬프트 템플릿 --------------------------------------------------------
+
+def localized(name: str, lang: str) -> str:
+    """영어 모드면 topics.txt → topics_en.txt (영어판이 있는 템플릿만)."""
+    if lang == "en":
+        stem, dot, ext = name.rpartition(".")
+        en = f"{stem}_en.{ext}"
+        if (resource_dir() / "prompts" / en).exists():
+            return en
+    return name
+
 
 def load_template(prompts_dir: Path, name: str) -> str:
     """prompts_dir/name 을 읽는다. 없으면 기본 템플릿을 그 자리에 복사해 두고 사용."""
@@ -135,7 +147,8 @@ def parse_topics(text: str, num_topics: int, num_titles: int) -> tuple[list[dict
 _EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 _LABEL_RE = re.compile(r"^(내레이션|나레이션|나레이터|내레이터|진행자|화자|narrator|host)\s*[:：]\s*",
                        re.IGNORECASE)
-_META_RE = re.compile(r"^(제목|주제|대본|영상 제목|기획 의도|목표 길이)\s*[:：]")
+_META_RE = re.compile(r"^(제목|주제|대본|영상 제목|기획 의도|목표 길이|title|topic|script|hook|video title)\s*[:：]",
+                      re.IGNORECASE)
 
 
 def tts_lines(text: str) -> list[str]:
@@ -254,16 +267,17 @@ def save_generation(g: Generation, outputs_dir: Path, tz: ZoneInfo) -> Path:
 # ---- 생성기 -----------------------------------------------------------------
 
 class ScriptGenerator:
-    def __init__(self, client: OllamaClient, prompts_dir: Path, settings: dict):
+    def __init__(self, client: OllamaClient, prompts_dir: Path, settings: dict, lang: str = "ko"):
         self.client = client
         self.prompts_dir = Path(prompts_dir)
         self.s = settings
+        self.lang = lang
 
     @classmethod
     def from_config(cls, cfg) -> "ScriptGenerator":
         o = cfg.ollama
         client = OllamaClient(o["host"], o["model"], timeout=o["timeout_sec"])
-        return cls(client, cfg.prompts_dir, o)
+        return cls(client, cfg.prompts_dir, o, lang=cfg.language)
 
     @property
     def model(self) -> str:
@@ -277,7 +291,7 @@ class ScriptGenerator:
                         on_token: Callable[[str], None] | None = None,
                         cancel: threading.Event | None = None) -> tuple[list[dict], int]:
         n_topics, n_titles = int(self.s.get("num_topics", 5)), int(self.s.get("num_titles", 3))
-        prompt = render_template(load_template(self.prompts_dir, template), {
+        prompt = render_template(load_template(self.prompts_dir, localized(template, self.lang)), {
             "channel_name": channel_title, "channel_data": context,
             "num_topics": n_topics, "num_titles": n_titles,
         })
@@ -290,11 +304,12 @@ class ScriptGenerator:
                         on_token: Callable[[str], None] | None = None,
                         cancel: threading.Event | None = None) -> list[str]:
         minutes = float(minutes if minutes is not None else self.s.get("script_minutes", 3))
-        prompt = render_template(load_template(self.prompts_dir, template), {
+        cpm = EN_CHARS_PER_MINUTE if self.lang == "en" else CHARS_PER_MINUTE
+        prompt = render_template(load_template(self.prompts_dir, localized(template, self.lang)), {
             "channel_name": channel_title, "channel_data": context,
             "topic": topic["topic"], "title": title, "reason": topic.get("reason", ""),
-            "script_minutes": f"{minutes:g}", "script_chars": int(minutes * CHARS_PER_MINUTE),
-            "script_seconds": int(round(minutes * 60)),
+            "script_minutes": f"{minutes:g}", "script_chars": int(minutes * cpm),
+            "script_seconds": int(round(minutes * 60)), "script_words": int(minutes * WORDS_PER_MINUTE),
         })
         text = self.client.chat(prompt, options=self._options(), on_token=on_token, cancel=cancel)
         lines = tts_lines(text)

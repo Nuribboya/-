@@ -2,8 +2,8 @@
 
 텍스트 → mp3 + 단어별 타임스탬프(WordBoundary). 타임스탬프로 자막 싱크를 맞춘다.
 
+영어 음성:   en-US-GuyNeural(남), en-US-ChristopherNeural(남), en-US-JennyNeural(여), en-US-AriaNeural(여)
 한국어 음성: ko-KR-SunHiNeural(여), ko-KR-InJoonNeural(남), ko-KR-HyunsuMultilingualNeural(남)
-영어 음성:   en-US-JennyNeural(여), en-US-GuyNeural(남), en-US-AriaNeural(여)
 전체 목록:   edge-tts --list-voices
 
 단독 테스트 (텍스트 → 음성 파일 + 단어 타이밍 + SRT):
@@ -24,12 +24,15 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 VOICES = {
+    "en-US-GuyNeural": "영어 남성 (Guy, 쇼츠 내레이션용)",
+    "en-US-ChristopherNeural": "영어 남성 (Christopher, 차분함)",
+    "en-US-EricNeural": "영어 남성 (Eric)",
+    "en-US-JennyNeural": "영어 여성 (Jenny)",
+    "en-US-AriaNeural": "영어 여성 (Aria, 활기참)",
+    "en-GB-RyanNeural": "영국 영어 남성 (Ryan)",
     "ko-KR-SunHiNeural": "한국어 여성 (선희)",
     "ko-KR-InJoonNeural": "한국어 남성 (인준)",
     "ko-KR-HyunsuMultilingualNeural": "한국어 남성 (현수)",
-    "en-US-JennyNeural": "영어 여성 (Jenny)",
-    "en-US-GuyNeural": "영어 남성 (Guy)",
-    "en-US-AriaNeural": "영어 여성 (Aria)",
 }
 TICKS = 10_000_000  # edge-tts 시간 단위: 100ns
 
@@ -140,8 +143,11 @@ class PlaceholderTTS:
         out_path = Path(out_path).with_suffix(".wav")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         words, t = [], 0.15
+        from .scenes import chars_per_second
+
+        cps = self.cps if chars_per_second(text) < 10 else 14.0   # 영어는 더 빠르게 읽는다
         for token in text.split():
-            dur = max(len(token), 1) / self.cps
+            dur = max(len(token), 1) / cps
             words.append(Word(token.strip(".,!?…"), t, t + dur))
             t += dur + 0.05
         total = t + 0.25
@@ -163,9 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="edge-tts 단독 테스트")
-    parser.add_argument("text", nargs="?", default="안녕하세요. 무료 TTS 테스트입니다. 자막 싱크도 함께 확인해 볼게요.")
+    parser.add_argument("text", nargs="?", default="Here is a free text to speech test. Let's check the subtitle sync too.")
     parser.add_argument("--file", help="텍스트 파일 (대본)")
-    parser.add_argument("--voice", default="ko-KR-SunHiNeural", help=" / ".join(VOICES))
+    parser.add_argument("--voice", default="en-US-GuyNeural", help=" / ".join(VOICES))
     parser.add_argument("--rate", default="+0%")
     parser.add_argument("--out", default="samples/tts")
     parser.add_argument("--offline", action="store_true", help="인터넷 없이 무음 + 추정 타이밍")

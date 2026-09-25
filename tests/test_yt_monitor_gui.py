@@ -217,7 +217,7 @@ def test_trend_flow_with_auto_video(root, dialogs, tmp_path, monkeypatch):
         raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
                             subtitle_font_size=20, subtitle_margin_bottom=40)
         raw["pexels"]["api_key"] = "fake"
-        raw["trends"]["popular_pages"] = 1
+        raw["trends"].update(popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
         save_config(raw, path)
         app = gui.App(root, path, check_ollama_on_start=False)
         app.video_pipeline_factory = lambda c: VideoPipeline(c, pexels=None, tts=FakeEdgeTTS(retry_delay=0),
@@ -257,12 +257,15 @@ def test_setup_dialog_writes_config(root, dialogs, tmp_path):
     dlg.vars["interval"].set("4")
     dlg.vars["threshold"].set("25")
     dlg.vars["pexels_key"].set("pexels-key ")
+    dlg.vars["language"].set("한국")
     dlg._save()
     assert dlg.saved
     cfg = load_config(path, load_env=False)
     assert cfg.youtube_api_key == "AIza-key" and cfg.channels[0].label == "첫 채널"
     assert cfg.schedule["interval_hours"] == 4 and cfg.analysis["drop_threshold_pct"] == 25
     assert cfg.pexels["api_key"] == "pexels-key" and cfg.video["width"] == 1080
+    assert cfg.language == "ko"
+    assert cfg.raw["trends"]["region"] == "KR" and cfg.video["tts_voice"] == "ko-KR-SunHiNeural"
 
     bad = gui.SetupDialog(root, tmp_path / "bad.yaml")
     bad._save()                                           # 필수값 없음 → 저장 안 됨

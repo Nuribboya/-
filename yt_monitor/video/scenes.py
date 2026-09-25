@@ -24,6 +24,13 @@ log = logging.getLogger(__name__)
 
 KEYWORDS_PROMPT = "video_keywords.txt"
 CHARS_PER_SECOND = 5.5 * 1.1   # 한국어 내레이션 ≈ 분당 330자, 쇼츠는 약간 빠르게
+EN_CHARS_PER_SECOND = 15.0     # 영어 내레이션 ≈ 분당 150단어 × 6자
+
+
+def chars_per_second(text: str) -> float:
+    """대본에 한글이 거의 없으면 영어 속도로 계산."""
+    hangul = len(re.findall(r"[가-힣]", text))
+    return CHARS_PER_SECOND if hangul > len(text) * 0.1 else EN_CHARS_PER_SECOND
 
 _COPULA = re.compile(r"(입니다|이에요|예요|이죠|이다|이야|이고|이라)$")
 _JOSA = re.compile(r"(으로|에서|에게|까지|부터|처럼|보다|이랑|하고|이나|은|는|이|가|을|를|의|에|도|만|와|과|로)$")
@@ -32,7 +39,9 @@ _VERBISH = re.compile(r"(다|요|까|네|면|고|서|게|지|한|된|운|던|나
 _VERB_STEM = re.compile(r"(있|없|했|았|었|하)$")
 _STOP = {"여러분", "오늘", "정말", "진짜", "그리고", "그래서", "하지만", "이렇게", "저렇게", "그냥", "바로",
          "지금", "우리", "이번", "다음", "영상", "구독", "좋아요", "알림", "부탁", "드려요", "있습니다",
-         "합니다", "입니다", "있어요", "해요", "보세요", "같아요", "번째", "마지막", "처음", "하나", "모두", "the", "and", "you", "this", "that"}
+         "합니다", "입니다", "있어요", "해요", "보세요", "같아요", "what", "with", "your", "they", "have",
+         "just", "from", "about", "will", "would", "could", "there", "their", "these", "those", "into",
+         "because", "every", "never", "really", "actually", "people", "thing", "things", "here", "know", "번째", "마지막", "처음", "하나", "모두", "the", "and", "you", "this", "that"}
 
 
 @dataclass
@@ -45,6 +54,7 @@ class Scene:
 
 def split_scenes(script: str, min_seconds: float = 2.5, max_chars: int = 90) -> list[Scene]:
     sentences = tts_lines(script)
+    cps = chars_per_second(" ".join(sentences))
     scenes: list[str] = []
     cur = ""
     for s in sentences:
@@ -53,11 +63,11 @@ def split_scenes(script: str, min_seconds: float = 2.5, max_chars: int = 90) -> 
             cur = s
         else:
             cur = f"{cur} {s}".strip()
-        if len(cur) / CHARS_PER_SECOND >= min_seconds:
+        if len(cur) / cps >= min_seconds:
             scenes.append(cur)
             cur = ""
     if cur:
-        if scenes and len(cur) / CHARS_PER_SECOND < min_seconds and len(scenes[-1]) + 1 + len(cur) <= max_chars:
+        if scenes and len(cur) / cps < min_seconds and len(scenes[-1]) + 1 + len(cur) <= max_chars:
             scenes[-1] += " " + cur
         else:
             scenes.append(cur)

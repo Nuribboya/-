@@ -10,13 +10,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fake_ollama import start_fake_ollama  # noqa: E402
-from yt_monitor.config import load_config, read_raw, save_config  # noqa: E402
+from yt_monitor.config import LANGUAGE_PRESETS, apply_language, load_config, read_raw, save_config  # noqa: E402
 from yt_monitor.db import Database  # noqa: E402
 from yt_monitor.trends import (TrendCollector, TrendError, hot_keywords, run_trends,  # noqa: E402
-                               trend_context)
+                               title_matches, trend_context)
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
 KST = ZoneInfo("Asia/Seoul")
+KO = {"popular_pages": 1, **LANGUAGE_PRESETS["ko"]["trends"], "min_views": 10000}
 
 
 class _Req:
@@ -44,6 +45,8 @@ def video(vid, title, hours_ago, views, seconds=40, channel="C1", tags=(), live=
 
 
 class FakeTrendYouTube:
+    region = "KR"
+
     def __init__(self):
         self.popular = [
             video("p1", "편의점 신상 꿀조합 #shorts", 10, 500_000, tags=["편의점", "꿀조합"]),
@@ -62,7 +65,7 @@ class FakeTrendYouTube:
         def fn(part, maxResults, chart=None, regionCode=None, pageToken=None, id=None):
             self.calls.append(("videos", chart or id))
             if chart:
-                assert chart == "mostPopular" and regionCode == "KR"
+                assert chart == "mostPopular" and regionCode == self.region
                 return {"items": self.popular}
             return {"items": [self.searched[i] for i in id.split(",") if i in self.searched]}
         return _Res(fn)
@@ -89,7 +92,7 @@ class FakeTrendYouTube:
 
 def test_collect_filters_and_ranks():
     fake = FakeTrendYouTube()
-    col = TrendCollector(fake, {"popular_pages": 1})
+    col = TrendCollector(fake, KO)
     vids = col.collect(NOW)
     assert [v.video_id for v in vids] == ["s1", "s2", "p1"]      # 시간당 조회수: 10만 > 6만 > 5만
     assert vids[0].views_per_hour(NOW) == pytest.approx(100_000)
@@ -100,20 +103,21 @@ def test_collect_filters_and_ranks():
 
 
 def test_context_mentions_breakout_and_keywords():
-    vids = TrendCollector(FakeTrendYouTube(), {"popular_pages": 1}).collect(NOW)
+    vids = TrendCollector(FakeTrendYouTube(), KO).collect(NOW)
     assert ("편의점", 3) in hot_keywords(vids)
-    ctx = trend_context(vids, NOW, KST)
+    ctx = trend_context(vids, NOW, KST, KO)
     assert "1. 편의점 라면 꿀조합 3가지 | 조회 200.0만 | 시간당 10.0만" in ctx
     assert "작은 채널인데 알고리즘을 탄 영상 1개" in ctx and "떡상" in ctx
     assert "[여러 영상에 반복되는 키워드]" in ctx
 
 
-def make_cfg(tmp_path, url):
-    raw = read_raw(tmp_path / "config.yaml")
+def make_cfg(tmp_path, url, lang="ko"):
+    raw = apply_language(read_raw(tmp_path / "config.yaml"), lang)
     raw["channels"] = [{"handle": "@test"}]
     raw["youtube"]["api_key"] = "fake"
     raw["ollama"].update(host=url)
     raw["trends"]["popular_pages"] = 1
+    raw["trends"]["min_views"] = 10000
     return load_config(save_config(raw, tmp_path / "config.yaml"), load_env=False)
 
 
@@ -144,3 +148,61 @@ def test_run_trends_without_results(tmp_path):
     fake.popular, fake.searched = [], {}
     with pytest.raises(TrendError, match="찾지 못했습니다"):
         run_trends(make_cfg(tmp_path, "http://127.0.0.1:9"), service=fake, now=NOW, generate=False)
+
+
+# ---- 영어권(미국) 모드 ----------------------------------------------------------------
+
+class FakeUSTrends(FakeTrendYouTube):
+    region = "US"
+
+    def __init__(self):
+        super().__init__()
+        self.popular = [video("u1", "5 Gas Station Snacks You NEED to Try", 10, 900_000, tags=["snacks", "food"]),
+                        video("u2", "편의점 꿀조합", 5, 900_000),                                 # 한글 → 제외
+                        video("u3", "Самый вкусный перекус", 5, 900_000)]                          # 키릴 → 제외
+        self.searched = {"e1": video("e1", "Gas station snacks ranked from worst to best", 20, 3_000_000,
+                                     channel="C2", tags=["snacks"]),
+                         "e2": video("e2", "This tiny channel's snack hack went viral", 6, 600_000, channel="C3")}
+
+
+def test_title_language_filter():
+    assert title_matches("5 Gas Station Snacks You NEED to Try 🍫", "en")
+    assert not title_matches("편의점 snacks", "en") and not title_matches("日本のお菓子 ranking", "en")
+    assert not title_matches("Самый вкусный перекус", "en") and not title_matches("😂😂", "en")
+    assert title_matches("편의점 꿀조합", "ko") and not title_matches("Snacks", "ko")
+    assert title_matches("anything 무엇이든", "any")
+
+
+def test_run_trends_english_us(tmp_path):
+    server, url, handler = start_fake_ollama()
+    try:
+        cfg = make_cfg(tmp_path, url, lang="en")
+        assert cfg.language == "en" and cfg.video["tts_voice"].startswith("en-US")
+        res = run_trends(cfg, service=FakeUSTrends(), now=NOW)
+        assert [v.video_id for v in res.videos] == ["e1", "e2", "u1"]
+        assert "Shorts ranked by views per hour" in res.context and "3.0M" in res.context
+        assert "breakout videos from small channels" in res.context
+        prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
+        assert "Shorts strategist for the US market" in prompts[0]           # trend_topics_en.txt
+        assert "한국어로" in prompts[0]                                         # 추천 이유는 한국어
+        assert "American English" in prompts[1] and "about 125 words" in prompts[1]   # 50초 ≈ 125단어
+        assert (tmp_path / "prompts" / "shorts_script_en.txt").exists()
+    finally:
+        server.shutdown()
+
+
+def test_old_config_without_language_switches_to_english(tmp_path):
+    """언어 설정이 생기기 전 exe가 저장한 config.yaml(한국어 값) → 영어/미국 프리셋으로 전환."""
+    old = read_raw(tmp_path / "none.yaml")
+    del old["language"]
+    old["video"]["tts_voice"] = "ko-KR-SunHiNeural"
+    old["trends"]["region"] = "KR"
+    old["channels"] = [{"handle": "@x"}]
+    path = save_config(old, tmp_path / "config.yaml")
+    raw = read_raw(path)
+    assert raw["language"] == "en" and raw["video"]["tts_voice"] == "en-US-GuyNeural"
+    assert raw["trends"]["region"] == "US" and raw["video"]["subtitle_font"] == "Arial Black"
+    # 언어가 저장된 뒤에는 사용자가 바꾼 값을 유지
+    raw["video"]["tts_voice"] = "en-US-JennyNeural"
+    save_config(raw, path)
+    assert read_raw(path)["video"]["tts_voice"] == "en-US-JennyNeural"
