@@ -410,8 +410,28 @@ class VideoPipeline:
         targets = [s for s in scenes if mode == "all" or s.index == 1 or not scene_clips.get(s.index)]
         if not targets:
             return {}
+        launcher = None
         st = comfy.status()
+        ai = self.cfg.ai_images
+        if not st.server_up and ai.get("auto_start", True):
+            from .comfy_launcher import ComfyLauncher
+
+            launcher = ComfyLauncher.from_config(ai, work / "logs")
+            if launcher is not None:
+                if self._ollama_used is not None:
+                    self._ollama_used.unload()
+                status(f"ComfyUI 자동 실행 중… ({launcher.comfy_dir}) — 처음 켤 때 1~2분 걸립니다")
+                try:
+                    started = launcher.start(cancel, status)
+                except InterruptedError:
+                    raise Cancelled("사용자가 영상 생성을 취소했습니다.") from None
+                if not started:
+                    warn(f"ComfyUI를 자동으로 켜지 못했습니다. 로그: {launcher.log_path}")
+                    launcher = None
+                st = comfy.status()
         if not st.ok:
+            if launcher is not None and ai.get("auto_stop", True):
+                launcher.stop()
             warn("AI 이미지를 건너뜁니다: " + st.message.splitlines()[0])
             return {}
         if self._ollama_used is not None:
@@ -435,6 +455,9 @@ class VideoPipeline:
                         break
         finally:
             comfy.free_memory()
+            if launcher is not None and ai.get("auto_stop", True):
+                launcher.stop()              # 프로그램이 켠 ComfyUI만 끈다 → 그래픽카드 메모리 완전히 반환
+                status("ComfyUI 종료 (자동)")
         status(f"AI 이미지 {len(out)}장 생성 ({st.checkpoint})")
         return out
 

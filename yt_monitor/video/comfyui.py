@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import threading
 import time
 import uuid
@@ -95,10 +96,23 @@ def build_workflow(prompt: str, negative: str, *, checkpoint: str, width: int, h
     }
 
 
+def tuned_params(checkpoint: str, steps: int, cfg: float, sampler: str, scheduler: str) -> tuple[int, float, str, str]:
+    """모델 이름에 맞는 권장값. ByteDance SDXL-Lightning은 steps/cfg/sampler가 틀리면 흐릿하게 나온다.
+
+    sdxl_lightning_4step → 4스텝 · cfg 1 · euler · sgm_uniform (2step/8step도 이름대로)
+    Juggernaut XL Lightning 같은 병합 모델은 권장값이 달라서(6스텝 · DPM++ SDE) 설정값을 그대로 쓴다.
+    """
+    name = checkpoint.lower()
+    if re.search(r"sdxl[_-]?lightning", name):
+        m = re.search(r"(\d+)\s*-?step", name)
+        return (int(m.group(1)) if m else 4), 1.0, "euler", "sgm_uniform"
+    return steps, cfg, sampler, scheduler
+
+
 class ComfyClient:
     def __init__(self, host: str = DEFAULT_HOST, *, checkpoint: str = "", width: int = 768, height: int = 1344,
                  steps: int = 6, cfg: float = 2.0, sampler: str = "dpmpp_sde", scheduler: str = "karras",
-                 style: str = "", negative: str = "", timeout: float = 300,
+                 style: str = "", negative: str = "", timeout: float = 300, auto_tune: bool = True,
                  session: requests.Session | None = None, poll_interval: float = 0.5):
         self.host = host.rstrip("/")
         self.checkpoint = checkpoint
@@ -107,6 +121,7 @@ class ComfyClient:
         self.sampler, self.scheduler = sampler, scheduler
         self.style, self.negative = style, negative
         self.timeout = timeout
+        self.auto_tune = auto_tune
         self.poll_interval = poll_interval
         self.session = session or requests.Session()
         self.session.trust_env = False      # 로컬 서버: 시스템 프록시를 타지 않게
@@ -119,7 +134,7 @@ class ComfyClient:
                    steps=ai_cfg.get("steps", 6), cfg=ai_cfg.get("cfg", 2.0),
                    sampler=ai_cfg.get("sampler", "dpmpp_sde"), scheduler=ai_cfg.get("scheduler", "karras"),
                    style=ai_cfg.get("style", ""), negative=ai_cfg.get("negative", ""),
-                   timeout=float(ai_cfg.get("timeout_sec", 300)))
+                   timeout=float(ai_cfg.get("timeout_sec", 300)), auto_tune=bool(ai_cfg.get("auto_tune", True)))
 
     # ---- 상태 -------------------------------------------------------------------
     def list_checkpoints(self) -> list[str]:
@@ -154,8 +169,10 @@ class ComfyClient:
         if not st.ok:
             raise ComfyError(st.message)
         full = f"{prompt}, {self.style}" if self.style else prompt
+        steps, cfg, sampler, scheduler = (tuned_params(st.checkpoint, self.steps, self.cfg, self.sampler, self.scheduler)
+                                          if self.auto_tune else (self.steps, self.cfg, self.sampler, self.scheduler))
         wf = build_workflow(full, self.negative, checkpoint=st.checkpoint, width=self.width, height=self.height,
-                            steps=self.steps, cfg=self.cfg, sampler=self.sampler, scheduler=self.scheduler,
+                            steps=steps, cfg=cfg, sampler=sampler, scheduler=scheduler,
                             seed=seed if seed is not None else random.randint(0, 2**31 - 1))
         try:
             resp = self.session.post(f"{self.host}/prompt", json={"prompt": wf, "client_id": self.client_id},

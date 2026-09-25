@@ -42,7 +42,7 @@ jobs:
           ffmpeg -hide_banner -version
 
       - name: 테스트
-        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py tests/test_yt_monitor_visuals.py tests/test_yt_monitor_upload.py -q
+        run: python -m pytest tests/test_yt_monitor.py tests/test_yt_monitor_generation.py tests/test_yt_monitor_gui.py tests/test_yt_monitor_video.py tests/test_yt_monitor_trends.py tests/test_yt_monitor_visuals.py tests/test_yt_monitor_upload.py tests/test_yt_monitor_comfy_launcher.py -q
 
       - name: exe 빌드
         run: python yt_monitor/build_exe.py

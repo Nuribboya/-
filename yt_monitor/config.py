@@ -171,6 +171,11 @@ DEFAULTS = {
     "ai_images": {                          # 로컬 AI 이미지 생성 (ComfyUI, 그래픽카드 필요)
         "enabled": False,
         "host": "http://127.0.0.1:8188",
+        "comfy_dir": "",                    # ComfyUI portable 폴더. 비우면 다운로드/C:\ 등에서 자동으로 찾음
+        "auto_start": True,                 # 영상 만들 때 꺼져 있으면 창 없이 자동 실행
+        "auto_stop": True,                  # 프로그램이 켠 ComfyUI는 이미지를 다 만들면 자동 종료
+        "start_timeout_sec": 240,
+        "auto_tune": True,                  # sdxl_lightning 모델이면 steps·cfg·sampler 자동 설정
         "mode": "mix",                      # mix = 첫 씬(훅) + 스톡 영상을 못 찾은 씬 / all = 모든 씬
         "checkpoint": "",                   # 비우면 ComfyUI에 있는 첫 번째 모델
         "width": 768,

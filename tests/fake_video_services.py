@@ -171,7 +171,7 @@ def start_fake_pixabay(clip_bytes: dict[str, bytes]):
 
 
 def start_fake_comfy(png: bytes, checkpoints=("juggernautXL_lightning.safetensors",), fail: bool = False,
-                     new_combo_format: bool = False):
+                     new_combo_format: bool = False, port: int = 0):
     """ComfyUI API 흉내: /system_stats, /object_info, /prompt, /history, /view, /free, /interrupt."""
 
     class Handler(BaseHTTPRequestHandler):
@@ -216,6 +216,6 @@ def start_fake_comfy(png: bytes, checkpoints=("juggernautXL_lightning.safetensor
                 type(self).freed.append(data)
             self._send(200, {})
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}", Handler

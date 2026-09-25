@@ -167,15 +167,21 @@ Claude 채팅에 붙여넣을 수 있는 요약 블록을 대신 보냅니다.
 > ⚠ 유명 가요/팝송은 넣지 마세요. Content ID 저작권 신고로 수익이 원곡자에게 가거나 영상이 막힐 수 있습니다.
 
 ### AI 이미지 생성 켜기 (그래픽카드 필요, RTX 5060 8GB면 충분)
-1. <https://www.comfy.org/download>에서 **ComfyUI Desktop**(Windows · NVIDIA)을 설치하고 실행합니다.
-2. SDXL 계열 **Lightning/Turbo 모델**(`.safetensors`, 예: Juggernaut XL Lightning)을 받아
-   ComfyUI의 `models/checkpoints` 폴더에 넣습니다. 모델마다 이용 조건이 다르니 상업적 이용이 가능한지 확인하세요.
-3. 프로그램 **⚙ 설정 → AI 이미지 생성** 체크 → **[연결 확인]**을 눌러 "ComfyUI 준비 완료"가 나오면 끝.
+1. **ComfyUI portable**(Windows · NVIDIA)을 받아 압축을 풉니다. RTX 50 시리즈는 **cu130** 버전을 받으세요.
+   Desktop 버전은 사용자 폴더 이름이 한글이면 안 켜지는 경우가 있어 portable을 권장합니다.
+2. **`sdxl_lightning_4step.safetensors`** (<https://huggingface.co/ByteDance/SDXL-Lightning>)를 받아
+   `ComfyUI_windows_portable\ComfyUI\models\checkpoints` 폴더에 넣습니다.
+3. 프로그램 **⚙ 설정 → AI 이미지 생성** 체크 → **[연결 확인]**.
+   - ComfyUI를 **직접 켤 필요가 없습니다.** 폴더를 자동으로 찾고(다운로드 · 바탕화면 · C:\ 등, 못 찾으면 **ComfyUI 폴더**에 지정),
+     영상을 만들 때 **창 없이 자동으로 켰다가 이미지를 다 만들면 자동으로 끕니다.** 직접 켜 둔 ComfyUI는 끄지 않습니다.
+   - [연결 확인]은 ComfyUI가 꺼져 있어도 폴더 · 모델 파일이 제대로 있는지 알려 줍니다.
+   - `sdxl_lightning_*step` 모델은 **4스텝 · cfg 1 · euler · sgm_uniform**을 자동으로 맞춥니다 (config 수정 필요 없음).
 4. 영상을 만들면 Ollama가 씬마다 영화 같은 장면 묘사를 쓰고, ComfyUI가 768x1344 세로 이미지를 만듭니다.
-   이미지는 줌 효과로 움직이는 영상처럼 들어갑니다. 이미지를 만들기 전에 Ollama 모델을 그래픽카드에서 내리고,
-   다 만든 뒤에는 ComfyUI 메모리도 비워서 8GB로도 돌아가게 했습니다.
-- 일반 SDXL 모델(Lightning이 아닌 것)을 쓰면 `ai_images.steps: 25`, `cfg: 6`으로 바꾸세요.
-- ComfyUI가 꺼져 있으면 경고만 남기고 스톡 영상으로 계속 만듭니다.
+   이미지는 줌 효과로 움직이는 영상처럼 들어갑니다. 이미지를 만들기 전에 Ollama 모델을 그래픽카드에서 내려서
+   8GB로도 돌아가게 했습니다. 처음 켤 때는 모델을 읽느라 1~2분 걸립니다.
+- 다른 모델: Juggernaut XL Lightning 등은 `ai_images.steps/cfg/sampler/scheduler` 값(기본 6 · 2.0 · dpmpp_sde · karras)을 쓰고,
+  일반 SDXL 모델은 `steps: 25`, `cfg: 6`으로 바꾸세요. 모델마다 이용 조건이 다르니 상업적 이용이 가능한지 확인하세요.
+- ComfyUI를 켜지 못하면 경고만 남기고 스톡 영상으로 계속 만듭니다. 원인은 `<영상>_work/logs/comfyui.log`에 있습니다.
 - 단독 테스트: `python -m yt_monitor.video.comfyui --check` / `python -m yt_monitor.video.comfyui "a giant shark under a neon city"`
 
 ## 🔥 유행 쇼츠 분석 → 영상

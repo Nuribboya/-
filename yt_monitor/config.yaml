@@ -92,6 +92,11 @@ pixabay:                          # (선택) 스톡 영상 추가 소스 — htt
 ai_images:                        # (선택) 로컬 AI 이미지 생성 — ComfyUI (https://www.comfy.org/download)
   enabled: false
   host: http://127.0.0.1:8188
+  comfy_dir: ""                   # ComfyUI portable 폴더 (run_nvidia_gpu.bat 있는 곳). 비우면 자동으로 찾음
+  auto_start: true                # 영상 만들 때 ComfyUI가 꺼져 있으면 창 없이 자동으로 켜기
+  auto_stop: true                 # 자동으로 켠 ComfyUI는 AI 이미지를 다 만들면 끄기 (그래픽카드 메모리 반환)
+  start_timeout_sec: 240
+  auto_tune: true                 # sdxl_lightning 모델이면 steps·cfg·sampler를 이름에 맞게 자동 설정 (아래 4개 무시)
   mode: mix                       # mix = 첫 씬(훅) + 스톡 영상 없는 씬 / all = 모든 씬
   checkpoint: ""                  # 비우면 ComfyUI models/checkpoints 의 첫 번째 모델
   width: 768

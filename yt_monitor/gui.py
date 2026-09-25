@@ -177,6 +177,7 @@ class SetupDialog(tk.Toplevel):
             "pixabay_key": tk.StringVar(value=r["pixabay"].get("api_key") or ""),
             "ai_enabled": tk.BooleanVar(value=bool(r["ai_images"].get("enabled"))),
             "ai_host": tk.StringVar(value=r["ai_images"].get("host") or "http://127.0.0.1:8188"),
+            "comfy_dir": tk.StringVar(value=r["ai_images"].get("comfy_dir") or ""),
             "chat_id": tk.StringVar(value=str(r["telegram"].get("chat_id") or "")),
             "interval": tk.StringVar(value=str(r["schedule"].get("interval_hours") or 6)),
             "model": tk.StringVar(value=r["ollama"]["model"]),
@@ -226,6 +227,9 @@ class SetupDialog(tk.Toplevel):
         ttk.Button(frm, text="연결 확인", command=self._check_comfy).grid(row=row, column=2, sticky="e", padx=6)
         row += 1
         field("ComfyUI 주소", "ai_host", width=32, hint="첫 씬(훅)과 영상 없는 씬에 AI 이미지")
+        field("ComfyUI 폴더", "comfy_dir", hint="비우면 자동으로 찾음 · 영상 만들 때 자동 실행/종료")
+        ttk.Button(frm, text="폴더 선택", command=self._pick_comfy_dir).grid(
+            row=row - 1, column=2, sticky="e", padx=6)
         field("체크 주기(시간)", "interval", width=8)
         field("하락 임계값(%)", "threshold", width=8, hint="최근 영상이 이전보다 이만큼 떨어지면 알림")
         field("Ollama 모델", "model", width=24, hint="기본 qwen2.5:7b")
@@ -257,13 +261,22 @@ class SetupDialog(tk.Toplevel):
         webbrowser.open(SIGNUP_URL)
         messagebox.showinfo("Pixabay API 키", KEY_HELP, parent=self)
 
-    def _check_comfy(self):
-        from .video.comfyui import ComfyClient
+    def _pick_comfy_dir(self):
+        path = filedialog.askdirectory(parent=self, title="ComfyUI 폴더 (run_nvidia_gpu.bat 이 있는 폴더)")
+        if path:
+            self.vars["comfy_dir"].set(path)
 
-        ai = dict(self.raw["ai_images"], host=self.vars["ai_host"].get().strip() or "http://127.0.0.1:8188")
-        st = ComfyClient.from_config(ai).status()
-        text = st.message + (f"\n\n설치된 모델: {', '.join(st.checkpoints)}" if st.checkpoints else "")
-        (messagebox.showinfo if st.ok else messagebox.showwarning)("ComfyUI", text, parent=self)
+    def _check_comfy(self):
+        from .video.comfy_launcher import diagnose, find_comfy_dir
+
+        ai = dict(self.raw["ai_images"], host=self.vars["ai_host"].get().strip() or "http://127.0.0.1:8188",
+                  comfy_dir=self.vars["comfy_dir"].get().strip())
+        ok, text = diagnose(ai)
+        if not ai["comfy_dir"]:                     # 자동으로 찾은 폴더를 칸에 채워 준다
+            found = find_comfy_dir(None)
+            if found:
+                self.vars["comfy_dir"].set(str(found))
+        (messagebox.showinfo if ok else messagebox.showwarning)("ComfyUI", text, parent=self)
 
     def _find_chat_id(self):
         token = self.vars["bot_token"].get().strip()
@@ -327,6 +340,7 @@ class SetupDialog(tk.Toplevel):
         r["pixabay"]["api_key"] = v["pixabay_key"].strip()
         r["ai_images"]["enabled"] = bool(v["ai_enabled"])
         r["ai_images"]["host"] = v["ai_host"].strip() or "http://127.0.0.1:8188"
+        r["ai_images"]["comfy_dir"] = v["comfy_dir"].strip()
         r["schedule"]["interval_hours"] = interval
         r["analysis"]["drop_threshold_pct"] = threshold
         r["ollama"]["model"] = v["model"].strip() or "qwen2.5:7b"
