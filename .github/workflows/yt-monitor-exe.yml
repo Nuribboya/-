@@ -60,7 +60,7 @@ jobs:
           $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList "--check-ffmpeg" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "ffmpeg 확인 실패: $($p.ExitCode)" }
           # 한글/공백이 든 경로로 오프라인 영상 합성 (ffmpeg 자막 필터의 Windows 경로 처리 확인)
-          Set-Content -Path "$dir/대본 테스트.txt" -Encoding utf8 -Value "안녕하세요. exe 영상 생성 테스트입니다.`n두 번째 문장입니다!"
+          Set-Content -Path "$dir/대본 테스트.txt" -Encoding utf8 -Value "Hello, this is an exe video test.`nThis is the second sentence!"
           $p = Start-Process -FilePath "$dir/YouTubeMonitor.exe" -ArgumentList '--make-video', '"대본 테스트.txt"', '--title', '"exe 테스트"', '--offline' -WorkingDirectory $dir -Wait -PassThru
           Get-ChildItem -Recurse "$dir/outputs" -ErrorAction SilentlyContinue | Select-Object FullName
           if ($p.ExitCode -ne 0) { Get-Content "$dir/logs/yt_monitor.log"; throw "영상 생성 실패: $($p.ExitCode)" }
