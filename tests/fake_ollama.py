@@ -61,7 +61,13 @@ The last one is wild. Which one would you try?
 """
 
 
+SCRIPT_TEXT_EN_LONG = SCRIPT_TEXT_EN.split("\n", 2)[2] + "\n".join(
+    f"Snack fact number {i} will honestly change how you shop at gas stations forever." for i in range(1, 12)) + "\n"
+SCRIPT_TEXT_KO_MORE = "\n".join(f"{i}번째 조합은 정말 의외로 맛있어서 다들 깜짝 놀라요." for i in range(3, 30)) + "\n"
+
+
 class _Handler(BaseHTTPRequestHandler):
+    extend_ok = True                       # False면 늘려 달라고 해도 똑같이 짧게 답한다
     models = ["qwen2.5:7b", "llama3:latest"]
     requests_log: list = []
     unloads: list = []
@@ -98,6 +104,10 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 data = KEYWORDS_JSON if "Pexels" in prompt else TOPICS_JSON
             content = json.dumps(data, ensure_ascii=False)
+        elif "too short" in prompt:
+            content = SCRIPT_TEXT_EN_LONG if type(self).extend_ok else SCRIPT_TEXT_EN
+        elif "너무 짧습니다" in prompt:
+            content = SCRIPT_TEXT if not type(self).extend_ok else SCRIPT_TEXT + SCRIPT_TEXT_KO_MORE
         elif "American English" in prompt:
             content = SCRIPT_TEXT_EN
         else:

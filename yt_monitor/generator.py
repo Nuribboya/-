@@ -299,6 +299,13 @@ def save_generation(g: Generation, outputs_dir: Path, tz: ZoneInfo) -> Path:
 
 # ---- 생성기 -----------------------------------------------------------------
 
+def estimate_seconds(lines: list[str], lang: str) -> float:
+    """내레이션 길이 추정: 영어 분당 150단어, 한국어 분당 330자."""
+    if lang == "en":
+        return sum(len(x.split()) for x in lines) / WORDS_PER_MINUTE * 60
+    return sum(len(x) for x in lines) / CHARS_PER_MINUTE * 60
+
+
 def pick_title(topic: dict, lang: str) -> str:
     """영어 모드에서 7B 모델이 제목을 한국어로 쓰는 경우가 있어, 한글 없는 제목을 먼저 고른다."""
     titles = [t for t in topic.get("titles") or [] if t] or [topic.get("topic", "")]
@@ -354,15 +361,57 @@ class ScriptGenerator:
             "script_minutes": f"{minutes:g}", "script_chars": int(minutes * cpm),
             "script_seconds": int(round(minutes * 60)), "script_words": int(minutes * WORDS_PER_MINUTE),
         })
+        target = minutes * 60
+        words = int(minutes * WORDS_PER_MINUTE)
+        # 사용자 폴더의 예전 프롬프트 파일에도 적용되게 코드에서 덧붙인다
         if self.lang == "en":
-            # 사용자 폴더의 예전 프롬프트 파일에도 적용되게 코드에서 덧붙인다
-            prompt += ("\n\nOutput ONLY the spoken lines, all in English. No Korean, no title line, "
+            prompt += (f"\n\nLength matters: write about {words} words, at least {max(6, words // 11)} lines. "
+                       "A short script is a failure.\n"
+                       "Output ONLY the spoken lines, all in English. No Korean, no title line, "
                        "and no introduction such as \"Sure, here is the script\". Start with the hook.")
+        else:
+            prompt += (f"\n\n분량이 중요합니다: 약 {int(minutes * CHARS_PER_MINUTE)}자, "
+                       f"최소 {max(6, int(minutes * CHARS_PER_MINUTE) // 30)}줄. 짧게 쓰면 실패입니다.")
+        skip = [title, topic.get("topic", ""), *topic.get("titles", [])]
         text = self.client.chat(prompt, options=self._options(), on_token=on_token, cancel=cancel)
-        lines = tts_lines(text, self.lang, [title, topic.get("topic", ""), *topic.get("titles", [])])
+        lines = tts_lines(text, self.lang, skip)
         if not lines:
             raise GenerationError("모델이 빈 대본을 돌려줬습니다.")
+
+        # 7B 모델은 목표보다 훨씬 짧게 쓰는 일이 많다 → 짧으면 같은 대본을 늘려서 다시 쓰게 한다
+        min_ratio = float(self.s.get("min_length_ratio", 0.8))
+        for _ in range(int(self.s.get("extend_tries", 2))):
+            est = estimate_seconds(lines, self.lang)
+            if est >= target * min_ratio:
+                break
+            if on_token:
+                on_token(f"\n\n[대본이 짧아서(약 {est:.0f}초 / 목표 {target:.0f}초) 늘려 쓰는 중…]\n")
+            longer = tts_lines(self.client.chat(self._extend_prompt(lines, topic, title, target, words, minutes),
+                                                options=self._options(), on_token=on_token, cancel=cancel),
+                               self.lang, skip)
+            if estimate_seconds(longer, self.lang) > est:
+                lines = longer
         return lines
+
+    def _extend_prompt(self, lines: list[str], topic: dict, title: str, target: float, words: int,
+                       minutes: float) -> str:
+        script = "\n".join(lines)
+        est = estimate_seconds(lines, self.lang)
+        if self.lang == "en":
+            return (f"This YouTube Shorts voice-over script is too short: about {est:.0f} seconds "
+                    f"({sum(len(x.split()) for x in lines)} words).\n"
+                    f"Rewrite it to about {target:.0f} seconds = about {words} words, at least {max(6, words // 11)} lines.\n"
+                    "Keep line 1 (the hook). Add more concrete facts, examples, numbers and a surprising twist, "
+                    "then end with a question for the comments.\n"
+                    "One short sentence per line, casual American English. Output ONLY the spoken lines: "
+                    "no title, no intro, no Korean, no brackets, no emojis.\n\n"
+                    f"Topic: {topic.get('topic', '')}\nTitle: {title}\n\n[Script]\n{script}")
+        chars = int(minutes * CHARS_PER_MINUTE)
+        return (f"아래 유튜브 쇼츠 내레이션 대본이 너무 짧습니다 (약 {est:.0f}초, {sum(len(x) for x in lines)}자).\n"
+                f"약 {target:.0f}초 = 약 {chars}자, 최소 {max(6, chars // 30)}줄로 늘려서 다시 쓰세요.\n"
+                "첫 줄(훅)은 유지하고, 구체적인 사실 · 예시 · 숫자 · 반전을 더한 뒤 댓글을 부르는 질문으로 끝내세요.\n"
+                "한 줄에 짧은 한 문장. 읽을 문장만 출력 (제목, 머리말, 괄호, 이모지 금지).\n\n"
+                f"주제: {topic.get('topic', '')}\n제목: {title}\n\n[대본]\n{script}")
 
     def generate(self, *, channel_id: str, channel_title: str, context: str, now: datetime,
                  trigger: str, selected: int | None = None,

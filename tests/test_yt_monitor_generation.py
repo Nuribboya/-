@@ -153,7 +153,8 @@ def test_generator_end_to_end_saves_files(ollama, tmp_path):
     assert g.title == "You've Been Eating Chips Wrong"        # 업로드 정보의 ⭐ 추천 제목
     assert g.upload["category_id"] == "26"
     assert g.script_lines[0] == "여러분, 편의점에서 이 조합 먹어보셨나요?"
-    prompt = handler.requests_log[-2]["messages"][-1]["content"]
+    prompt = next(r["messages"][-1]["content"] for r in handler.requests_log
+                  if "[작성 규칙]" in r["messages"][-1]["content"])
     assert "채널 데이터 요약" in prompt and "약 660자" in prompt and "{" not in prompt.split("[작성 규칙]")[1]
 
     from yt_monitor.generator import save_generation
@@ -265,3 +266,30 @@ def test_pick_title_prefers_english_in_english_mode():
     assert pick_title(t, "en") == "90s Kids Remember This?"
     assert pick_title(t, "ko") == "90s 추억, 기억해?"
     assert pick_title({"topic": "90s nostalgia", "titles": ["90s 추억"]}, "en") == "90s nostalgia"
+
+
+def test_short_script_is_extended():
+    """7B 모델이 목표보다 훨씬 짧게 쓰면 늘려 쓰게 다시 요청하고, 더 긴 쪽을 쓴다."""
+    from yt_monitor.generator import estimate_seconds
+
+    server, url, handler = start_fake_ollama()
+    try:
+        gen = ScriptGenerator(OllamaClient(url, "qwen2.5:7b"), PROMPTS, {"upload_meta": False}, lang="en")
+        tokens = []
+        topic = {"topic": "gas station snacks", "titles": ["Snack Hacks"]}
+        lines = gen.generate_script("c", "ctx", topic, "Snack Hacks", template="shorts_script.txt",
+                                    minutes=50 / 60, on_token=tokens.append)
+        prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
+        assert "about 125 words" in prompts[0] and "A short script is a failure" in prompts[0]
+        assert len(prompts) == 2 and "too short" in prompts[1] and "Number one is chips" in prompts[1]
+        assert estimate_seconds(lines, "en") >= 40 and lines[0] == "You won't believe these gas station snack hacks."
+        assert any("늘려 쓰는 중" in t for t in tokens)
+
+        # 늘려 달라고 해도 계속 짧으면 2번까지만 시도하고 그대로 쓴다 (멈추지 않는다)
+        handler.requests_log.clear()
+        handler.extend_ok = False
+        lines = gen.generate_script("c", "ctx", topic, "Snack Hacks", template="shorts_script.txt", minutes=50 / 60)
+        assert len(handler.requests_log) == 3 and lines
+    finally:
+        handler.extend_ok = True
+        server.shutdown()

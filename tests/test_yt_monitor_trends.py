@@ -194,7 +194,8 @@ def test_run_trends_english_us(tmp_path):
         assert res.generation.script_lines[0] == "You won't believe these gas station snack hacks."
         assert not any("편의점" in s or "Sure" in s for s in res.generation.script_lines)
         # 업로드 정보: 유행 카테고리 통계가 프롬프트에 들어가고, 추천 제목이 영상 제목이 된다
-        assert "Categories of the trending Shorts" in prompts[2] and "24 Entertainment: 3 videos" in prompts[2]
+        upload_prompt = next(p for p in prompts if "category_id" in p)
+        assert "Categories of the trending Shorts" in upload_prompt and "24 Entertainment: 3 videos" in upload_prompt
         up = res.generation.upload
         assert up["category_id"] == "26" and up["hashtags"][0] == "#Shorts"
         assert res.generation.title == "You've Been Eating Chips Wrong"
