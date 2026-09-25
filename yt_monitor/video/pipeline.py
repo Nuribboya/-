@@ -425,7 +425,10 @@ class VideoPipeline:
             from .comfy_launcher import ComfyLauncher
 
             launcher = ComfyLauncher.from_config(ai, work / "logs")
-            if launcher is not None:
+            if launcher is None:
+                warn("ComfyUI 폴더를 찾지 못해 자동으로 켜지 못했습니다 → [⚙ 설정]의 'ComfyUI 폴더'에 "
+                     "run_nvidia_gpu.bat 이 있는 폴더를 지정하세요")
+            else:
                 if self._ollama_used is not None:
                     self._ollama_used.unload()
                 status(f"ComfyUI 자동 실행 중… ({launcher.comfy_dir}) — 처음 켤 때 1~2분 걸립니다")

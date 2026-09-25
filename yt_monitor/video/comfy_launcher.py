@@ -43,10 +43,12 @@ def _candidates(extra: list[Path] | None = None) -> list[Path]:
             if not base.is_dir():
                 continue
             out.append(base)
-            for p in sorted(base.glob("ComfyUI*")):
-                if p.is_dir():
-                    out.append(p)
-                    out += [q for q in sorted(p.glob("ComfyUI*")) if q.is_dir()]
+            # 압축을 풀면 ComfyUI_windows_portable_nvidia\ComfyUI_windows_portable_nvidia\ComfyUI_windows_portable
+            # 처럼 한 단계 더 생기는 경우가 있어서 3단계까지 본다
+            level = [p for p in sorted(base.glob("ComfyUI*")) if p.is_dir()]
+            for _ in range(3):
+                out += level
+                level = [q for p in level for q in sorted(p.glob("ComfyUI*")) if q.is_dir()]
         except OSError:
             continue
     return out
@@ -59,7 +61,7 @@ def find_comfy_dir(configured: str | Path | None = None, extra: list[Path] | Non
         for cand in (p, p.parent, p / "ComfyUI_windows_portable"):   # ComfyUI\ 나 상위 폴더를 넣어도 되게
             if is_comfy_dir(cand):
                 return cand
-        return None
+        log.warning("설정한 ComfyUI 폴더가 올바르지 않음: %s → 자동으로 찾아봅니다", configured)
     for cand in _candidates(extra):
         if is_comfy_dir(cand):
             return cand

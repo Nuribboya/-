@@ -65,6 +65,11 @@ def test_find_comfy_dir(tmp_path):
     # 설정에 상위 폴더나 ComfyUI\ 를 넣어도 찾는다
     assert find_comfy_dir(str(d)) == d and find_comfy_dir(d / "ComfyUI") == d and find_comfy_dir(root) == d
     assert find_comfy_dir(tmp_path / "nothing") is None
+    # 압축 풀기로 같은 이름 폴더가 한 단계 더 생긴 경우 (3단계)
+    deep = tmp_path / "Deep" / "ComfyUI_windows_portable_nvidia" / "ComfyUI_windows_portable_nvidia"
+    deep.mkdir(parents=True)
+    d3 = make_portable(deep)
+    assert find_comfy_dir(None, extra=[tmp_path / "Deep"]) == d3
     assert list_checkpoint_files(d) == ["sdxl_lightning_4step.safetensors"]
     cmd = launch_command(d, "http://127.0.0.1:8190")
     assert cmd[1:4] == ["-s", str(d / "ComfyUI" / "main.py"), "--windows-standalone-build"]
