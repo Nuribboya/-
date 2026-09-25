@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,11 @@ from .db import Database, utcnow
 from .report import save_report
 
 log = logging.getLogger(__name__)
+
+
+def redact_secrets(text: str) -> str:
+    """오류 메시지(요청 주소 포함)에 섞인 API 키를 가린다. 화면/텔레그램에 키가 노출되지 않게."""
+    return re.sub(r"(key=)[^&\s\"'<>]+", r"\1***", text)
 
 
 @dataclass
@@ -136,7 +142,7 @@ def run_check(cfg: Config, *, collect: bool = True, notify: bool = True, generat
                     db.commit()
             except Exception as exc:  # 한 채널 실패가 다른 채널 처리를 막지 않게
                 log.exception("[%s] 처리 실패", ch.label)
-                res.error = f"{type(exc).__name__}: {exc}"
+                res.error = redact_secrets(f"{type(exc).__name__}: {exc}")
 
     if notifier:
         _send_side_messages(cfg, notifier, results, tz, now)

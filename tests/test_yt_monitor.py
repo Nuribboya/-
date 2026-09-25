@@ -346,3 +346,29 @@ def test_scheduler_builds_from_cron(tmp_path):
     scheduler, _ = build_scheduler(cfg, blocking=False)
     job = scheduler.get_jobs()[0]
     assert "hour='*/6'" in str(job.trigger)
+
+
+def test_channel_without_uploads_and_key_redaction(tmp_path):
+    """영상이 없는 새 채널: 업로드 재생목록 404 → 오류가 아니라 '영상 0개'로 처리."""
+    cfg = load_config(write_config(tmp_path), load_env=False)
+
+    class HttpError404(Exception):
+        class resp:  # googleapiclient HttpError 처럼 resp.status 를 가진다
+            status = 404
+
+    class NoUploads(FakeYouTube):
+        def playlistItems(self):
+            def fn(**kw):
+                raise HttpError404("<HttpError 404 ... playlistNotFound>")
+            return _Resource(fn)
+
+    results = run_check(cfg, service=NoUploads([], T0), notifier=FakeNotifier(), generate=False, now=T0)
+    assert results[0].error is None
+    assert results[0].analysis is not None and not results[0].analysis.slowdown
+
+    class KeyInError(FakeYouTube):
+        def channels(self):
+            raise RuntimeError("<HttpError 400 when requesting https://x/channels?part=a&key=AIzaSECRET123&alt=json>")
+
+    results = run_check(cfg, service=KeyInError([], T0), notifier=FakeNotifier(), generate=False, now=T0)
+    assert "AIzaSECRET123" not in results[0].error and "key=***" in results[0].error

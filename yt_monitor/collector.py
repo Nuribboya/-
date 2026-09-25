@@ -80,12 +80,19 @@ class YouTubeCollector:
         ids: list[str] = []
         page_token = None
         while len(ids) < self.max_videos:
-            resp = self.yt.playlistItems().list(
-                part="contentDetails",
-                playlistId=uploads_playlist_id,
-                maxResults=min(50, self.max_videos - len(ids)),
-                pageToken=page_token,
-            ).execute()
+            try:
+                resp = self.yt.playlistItems().list(
+                    part="contentDetails",
+                    playlistId=uploads_playlist_id,
+                    maxResults=min(50, self.max_videos - len(ids)),
+                    pageToken=page_token,
+                ).execute()
+            except Exception as exc:
+                # 영상을 한 번도 올리지 않은 채널은 업로드 재생목록이 없어서 404(playlistNotFound)가 난다
+                if getattr(getattr(exc, "resp", None), "status", None) == 404 or "playlistNotFound" in str(exc):
+                    log.info("업로드 재생목록 없음(%s) → 공개 영상 0개로 처리", uploads_playlist_id)
+                    return ids
+                raise
             ids += [it["contentDetails"]["videoId"] for it in resp.get("items", [])]
             page_token = resp.get("nextPageToken")
             if not page_token:
