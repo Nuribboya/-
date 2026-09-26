@@ -85,8 +85,19 @@ jobs:
         run: python -m PyInstaller --noconfirm --clean prime_finder.spec
 
       - name: 실행 확인
-        # GUI 는 CI 에서 띄울 수 없으니 묶인 코드가 임포트되는지까지만 본다.
-        run: python -c "import prime_contractor.gui; from prime_contractor.build_info import label; print(label())"
+        # 화면을 눈으로 볼 순 없지만, 위젯을 실제로 다 만들어 보면 이번 같은
+        # "-bootstyle" 생성 단계 오류(임포트만 해서는 안 걸림)는 여기서 잡힌다.
+        shell: bash
+        run: |
+          python - <<'PY'
+          from prime_contractor.gui import App, _make_root
+          from prime_contractor.build_info import label
+          root = _make_root()
+          App(root)
+          root.update()
+          root.destroy()
+          print("화면 생성 확인:", label())
+          PY
 
       - uses: actions/upload-artifact@v4
         with:

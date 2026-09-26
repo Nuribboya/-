@@ -47,9 +47,17 @@ PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70
                 ("한 달 예상 금액", 120), ("합치면", 120))
 
 
-def _accent(**kw) -> dict:
-    """ttkbootstrap 이 있을 때만 bootstyle 을 넘긴다. 없으면 빈 dict — 순정 ttk 로 그냥 뜬다."""
-    return kw if _HAS_BOOTSTRAP else {}
+def _Button(parent, **kw):
+    """강조색 버튼 하나.
+
+    bootstyle 은 ttkbootstrap 전용 위젯에서만 먹는 옵션이라, 순정 tkinter.ttk.Button
+    에 넘기면 TclError("unknown option -bootstyle")로 죽는다. 그래서 ttkbootstrap이
+    있을 때는 tb.Button 을, 없을 때는 그 옵션을 뺀 순정 ttk.Button 을 만든다.
+    """
+    if _HAS_BOOTSTRAP:
+        return tb.Button(parent, **kw)
+    kw.pop("bootstyle", None)
+    return ttk.Button(parent, **kw)
 
 
 def _label_for(choices: dict, value) -> str:
@@ -182,17 +190,17 @@ class App:
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
-        self.run_button = ttk.Button(buttons, text="  후보 찾기  ", command=self.on_run,
-                                     **_accent(bootstyle="primary"))
+        self.run_button = _Button(buttons, text="  후보 찾기  ", command=self.on_run,
+                                   bootstyle="primary")
         self.run_button.pack(side=LEFT)
-        self.save_button = ttk.Button(buttons, text="엑셀로 저장",
-                                      command=self.on_save, state="disabled",
-                                      **_accent(bootstyle="success-outline"))
+        self.save_button = _Button(buttons, text="엑셀로 저장",
+                                    command=self.on_save, state="disabled",
+                                    bootstyle="success-outline")
         self.save_button.pack(side=LEFT, padx=6)
         ttk.Button(buttons, text="입력 내용 저장", command=self.on_remember).pack(side=LEFT)
-        ttk.Button(buttons, text="고른 회사를 영업 목록에 넣기",
-                   command=self.on_add_to_leads,
-                   **_accent(bootstyle="info-outline")).pack(side=LEFT, padx=6)
+        _Button(buttons, text="고른 회사를 영업 목록에 넣기",
+                command=self.on_add_to_leads,
+                bootstyle="info-outline").pack(side=LEFT, padx=6)
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -265,9 +273,9 @@ class App:
             row=1, column=2, sticky=W, padx=(4, 16), pady=(6, 0))
         buttons = ttk.Frame(cost)
         buttons.grid(row=1, column=3, columnspan=3, sticky=W, pady=(6, 0))
-        ttk.Button(buttons, text="손익분기로 목표 잡기",
-                   command=self.on_apply_breakeven,
-                   **_accent(bootstyle="primary")).pack(side=LEFT)
+        _Button(buttons, text="손익분기로 목표 잡기",
+                command=self.on_apply_breakeven,
+                bootstyle="primary").pack(side=LEFT)
         ttk.Button(buttons, text="재무제표로 채우기",
                    command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
         self.cost_model = None
@@ -289,9 +297,9 @@ class App:
         ttk.Label(act, text="몇 달치로 볼까요").pack(side=LEFT, padx=(20, 4))
         ttk.Combobox(act, textvariable=self.months_back, values=["1", "2", "3", "6"],
                      state="readonly", width=4).pack(side=LEFT)
-        self.gap_button = ttk.Button(act, text="  이만큼 채울 회사 찾기  ",
-                                     command=self.on_find_for_gap, state="disabled",
-                                     **_accent(bootstyle="primary"))
+        self.gap_button = _Button(act, text="  이만큼 채울 회사 찾기  ",
+                                   command=self.on_find_for_gap, state="disabled",
+                                   bootstyle="primary")
         self.gap_button.pack(side=RIGHT)
 
         bottom = ttk.LabelFrame(root, text="어디에 연락하면 되나", padding=6)
@@ -711,8 +719,8 @@ class App:
             ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, pady=2)
             ttk.Entry(box, textvariable=var, width=14).grid(row=row, column=1, sticky=W, pady=2)
             ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=2, sticky=W, padx=6)
-        ttk.Button(box, text="  계산하기  ", command=self.on_goal,
-                   **_accent(bootstyle="primary")).grid(
+        _Button(box, text="  계산하기  ", command=self.on_goal,
+                bootstyle="primary").grid(
             row=0, column=3, rowspan=2, padx=(20, 0))
         ttk.Label(box, text="월매출은 ② 탭에서 불러온 장부로,\n위험은 ② 탭의 고정비로 계산합니다.",
                   foreground="#666").grid(row=2, column=3, rowspan=3, padx=(20, 0), sticky=W)
@@ -747,8 +755,8 @@ class App:
         ttk.Button(act, text="단계로 옮기기", command=self.on_lead_move).pack(side=LEFT)
         ttk.Button(act, text="다음 할 일·결제조건 적기",
                    command=self.on_lead_edit).pack(side=LEFT, padx=6)
-        ttk.Button(act, text="빼기", command=self.on_lead_remove,
-                   **_accent(bootstyle="danger-outline")).pack(side=LEFT)
+        _Button(act, text="빼기", command=self.on_lead_remove,
+                bootstyle="danger-outline").pack(side=LEFT)
         ttk.Label(act, text="빨간 줄 = 할 일 날짜가 지남 · 초록 줄 = 첫 수주",
                   foreground="#666").pack(side=RIGHT)
         self._render_leads()
