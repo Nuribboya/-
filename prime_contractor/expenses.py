@@ -6,6 +6,12 @@
 
 엑셀 읽기는 sales.py 의 블록 찾기 로직을 그대로 재사용한다 — '1월' 옆 칸의
 금액을 찾는 방식은 매출이든 지출이든 똑같기 때문이다.
+
+매출 장부는 '우리 매출' 블록 하나만 고르면 되지만(같은 매출이 거래처 쪽
+표에도 또 나오면 두 번 세게 된다), 지출 장부는 반대다 — 식대비·전기요금·
+부가가치세처럼 서로 다른 항목이 블록별로 나뉘어 있는 게 보통이고, 그
+항목들은 다 더해야 그 달 총지출이 된다. 그래서 가장 그럴듯한 블록 하나만
+쓰지 않고, 찾은 블록을 전부 월별로 합산한다.
 """
 from __future__ import annotations
 
@@ -13,9 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from prime_contractor.sales import _block_to_months, _guess_year, _month_blocks
-
-#: 이 글자가 시트 이름에 있으면 '지출' 블록으로 더 쳐준다.
-_EXPENSE_HINTS = ("지출", "비용", "요금", "지급")
 
 
 @dataclass
@@ -35,14 +38,15 @@ class ExpenseBook:
 
 
 def load_expenses(path: str | Path) -> ExpenseBook:
-    """지출 장부(.xlsx)를 읽는다. '1월' 같은 월 이름과 그 옆 칸의 금액을 찾는다."""
+    """지출 장부(.xlsx)를 읽는다. '1월' 같은 월 이름과 그 옆 칸의 금액을 찾아 다 더한다."""
     path = Path(path)
     if path.suffix.lower() not in (".xlsx", ".xlsm"):
         raise ValueError("지출 장부는 엑셀(.xlsx) 파일만 지원합니다.")
     from prime_contractor.xlsx import col_index, read_sheets
 
     sheets = read_sheets(path)
-    best: tuple[int, list] = (-1, [])
+    totals: dict[str, int] = {}
+    found_any = False
     for name, grid in sheets.items():
         blocks = _month_blocks(grid, col_index)
         if not blocks:
@@ -52,12 +56,12 @@ def load_expenses(path: str | Path) -> ExpenseBook:
             months = _block_to_months(block, year)
             if not months:
                 continue
-            rank = len(months) + (20 if any(h in name for h in _EXPENSE_HINTS) else 0)
-            if rank > best[0]:
-                best = (rank, months)
+            found_any = True
+            for m in months:
+                totals[m.ym] = totals.get(m.ym, 0) + m.revenue
 
-    if not best[1]:
+    if not found_any:
         raise ValueError("엑셀에서 월별 지출을 찾지 못했습니다. "
                          "'1월' 같은 월 이름과 그 옆 칸에 금액이 있어야 합니다.")
-    records = [ExpenseRecord(ym=m.ym, amount=m.revenue) for m in best[1]]
+    records = [ExpenseRecord(ym=ym, amount=amount) for ym, amount in sorted(totals.items())]
     return ExpenseBook(months=records, source=str(path))

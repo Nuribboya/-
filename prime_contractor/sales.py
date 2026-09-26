@@ -121,6 +121,8 @@ def load_sales(path: str | Path) -> SalesBook:
 # 합계로 보고 버린다. 합계를 매출로 잘못 읽으면 목표 대비 계산이 통째로 어긋난다.
 
 _MONTH_LABEL = re.compile(r"^\s*(1[0-2]|[1-9])\s*월\s*$")
+#: "7월25일" 처럼 날짜까지 박힌 라벨 — 부가가치세 납부일정 같은 장부에서 흔하다.
+_MONTH_DAY_LABEL = re.compile(r"^\s*(1[0-2]|[1-9])\s*월\s*\d{1,2}\s*일\s*$")
 _YM_LABEL = re.compile(r"^\s*(20\d{2})\s*[-./년]\s*(1[0-2]|0?[1-9])\s*월?\s*$")
 _YEAR_IN_TEXT = re.compile(r"(20\d{2})\s*년")
 
@@ -181,7 +183,10 @@ def _month_of(text: str) -> int | None:
     if ym:
         return int(ym.group(2))
     plain = _MONTH_LABEL.match(text)
-    return int(plain.group(1)) if plain else None
+    if plain:
+        return int(plain.group(1))
+    day = _MONTH_DAY_LABEL.match(text)
+    return int(day.group(1)) if day else None
 
 
 def _amount_right_of(grid, row: int, col: str, col_index):

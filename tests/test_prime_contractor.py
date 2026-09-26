@@ -1989,6 +1989,41 @@ def test_expense_ledger_without_month_rows_says_so(tmp_path):
         load_expenses(path)
 
 
+def test_expense_ledger_sums_multiple_category_blocks(tmp_path):
+    """식대비·전기요금처럼 서로 다른 지출 항목이 나란히 있으면 둘 다 더해야 한다.
+
+    예전엔 매출 장부처럼 '더 그럴듯한 블록 하나'만 골라, 나머지 항목을
+    통째로 빠뜨렸다(실제로 겪은 버그).
+    """
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"결제내역": {
+        "A2": "2026년",
+        "A3": "월별", "B3": "식대비",
+        "A4": "1월", "B4": 238000,
+        "A5": "2월", "B5": 476000,
+        "D3": "월별", "E3": "전기요금",
+        "D4": "1월", "E4": 13003045,
+        "D5": "2월", "E5": 15005813,
+    }})
+    book = load_expenses(path)
+    assert book.amount("2026-01") == 238000 + 13003045
+    assert book.amount("2026-02") == 476000 + 15005813
+
+
+def test_month_day_labels_are_recognized(tmp_path):
+    """'7월25일'처럼 날짜까지 적힌 라벨도 그 달로 잡는다 (부가가치세 납부일정 등)."""
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"지출": {
+        "A2": "2026년 부가가치세",
+        "A3": "1기분", "B3": "부가가치세",
+        "A4": "7월25일", "B4": 7998390,
+        "A5": "8월25일", "B5": 8000000,
+    }})
+    book = load_expenses(path)
+    assert book.amount("2026-07") == 7998390
+    assert book.amount("2026-08") == 8000000
+
+
 # --- 실제 지출이 손익분기 어림값보다 우선 ------------------------------------------
 
 def test_actual_expense_overrides_breakeven_guess_for_the_loss_check():
