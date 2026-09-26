@@ -1532,7 +1532,8 @@ def test_readme_still_documents_every_feature():
     from pathlib import Path
     text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
-                 "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값"):
+                 "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
+                 "우선순위 진단", "직원당 매출"):
         assert must in text, must
 
 
@@ -1737,3 +1738,75 @@ def test_rate_limiter_does_not_wait_once_time_has_passed():
     clock[0] = 1.0                                # 한참 뒤의 요청
     limiter.wait()
     assert slept == []
+
+
+# --- 우선순위 진단 ---------------------------------------------------------------
+
+def test_diagnosis_needs_closed_months():
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    book = _book([("2026-09", 50_000_000)])        # 아직 진행 중인 달만 있음
+    diag = analyze(book, employees=5, today=date(2026, 9, 15))
+    assert diag.note
+    assert diag.priorities == []
+
+
+def test_diagnosis_flags_a_loss_month_as_top_priority():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.diagnosis import analyze
+    book = _book([("2026-07", 40_000_000), ("2026-08", 40_000_000)])
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)   # 손익분기 6천만
+    diag = analyze(book, employees=4, cost=cost, today=date(2026, 9, 1))
+    assert diag.latest_month == "2026-08"
+    assert diag.latest_month_profit < 0
+    assert diag.priorities[0].severity == "high"
+    assert "비용" in diag.priorities[0].text
+
+
+def test_diagnosis_computes_revenue_per_employee_and_trend():
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    book = _book([
+        ("2026-04", 100_000_000), ("2026-05", 100_000_000), ("2026-06", 100_000_000),
+        ("2026-07", 60_000_000), ("2026-08", 60_000_000), ("2026-09", 60_000_000),
+    ])
+    diag = analyze(book, employees=10, today=date(2026, 10, 1))
+    assert diag.revenue_per_employee == 6_000_000          # 6천만 ÷ 10명
+    assert diag.revenue_per_employee_prior == 10_000_000
+    assert diag.revenue_per_employee_trend == "감소"
+    assert any("인력" in p.text for p in diag.priorities)
+
+
+def test_diagnosis_flags_high_variable_ratio():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.diagnosis import analyze
+    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
+    cost = CostModel(monthly_fixed=5_000_000, variable_ratio=0.8)   # 재료비 비중 80%
+    diag = analyze(book, employees=0, cost=cost, today=date(2026, 9, 1))
+    assert any("원가" in p.text for p in diag.priorities)
+
+
+def test_diagnosis_falls_back_to_sales_expansion_when_nothing_is_wrong():
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
+    diag = analyze(book, employees=0, today=date(2026, 9, 1))
+    assert len(diag.priorities) == 1
+    assert "영업" in diag.priorities[0].text
+
+
+def test_diagnosis_priorities_are_sorted_by_severity():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.diagnosis import analyze
+    book = _book([
+        ("2026-04", 100_000_000), ("2026-05", 100_000_000), ("2026-06", 100_000_000),
+        ("2026-07", 40_000_000), ("2026-08", 40_000_000), ("2026-09", 40_000_000),
+    ])
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.8)  # 적자 + 고비율 둘 다 걸림
+    diag = analyze(book, employees=10, cost=cost, today=date(2026, 10, 1))
+    severities = [p.severity for p in diag.priorities]
+    assert severities == sorted(severities, key=lambda s: {"high": 0, "medium": 1, "low": 2}[s])
+    assert severities[0] == "high"

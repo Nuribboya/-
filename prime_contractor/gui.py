@@ -280,6 +280,20 @@ class App:
                    command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
         self.cost_model = None
 
+        diag = ttk.LabelFrame(root, text="회사 안쪽 우선순위 진단 — 뭐부터 챙길지", padding=10)
+        diag.pack(fill=X, padx=10, pady=5)
+        diag_row = ttk.Frame(diag)
+        diag_row.pack(fill=X)
+        ttk.Label(diag_row, text="직원 수").pack(side=LEFT)
+        self.employees = StringVar(value=str(saved.get("employees", "")))
+        ttk.Entry(diag_row, textvariable=self.employees, width=6).pack(side=LEFT, padx=(4, 4))
+        ttk.Label(diag_row, text="명  (엑셀엔 없어서 직접 적어주세요 — 직원당 매출 계산용)",
+                  foreground="#666").pack(side=LEFT, padx=(0, 16))
+        _Button(diag_row, text="진단하기", command=self.on_diagnose,
+                bootstyle="primary").pack(side=LEFT)
+        self.diag_text = scrolledtext.ScrolledText(diag, height=6, wrap="word", state="disabled")
+        self.diag_text.pack(fill=X, pady=(8, 0))
+
         mid = ttk.LabelFrame(root, text="달마다 얼마 벌었나", padding=6)
         mid.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.sales_tree = ttk.Treeview(mid, columns=[c for c, _ in SALES_COLUMNS],
@@ -420,6 +434,34 @@ class App:
             "'재료·외주비' 비율은 그만큼 낮춰서 고쳐 주세요.\n\n"
             "[손익분기로 목표 잡기]를 누르면 반영됩니다.")
 
+    def on_diagnose(self) -> None:
+        if not self.book:
+            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
+            return
+        from prime_contractor.diagnosis import analyze
+        employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
+        diag = analyze(self.book, employees, self.cost_model)
+        self._render_diagnosis(diag)
+
+    def _render_diagnosis(self, diag) -> None:
+        lines: list[str] = []
+        if diag.note:
+            lines.append(diag.note)
+        if diag.revenue_per_employee is not None:
+            trend = f" — {diag.revenue_per_employee_trend}" if diag.revenue_per_employee_trend else ""
+            lines.append(f"직원당 매출(최근 평균): {diag.revenue_per_employee / 1e4:,.0f}만원/인{trend}")
+        if diag.latest_month_profit is not None:
+            lines.append(f"{diag.latest_month} 추정 손익: {diag.latest_month_profit / 1e4:+,.0f}만원")
+        if diag.priorities:
+            lines.append("")
+            lines.append("[뭐부터 챙길지]")
+            for i, p in enumerate(diag.priorities, 1):
+                lines.append(f"{i}. {p.text} — {p.reason}")
+        self.diag_text.configure(state="normal")
+        self.diag_text.delete("1.0", END)
+        self.diag_text.insert(END, "\n".join(lines) if lines else "장부에서 끝난 달을 찾지 못했습니다.")
+        self.diag_text.configure(state="disabled")
+
     def on_apply_target(self) -> None:
         if not self.book:
             messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
@@ -458,16 +500,15 @@ class App:
             book.apply_target(saved_model.target, overwrite=True)
             self.say(f"저장해 둔 비용 숫자로 손익분기(월 {saved_model.breakeven / 1e4:,.0f}만원)를 "
                      f"적용했습니다.")
-            self._render_sales()
-            return
         # 장부에 목표가 없으면 최근 평균을 제안해 둔다. 그대로 쓰든 고치든 사장님 몫.
-        if not book.has_targets and not self.monthly_target.get().strip():
+        elif not book.has_targets and not self.monthly_target.get().strip():
             average = book.average_revenue()
             if average:
                 self.monthly_target.set(str(average))
                 self.say(f"장부에 목표가 없어 최근 평균({average / 1e4:,.0f}만원)을 "
                          f"'월 목표' 칸에 넣어 두었습니다. 고치고 [적용]을 누르세요.")
         self._render_sales()
+        self.on_diagnose()   # 올리면 바로 진단까지 — 버튼을 따로 안 눌러도 되게
 
     def _render_sales(self) -> None:
         book = self.book
@@ -559,6 +600,7 @@ class App:
             "fixed_cost": self.fixed_cost.get(),
             "variable_ratio": self.variable_ratio.get(),
             "target_profit": self.target_profit.get(),
+            "employees": self.employees.get(),
             "months_back": self.months_back.get(),
             "goal_target": self.goal_target.get(),
             "goal_current": self.goal_current.get(),
