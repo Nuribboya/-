@@ -51,8 +51,8 @@ def load_expenses(path: str | Path) -> ExpenseBook:
         blocks = _month_blocks(grid, col_index)
         if not blocks:
             continue
-        year = _guess_year(grid, name, path)
         for block in blocks:
+            year = _guess_year(grid, name, path, block)
             months = _block_to_months(block, year)
             if not months:
                 continue

@@ -2010,6 +2010,88 @@ def test_expense_ledger_sums_multiple_category_blocks(tmp_path):
     assert book.amount("2026-02") == 476000 + 15005813
 
 
+def test_year_is_not_borrowed_from_an_unrelated_block(tmp_path, monkeypatch):
+    """식대비 블록엔 연도가 없고, 한참 아래 부가세 블록에만 '2025년'이 적혀 있다.
+
+    예전엔 시트 전체를 뒤져 그 '2025년'을 식대비 블록에도 갖다 붙였다(실제로
+    겪은 버그 — 실제 지출 칸이 전부 '-'로 나왔다). 블록과 상관없는 다른
+    블록의 연도를 빌려오면 안 되고, 자기 근처에 연도가 없으면 오늘 연도로
+    떨어져야 한다.
+    """
+    import prime_contractor.sales as sales_module
+
+    class _FixedToday:
+        @staticmethod
+        def today():
+            from datetime import date as _d
+            return _d(2026, 9, 26)
+
+    monkeypatch.setattr(sales_module, "date", _FixedToday)
+
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"결제내역": {
+        "A2": "공단식당 식대비",
+        "A3": "월별", "B3": "결제금액",
+        "A4": "1월", "B4": 238000,
+        "A20": "2025년 부가가치세",
+        "A21": "1기분", "B21": "부가가치세",
+        "A22": "7월25일", "B22": 7998390,
+    }})
+    book = load_expenses(path)
+    assert book.amount("2026-01") == 238000     # 오늘 연도(2026) — 남의 블록 연도를 빌리지 않는다
+    assert book.amount("2025-07") == 7998390    # 부가세 블록은 자기 근처 연도를 그대로 쓴다
+
+
+def test_stacked_tables_in_the_same_column_stay_separate(tmp_path, monkeypatch):
+    """식대비 표 밑에 부가세 표가 또 있고, 둘 다 금액을 B열에 둔다 (실제 파일 그대로).
+
+    예전엔 열만 보고 묶어서 두 표가 한 블록이 됐고, 겹치는 달(7~9월)은
+    뒤엣것(부가세)이 '중복'으로 조용히 버려졌다. 행 간격으로 표를 나눠야
+    둘 다 살아남는다 — 여기선 연도도 서로 달라(부가세는 작년 몫) 아예
+    다른 달로 떨어지는 게 맞다. 식대비 표엔 연도가 안 적혀 있어 '오늘'
+    연도로 떨어지므로, 시계를 고정해 둔다.
+    """
+    import prime_contractor.sales as sales_module
+
+    class _FixedToday:
+        @staticmethod
+        def today():
+            from datetime import date as _d
+            return _d(2026, 9, 26)
+
+    monkeypatch.setattr(sales_module, "date", _FixedToday)
+
+    from prime_contractor.expenses import load_expenses
+
+    cells = {"A2": "공단식당 식대비", "A3": "월별", "B3": "결제금액"}
+    food = [238000, 476000, 514000, 679000, 336000, 546000, 574000, 573000, 245000]
+    for i, amt in enumerate(food, start=1):
+        cells[f"A{3 + i}"] = f"{i}월"
+        cells[f"B{3 + i}"] = amt
+    cells["A13"] = "총합계"
+    cells["B13"] = sum(food)
+
+    cells["A20"] = "2025년 부가가치세"
+    cells["A21"] = "1기분"
+    cells["B21"] = "부가가치세"
+    vat = [("7월25일", 7998390), ("8월25일", 8000000), ("9월25일", 8000000), ("10월27일", 11999000)]
+    for i, (label, amt) in enumerate(vat):
+        cells[f"A{22 + i}"] = label
+        cells[f"B{22 + i}"] = amt
+    cells["A26"] = "총합계"
+    cells["B26"] = sum(a for _, a in vat)
+
+    path = _make_xlsx(tmp_path, {"결제내역": cells})
+    book = load_expenses(path)
+
+    assert book.amount("2025-07") == 7998390     # 부가세(작년 몫) — 안 잃어버림
+    assert book.amount("2025-08") == 8000000
+    assert book.amount("2025-09") == 8000000
+    assert book.amount("2025-10") == 11999000
+    for i, amt in enumerate(food, start=1):       # 식대비(올해)도 그대로
+        assert book.amount(f"2026-{i:02d}") == amt
+
+
 def test_month_day_labels_are_recognized(tmp_path):
     """'7월25일'처럼 날짜까지 적힌 라벨도 그 달로 잡는다 (부가가치세 납부일정 등)."""
     from prime_contractor.expenses import load_expenses

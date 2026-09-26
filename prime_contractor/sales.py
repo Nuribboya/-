@@ -142,8 +142,8 @@ def _from_xlsx(path: Path) -> SalesBook:
         blocks = _month_blocks(grid, col_index)
         if not blocks:
             continue
-        year = _guess_year(grid, name, path)
         for block in blocks:
+            year = _guess_year(grid, name, path, block)
             months = _block_to_months(block, year)
             if not months:
                 continue
@@ -157,12 +157,22 @@ def _from_xlsx(path: Path) -> SalesBook:
     return SalesBook(months=best[1], source=str(path))
 
 
+#: 같은 열에서 행이 이보다 더 벌어지면 다른 표로 본다 — 표 사이엔 보통
+#: 제목·머리글·빈 줄이 몇 줄씩 낀다. 한 표 안에서 몇 달치가 통째로 비는
+#: 경우는 흔치 않다.
+_MAX_ROW_GAP = 3
+
+
 def _month_blocks(grid, col_index) -> list[dict]:
     """월 이름 + 오른쪽 금액을 찾아, 금액이 놓인 열 기준으로 묶는다.
 
-    같은 행에 블록이 여럿이어도 열이 다르므로 자연히 나뉜다.
+    같은 행에 블록이 여럿이어도 열이 다르므로 자연히 나뉜다. 반대로 세로로
+    쌓인 서로 다른 표가 같은 열에 금액을 두면(식대비 표 밑에 부가세 표가
+    또 있는 식) 열만 보고 묶으면 안 된다 — 그러면 서로 다른 표의 같은 달이
+    '중복'으로 처리돼 뒤엣것이 조용히 버려진다. 그래서 열이 같아도 행이
+    많이 벌어지면 별개 블록으로 쪼갠다.
     """
-    blocks: dict[str, dict] = {}
+    raw: dict[str, dict[int, tuple[int, float]]] = {}
     for (row, col), value in grid.items():
         if not isinstance(value, str):
             continue
@@ -173,9 +183,23 @@ def _month_blocks(grid, col_index) -> list[dict]:
         if found is None:
             continue
         amount_col, amount = found
-        block = blocks.setdefault(amount_col, {"col": amount_col, "rows": {}})
-        block["rows"][row] = (month, amount)
-    return list(blocks.values())
+        raw.setdefault(amount_col, {})[row] = (month, amount)
+
+    blocks: list[dict] = []
+    for amount_col, rows in raw.items():
+        blocks.extend(_split_by_row_gap(amount_col, rows))
+    return blocks
+
+
+def _split_by_row_gap(col: str, rows: dict[int, tuple[int, float]]) -> list[dict]:
+    ordered = sorted(rows)
+    groups: list[list[int]] = []
+    for row in ordered:
+        if groups and row - groups[-1][-1] <= _MAX_ROW_GAP:
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+    return [{"col": col, "rows": {r: rows[r] for r in group}} for group in groups]
 
 
 def _month_of(text: str) -> int | None:
@@ -244,17 +268,35 @@ def _block_rank(sheet_name: str, block: dict, month_count: int) -> int:
     return score
 
 
-def _guess_year(grid, sheet_name: str, path: Path) -> int:
-    """연도는 칸이 아니라 제목이나 파일 이름에 있는 경우가 많다."""
+#: 블록 바로 위 몇 줄까지를 '그 블록의 제목'으로 본다.
+_YEAR_SEARCH_ROWS = 8
+
+
+def _guess_year(grid, sheet_name: str, path: Path, block: dict | None = None) -> int:
+    """연도는 칸이 아니라 제목이나 파일 이름에 있는 경우가 많다.
+
+    한 시트에 블록이 여럿이면(지출 장부에서 흔하다) 블록마다 연도가 다를 수
+    있다 — "2025년 부가가치세" 옆에 "2026년 부가가치세" 블록이 나란히 있는
+    식으로. 그래서 시트 전체를 무작정 뒤지지 않고, **그 블록 바로 위**에서
+    먼저 찾는다. 거기 없으면 시트 이름·파일 이름을 보고, 그래도 없으면
+    오늘 연도로 본다 — 엉뚱한 다른 블록의 제목에서 연도를 잘못 가져오는
+    것보다는 안전하다.
+    """
+    if block is not None and block.get("rows"):
+        first_row = min(block["rows"])
+        nearby = sorted(
+            ((first_row - r, v) for (r, c), v in grid.items()
+             if isinstance(v, str) and 0 < first_row - r <= _YEAR_SEARCH_ROWS),
+            key=lambda t: t[0])
+        for _, text in nearby:
+            found = _YEAR_IN_TEXT.search(text)
+            if found:
+                return int(found.group(1))
+
     for source in (sheet_name, path.name):
         found = _YEAR_IN_TEXT.search(source) or re.search(r"(20\d{2})", source)
         if found:
             return int(found.group(1))
-    for value in grid.values():
-        if isinstance(value, str):
-            found = _YEAR_IN_TEXT.search(value)
-            if found:
-                return int(found.group(1))
     return date.today().year
 
 
