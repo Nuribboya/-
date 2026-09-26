@@ -44,6 +44,7 @@ def build(console: bool = False) -> Path:
         # 영상 생성: edge-tts(aiohttp 웹소켓) + 인증서 번들
         "--collect-submodules", "edge_tts",
         "--collect-data", "certifi",
+        "--collect-data", "sv_ttk",                      # 화면 테마 파일(tcl · 이미지)
         # exe 용량을 줄이기 위해 쓰지 않는 무거운 패키지 제외
         "--exclude-module", "sympy",
         "--exclude-module", "numpy",

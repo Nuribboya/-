@@ -174,7 +174,7 @@ class UploadDialog(tk.Toplevel):
         ttk.Label(frm, text=head, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
         row = 1
         for w in (warnings or [])[:4]:
-            ttk.Label(frm, text="⚠ " + w, foreground="#b35c00", wraplength=620, justify="left").grid(
+            ttk.Label(frm, text="⚠ " + w, style="Warning.TLabel", wraplength=620, justify="left").grid(
                 row=row, column=0, columnspan=3, sticky="w")
             row += 1
 
@@ -188,7 +188,7 @@ class UploadDialog(tk.Toplevel):
             row=row, column=2, padx=(6, 0), pady=(10, 2))
         row += 1
         self.why_var = tk.StringVar()
-        ttk.Label(frm, textvariable=self.why_var, foreground="#777", wraplength=560, justify="left").grid(
+        ttk.Label(frm, textvariable=self.why_var, style="Muted.TLabel", wraplength=560, justify="left").grid(
             row=row, column=1, sticky="w")
         row += 1
 
@@ -203,7 +203,9 @@ class UploadDialog(tk.Toplevel):
 
         # 설명 (설명 + 해시태그 + 출처)
         ttk.Label(frm, text="설명").grid(row=row, column=0, sticky="nw", pady=(8, 2))
-        self.desc = tk.Text(frm, width=64, height=9, wrap="word")
+        from .ui_theme import style_text
+
+        self.desc = style_text(tk.Text(frm, width=64, height=9, wrap="word"), None)
         self.desc.insert("1.0", res.description)
         self.desc.grid(row=row, column=1, sticky="nsew", pady=(8, 2))
         frm.rowconfigure(row, weight=1)
@@ -211,7 +213,7 @@ class UploadDialog(tk.Toplevel):
             row=row, column=2, sticky="n", padx=(6, 0), pady=(8, 2))
         row += 1
         ttk.Label(frm, text="해시태그 · 출처까지 들어 있어요. 통째로 설명란에 붙여넣으면 됩니다.",
-                  foreground="#777").grid(row=row, column=1, sticky="w")
+                  style="Muted.TLabel").grid(row=row, column=1, sticky="w")
         row += 1
 
         # 태그
@@ -221,7 +223,7 @@ class UploadDialog(tk.Toplevel):
         ttk.Button(frm, text="복사", command=lambda: self.copy(self.tags_var.get(), "태그")).grid(
             row=row, column=2, padx=(6, 0), pady=(8, 2))
         row += 1
-        ttk.Label(frm, text="PC 스튜디오 → 세부정보 → 더보기 → 태그 칸 (휴대폰 앱엔 없음)", foreground="#777").grid(
+        ttk.Label(frm, text="PC 스튜디오 → 세부정보 → 더보기 → 태그 칸 (휴대폰 앱엔 없음)", style="Muted.TLabel").grid(
             row=row, column=1, sticky="w")
         row += 1
 
@@ -242,7 +244,7 @@ class UploadDialog(tk.Toplevel):
 
         btns = ttk.Frame(frm)
         btns.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 0))
-        ttk.Label(btns, textvariable=self.copied_var, foreground="#1a7f37").pack(side="left")
+        ttk.Label(btns, textvariable=self.copied_var, style="Success.TLabel").pack(side="left")
         ttk.Button(btns, text="닫기", command=self.destroy).pack(side="right")
         ttk.Button(btns, text="🌐 YouTube 스튜디오", command=self.open_studio).pack(side="right", padx=4)
         ttk.Button(btns, text="📂 영상 폴더", command=self.open_folder).pack(side="right")
@@ -280,11 +282,17 @@ class SetupDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(master)
 
-        frm = ttk.Frame(self, padding=14)
-        frm.grid(sticky="nsew")
+        outer = ttk.Frame(self, padding=16)
+        outer.grid(sticky="nsew")
+        # 노트북 화면에서도 저장 버튼이 보이게 두 칸으로 나눈다
+        left, right = ttk.Frame(outer), ttk.Frame(outer)
+        left.grid(row=1, column=0, sticky="nw")
+        ttk.Separator(outer, orient="vertical").grid(row=1, column=1, sticky="ns", padx=16)
+        right.grid(row=1, column=2, sticky="nw")
+        frm = left
         if first_run:
-            ttk.Label(frm, text="처음 실행입니다. 아래 정보를 입력하면 config.yaml이 만들어집니다.",
-                      foreground="#555").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+            ttk.Label(outer, text="처음 실행입니다. 아래 정보를 입력하면 config.yaml이 만들어집니다.",
+                      style="Muted.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
         r = self.raw
         self.vars: dict[str, tk.Variable] = {
@@ -305,48 +313,68 @@ class SetupDialog(tk.Toplevel):
         }
         row = 1
 
-        def field(label, key, width=48, hint=None, show=None):
+        def section(title, first=False):
+            nonlocal row
+            ttk.Label(frm, text=title, style="Section.TLabel").grid(row=row, column=0, columnspan=3, sticky="w",
+                                                                   pady=(0 if first else 14, 2))
+            row += 1
+            ttk.Separator(frm).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+            row += 1
+
+        def field(label, key, width=40, hint=None, show=None):
             nonlocal row
             ttk.Label(frm, text=label).grid(row=row, column=0, sticky="w", pady=3)
             e = ttk.Entry(frm, textvariable=self.vars[key], width=width, show=show or "")
             e.grid(row=row, column=1, sticky="w", pady=3)
-            if hint:
-                ttk.Label(frm, text=hint, foreground="#777").grid(row=row, column=2, sticky="w", padx=6)
             row += 1
+            if hint:                        # 설명은 입력칸 아래에 작게 (창이 너무 넓어지지 않게)
+                hint_label(hint)
             return e
 
+        def hint_label(text):
+            nonlocal row
+            ttk.Label(frm, text=text, style="Hint.TLabel").grid(row=row, column=1, columnspan=2, sticky="w",
+                                                                pady=(0, 4))
+            row += 1
+
+        section("🌎 기본", first=True)
         ttk.Label(frm, text="콘텐츠 언어/시장").grid(row=row, column=0, sticky="w", pady=3)
         ttk.Combobox(frm, textvariable=self.vars["language"], values=list(LANGUAGE_LABELS.values()),
                      state="readonly", width=20).grid(row=row, column=1, sticky="w", pady=3)
-        ttk.Label(frm, text="유행 분석 지역 · 대본 언어 · 음성 · 자막 폰트가 함께 바뀜",
-                  foreground="#777").grid(row=row, column=2, sticky="w", padx=6)
         row += 1
+        hint_label("유행 분석 지역 · 대본 언어 · 음성 · 자막 폰트가 함께 바뀜")
         field("YouTube API 키 *", "api_key")
         ttk.Label(frm, text="채널 목록 *").grid(row=row, column=0, sticky="nw", pady=3)
-        self.channels_text = tk.Text(frm, width=48, height=5)
+        from .ui_theme import style_text
+
+        self.channels_text = style_text(tk.Text(frm, width=40, height=4), None)
         self.channels_text.insert("1.0", channel_lines(r.get("channels")))
         self.channels_text.grid(row=row, column=1, sticky="w", pady=3)
-        ttk.Label(frm, text="한 줄에 하나\n@핸들 · UC채널ID · 채널 주소\n'| 이름'으로 표시 이름 지정",
-                  foreground="#777", justify="left").grid(row=row, column=2, sticky="nw", padx=6)
         row += 1
+        hint_label("한 줄에 하나 · @핸들 · UC채널ID · 채널 주소 · '| 이름'으로 표시 이름")
+        section("🔔 텔레그램 알림 (선택)")
         field("텔레그램 봇 토큰", "bot_token", hint="@BotFather 에서 발급")
         field("텔레그램 chat_id", "chat_id", width=20)
         ttk.Button(frm, text="chat_id 찾기", command=self._find_chat_id).grid(
             row=row - 1, column=1, sticky="e")
-        field("Pexels API 키", "pexels_key", hint="영상 생성용 (무료)")
-        ttk.Button(frm, text="발급 페이지 열기", command=self._open_pexels).grid(
-            row=row - 1, column=2, sticky="e", padx=6)
-        field("Pixabay API 키", "pixabay_key", hint="선택 · 영상 소스 추가 (무료)")
-        ttk.Button(frm, text="발급 페이지 열기", command=self._open_pixabay).grid(
-            row=row - 1, column=2, sticky="e", padx=6)
-        ttk.Checkbutton(frm, text="AI 이미지 생성 (ComfyUI · 그래픽카드 필요)", variable=self.vars["ai_enabled"]).grid(
+        frm, row = right, 0                 # 오른쪽 칸
+        section("🎞 영상 소스 (무료 API 키)", first=True)
+        e = field("Pexels API 키", "pexels_key", width=34, hint="영상 생성용 (무료)")
+        ttk.Button(frm, text="발급 페이지", command=self._open_pexels).grid(
+            row=int(e.grid_info()["row"]), column=2, sticky="e", padx=(6, 0))
+        e = field("Pixabay API 키", "pixabay_key", width=34, hint="선택 · 영상 소스 추가 (무료)")
+        ttk.Button(frm, text="발급 페이지", command=self._open_pixabay).grid(
+            row=int(e.grid_info()["row"]), column=2, sticky="e", padx=(6, 0))
+        section("🖼 AI 이미지 (선택 · 그래픽카드 필요)")
+        ttk.Checkbutton(frm, text="AI 이미지 생성 (ComfyUI)", variable=self.vars["ai_enabled"]).grid(
             row=row, column=1, sticky="w", pady=3)
-        ttk.Button(frm, text="연결 확인", command=self._check_comfy).grid(row=row, column=2, sticky="e", padx=6)
+        ttk.Button(frm, text="연결 확인", command=self._check_comfy).grid(row=row, column=2, sticky="e", padx=(6, 0))
         row += 1
         field("ComfyUI 주소", "ai_host", width=32, hint="첫 씬(훅)과 영상 없는 씬에 AI 이미지")
-        field("ComfyUI 폴더", "comfy_dir", hint="비우면 자동으로 찾음 · 영상 만들 때 자동 실행/종료")
+        e = field("ComfyUI 폴더", "comfy_dir", width=34, hint="비우면 자동으로 찾아요 · 영상 만들 때 자동 실행/종료")
         ttk.Button(frm, text="폴더 선택", command=self._pick_comfy_dir).grid(
-            row=row - 1, column=2, sticky="e", padx=6)
+            row=int(e.grid_info()["row"]), column=2, sticky="e", padx=(6, 0))
+        section("📊 채널 체크 · Ollama(대본 AI)")
         field("체크 주기(시간)", "interval", width=8)
         field("하락 임계값(%)", "threshold", width=8, hint="최근 영상이 이전보다 이만큼 떨어지면 알림")
         field("Ollama 모델", "model", width=24, hint="기본 qwen2.5:7b")
@@ -355,9 +383,9 @@ class SetupDialog(tk.Toplevel):
             row=row, column=1, sticky="w", pady=(6, 0))
         row += 1
 
-        btns = ttk.Frame(frm)
-        btns.grid(row=row, column=0, columnspan=3, sticky="e", pady=(12, 0))
-        ttk.Button(btns, text="저장", command=self._save).pack(side="right", padx=4)
+        btns = ttk.Frame(outer)
+        btns.grid(row=2, column=0, columnspan=3, sticky="e", pady=(16, 0))
+        ttk.Button(btns, text="저장", style="Accent.TButton", command=self._save).pack(side="right", padx=4)
         ttk.Button(btns, text="취소", command=self.destroy).pack(side="right")
         self.bind("<Escape>", lambda _e: self.destroy())
         self.grab_set()
@@ -495,8 +523,8 @@ class App:
         self.video_pipeline_factory: Callable = self._default_video_pipeline
 
         root.title(APP_TITLE)
-        root.geometry("1000x700")
-        root.minsize(820, 560)
+        root.geometry("1180x840")
+        root.minsize(940, 680)
         self._fonts()
         self._build()
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -511,105 +539,127 @@ class App:
     # ---- 기본 틀 ---------------------------------------------------------------
 
     def _fonts(self):
-        families = set(tkfont.families(self.root))
-        family = next((f for f in ("Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo",
-                                   "Noto Sans CJK KR", "NanumGothic") if f in families), None)
-        if family:
-            for name in ("TkDefaultFont", "TkTextFont", "TkHeadingFont", "TkMenuFont"):
-                tkfont.nametofont(name).configure(family=family, size=10)
-        self.text_font = (family or "TkFixedFont", 10)
+        from .ui_theme import apply_theme
+
+        self.fonts = apply_theme(self.root)
+        self.text_font = self.fonts["text"]
+
+    def _text(self, parent, **kw) -> scrolledtext.ScrolledText:
+        from .ui_theme import style_text
+
+        readonly = kw.pop("readonly_bg", False)
+        return style_text(scrolledtext.ScrolledText(parent, **kw), self.fonts, readonly_bg=readonly)
 
     def _build(self):
-        top = ttk.Frame(self.root, padding=(10, 8))
-        top.pack(fill="x")
-        self.btn_check = ttk.Button(top, text="▶ 지금 체크하기", command=self.check_now)
+        # ── 머리글: 제목 · 상태 · 설정 ─────────────────────────────────────────────────
+        head = ttk.Frame(self.root, padding=(18, 12, 18, 4))
+        head.pack(fill="x")
+        title = ttk.Frame(head)
+        title.pack(side="left")
+        ttk.Label(title, text="🎬 YouTube 쇼츠 스튜디오", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(title, text="유행 분석 → 대본 → 영상 → 업로드 정보까지, 내 PC에서 무료로",
+                  style="Muted.TLabel").pack(anchor="w")
+        ttk.Button(head, text="⚙ 설정", command=self.open_settings).pack(side="right")
+        ttk.Button(head, text="📂 출력 폴더", command=self.open_outputs).pack(side="right", padx=6)
+        self.ollama_label = ttk.Label(head, text="● Ollama 확인 중…", style="Muted.TLabel")
+        self.ollama_label.pack(side="right", padx=12)
+
+        # ── 원클릭 카드 ──────────────────────────────────────────────────────────────
+        card = ttk.Frame(self.root, style="Card.TFrame", padding=(16, 12))
+        card.pack(fill="x", padx=18, pady=(6, 8))
+        line = ttk.Frame(card)
+        line.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(line, text="🚀 원클릭 쇼츠 만들기", style="CardTitle.TLabel").pack(side="left")
+        ttk.Label(line, text="   주제를 비우면 요즘 유행에서 자동으로, 적으면 그 주제로 (예: Nutella food hacks) → "
+                             "대본 · 제목 · 영상 · 업로드 정보까지", style="CardMuted.TLabel").pack(side="left")
+        self.oneclick_topic = tk.StringVar()
+        topic_entry = ttk.Entry(card, textvariable=self.oneclick_topic, font=(self.fonts["family"], 11))
+        topic_entry.grid(row=1, column=0, sticky="ew", ipady=3)
+        topic_entry.bind("<Return>", lambda _e: self.one_click())
+        self.btn_oneclick = ttk.Button(card, text="🚀 만들기", style="Big.Accent.TButton", command=self.one_click)
+        self.btn_oneclick.grid(row=1, column=1, padx=(10, 0))
+        card.columnconfigure(0, weight=1)
+
+        # ── 보조 도구 줄 ─────────────────────────────────────────────────────────────
+        tools = ttk.Frame(self.root, padding=(18, 0, 18, 6))
+        tools.pack(fill="x")
+        self.btn_check = ttk.Button(tools, text="▶ 지금 체크하기", command=self.check_now)
         self.btn_check.pack(side="left")
-        self.btn_generate = ttk.Button(top, text="✨ 새 주제/대본 생성", command=self.generate_now)
+        self.btn_generate = ttk.Button(tools, text="✨ 새 주제/대본 생성", command=self.generate_now)
         self.btn_generate.pack(side="left", padx=6)
-        self.btn_trend = ttk.Button(top, text="🔥 유행 쇼츠 분석", command=self.trend_now)
+        self.btn_trend = ttk.Button(tools, text="🔥 유행 쇼츠 분석", command=self.trend_now)
         self.btn_trend.pack(side="left")
         self.auto_var = tk.BooleanVar(value=False)
-        self.auto_chk = ttk.Checkbutton(top, text="자동 체크", variable=self.auto_var,
+        self.auto_chk = ttk.Checkbutton(tools, text="자동 체크", variable=self.auto_var,
                                         command=lambda: self._apply_auto_check(self.auto_var.get(), save=True))
-        self.auto_chk.pack(side="left", padx=(12, 0))
-        ttk.Button(top, text="⚙ 설정", command=self.open_settings).pack(side="right")
-        ttk.Button(top, text="📂 출력 폴더", command=self.open_outputs).pack(side="right", padx=6)
-        self.ollama_label = ttk.Label(top, text="Ollama 확인 중…", foreground="#777")
-        self.ollama_label.pack(side="right", padx=10)
-
-        one = ttk.Frame(self.root, padding=(10, 0, 10, 6))
-        one.pack(fill="x")
-        self.btn_oneclick = ttk.Button(one, text="🚀 원클릭 쇼츠 만들기", command=self.one_click)
-        self.btn_oneclick.pack(side="left", ipady=4)
-        ttk.Label(one, text="주제(선택):").pack(side="left", padx=(12, 4))
-        self.oneclick_topic = tk.StringVar()
-        topic_entry = ttk.Entry(one, textvariable=self.oneclick_topic, width=36)
-        topic_entry.pack(side="left")
-        topic_entry.bind("<Return>", lambda _e: self.one_click())
-        ttk.Label(one, text="비우면 요즘 유행에서 주제를 골라 → 대본 · 제목 · 영상까지 한 번에",
-                  foreground="#777").pack(side="left", padx=8)
+        self.auto_chk.pack(side="left", padx=(14, 0))
 
         # 상태 표시줄은 먼저 아래에 붙여야 창이 작아져도 가려지지 않는다
-        status = ttk.Frame(self.root, padding=(10, 4))
+        ttk.Separator(self.root).pack(side="bottom", fill="x")
+        status = ttk.Frame(self.root, padding=(18, 6))
         status.pack(side="bottom", fill="x")
         self.progress = ttk.Progressbar(status, mode="indeterminate", length=140)
         self.progress.pack(side="left")
         self.status_var = tk.StringVar(value="준비")
-        ttk.Label(status, textvariable=self.status_var).pack(side="left", padx=8)
+        ttk.Label(status, textvariable=self.status_var, style="Muted.TLabel").pack(side="left", padx=10)
 
-        paned = ttk.PanedWindow(self.root, orient="vertical")
-        paned.pack(fill="both", expand=True, padx=10)
-
-        tree_frame = ttk.Frame(paned)
-        self.tree = ttk.Treeview(tree_frame, columns=[c[0] for c in self.COLUMNS], height=5)
+        self.nb = ttk.Notebook(self.root)
+        self.nb.pack(fill="both", expand=True, padx=18, pady=(0, 8))
+        summary_tab = ttk.Frame(self.nb, padding=10)
+        ttk.Label(summary_tab, text="📺 내 채널 (선택하면 아래에 조회수 추이)", style="Section.TLabel").pack(
+            anchor="w", pady=(0, 4))
+        self.tree = ttk.Treeview(summary_tab, columns=[c[0] for c in self.COLUMNS], height=3)
         self.tree.heading("#0", text="채널")
-        self.tree.column("#0", width=180)
+        self.tree.column("#0", width=200)
         for key, label, width in self.COLUMNS:
             self.tree.heading(key, text=label)
             self.tree.column(key, width=width, anchor="center")
-        self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._show_selected_summary())
-        paned.add(tree_frame, weight=1)
+        from .ui_theme import COLORS
 
-        self.nb = ttk.Notebook(paned)
-        self.summary_box = scrolledtext.ScrolledText(self.nb, wrap="none", font=self.text_font)
+        self.tree.tag_configure("slow", foreground=COLORS["danger"])
+        self.tree.tag_configure("ok", foreground=COLORS["success"])
+        self.tree.tag_configure("empty", foreground=COLORS["muted"])
+        self.tree.pack(fill="x")
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._show_selected_summary())
+        self.summary_box = self._text(summary_tab, wrap="none", readonly_bg=True)
+        self.summary_box.pack(fill="both", expand=True, pady=(10, 0))
         self.summary_box.configure(state="disabled")
-        self.nb.add(self.summary_box, text="조회수 추이")
+        self.nb.add(summary_tab, text="📊 내 채널 · 조회수")
         self._build_trend_tab()
 
-        gen_tab = ttk.Frame(self.nb)
+        gen_tab = ttk.Frame(self.nb, padding=10)
         self.gen_tab = gen_tab
-        bar = ttk.Frame(gen_tab, padding=(0, 6))
+        bar = ttk.Frame(gen_tab, padding=(0, 0, 0, 8))
         bar.pack(fill="x")
-        ttk.Label(bar, text="주제:").pack(side="left")
-        self.topic_combo = ttk.Combobox(bar, state="readonly", width=48)
-        self.topic_combo.pack(side="left", padx=4)
+        ttk.Label(bar, text="주제").pack(side="left")
+        self.topic_combo = ttk.Combobox(bar, state="readonly", width=44)
+        self.topic_combo.pack(side="left", padx=6)
         self.btn_rescript = ttk.Button(bar, text="선택한 주제로 대본 생성", command=self.rewrite_script)
         self.btn_rescript.pack(side="left")
         self.btn_cancel = ttk.Button(bar, text="취소", command=self.cancel, state="disabled")
-        self.btn_cancel.pack(side="left", padx=4)
+        self.btn_cancel.pack(side="left", padx=6)
         ttk.Button(bar, text="💾 파일로 저장", command=self.save_result).pack(side="right")
-        ttk.Button(bar, text="🎬 이 대본으로 영상 만들기", command=self.send_to_video).pack(side="right", padx=4)
-        self.result_box = scrolledtext.ScrolledText(gen_tab, wrap="word", font=self.text_font, undo=True)
+        ttk.Button(bar, text="🎬 이 대본으로 영상 만들기", style="Accent.TButton",
+                   command=self.send_to_video).pack(side="right", padx=6)
+        self.result_box = self._text(gen_tab, wrap="word", undo=True)
         self.result_box.pack(fill="both", expand=True)
-        self.nb.add(gen_tab, text="주제/대본")
+        self.nb.add(gen_tab, text="📝 주제/대본")
         self._build_video_tab()
-        paned.add(self.nb, weight=3)
 
     def _build_trend_tab(self):
-        tab = ttk.Frame(self.nb)
+        tab = ttk.Frame(self.nb, padding=10)
         self.trend_tab = tab
-        bar = ttk.Frame(tab, padding=(0, 6))
+        bar = ttk.Frame(tab, padding=(0, 0, 0, 8))
         bar.pack(fill="x")
-        self.btn_trend2 = ttk.Button(bar, text="🔥 유행 쇼츠 분석 시작", command=self.trend_now)
+        self.btn_trend2 = ttk.Button(bar, text="🔥 유행 쇼츠 분석 시작", style="Accent.TButton", command=self.trend_now)
         self.btn_trend2.pack(side="left")
         self.trend_auto_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bar, text="대본 생성 후 영상까지 자동으로 만들기", variable=self.trend_auto_var,
-                        command=self._save_trend_auto).pack(side="left", padx=10)
-        self.trend_hint = ttk.Label(bar, foreground="#777")
+        ttk.Checkbutton(bar, text="대본 생성 후 영상까지 자동으로", variable=self.trend_auto_var,
+                        command=self._save_trend_auto).pack(side="left", padx=12)
+        self.trend_hint = ttk.Label(bar, style="Muted.TLabel")
         self.trend_hint.pack(side="left")
-        self.trend_box = scrolledtext.ScrolledText(tab, wrap="none", font=self.text_font)
-        self.trend_box.insert("1.0", "[🔥 유행 쇼츠 분석]을 누르면 최근 유행하는 쇼츠 목록이 여기에 표시됩니다.\n"
+        self.trend_box = self._text(tab, wrap="none", readonly_bg=True)
+        self.trend_box.insert("1.0", "[🔥 유행 쇼츠 분석]을 누르면 최근 유행하는 쇼츠 목록과 분석 리포트가 여기에 표시됩니다.\n"
                               "(YouTube API 쿼터를 1회 약 200 사용합니다. 무료 쿼터는 하루 10,000)")
         self.trend_box.configure(state="disabled")
         self.trend_box.pack(fill="both", expand=True)
@@ -618,67 +668,77 @@ class App:
     def _build_video_tab(self):
         from .video.tts import VOICES
 
-        tab = ttk.Frame(self.nb)
+        tab = ttk.Frame(self.nb, padding=10)
         self.video_tab = tab
-        row1 = ttk.Frame(tab, padding=(0, 6))
-        row1.pack(fill="x")
-        ttk.Label(row1, text="제목(파일명):").pack(side="left")
-        self.video_title_var = tk.StringVar()
-        ttk.Entry(row1, textvariable=self.video_title_var, width=34).pack(side="left", padx=4)
-        ttk.Label(row1, text="음성:").pack(side="left", padx=(8, 0))
-        self.voice_var = tk.StringVar(value=AUTO_VOICE)
-        self.voice_combo = ttk.Combobox(row1, textvariable=self.voice_var, width=30, state="readonly",
-                                        values=[AUTO_VOICE] + [f"{k}  {v}" for k, v in VOICES.items()])
-        self.voice_combo.pack(side="left", padx=4)
-        ttk.Button(row1, text="📥 주제/대본 탭에서 가져오기", command=self.import_script).pack(side="right")
-        row_hook = ttk.Frame(tab)
-        row_hook.pack(fill="x")
-        ttk.Label(row_hook, text="첫 화면 훅 문구:").pack(side="left")
-        self.hook_var = tk.StringVar()
-        ttk.Entry(row_hook, textvariable=self.hook_var, width=50).pack(side="left", padx=4)
-        ttk.Label(row_hook, text="처음 2.5초 동안 크게 표시 (비우면 제목, '-' 이면 표시 안 함)",
-                  foreground="#777").pack(side="left")
 
-        # 아래쪽 줄(진행/로그/결과)을 먼저 붙여야 창이 작아도 결과 경로와 버튼이 가려지지 않는다
-        row3 = ttk.Frame(tab, padding=(0, 6))
-        row3.pack(side="bottom", fill="x")
-        ttk.Label(row3, text="결과:").pack(side="left")
+        # ① 영상 정보
+        info = ttk.Labelframe(tab, text=" ① 영상 정보 ", padding=(12, 8))
+        info.pack(fill="x")
+        ttk.Label(info, text="제목(파일명)").grid(row=0, column=0, sticky="w")
+        self.video_title_var = tk.StringVar()
+        ttk.Entry(info, textvariable=self.video_title_var).grid(row=0, column=1, sticky="ew", padx=8)
+        ttk.Label(info, text="음성").grid(row=0, column=2, sticky="w")
+        self.voice_var = tk.StringVar(value=AUTO_VOICE)
+        self.voice_combo = ttk.Combobox(info, textvariable=self.voice_var, width=28, state="readonly",
+                                        values=[AUTO_VOICE] + [f"{k}  {v}" for k, v in VOICES.items()])
+        self.voice_combo.grid(row=0, column=3, sticky="w", padx=(8, 0))
+        ttk.Label(info, text="첫 화면 훅 문구").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self.hook_var = tk.StringVar()
+        ttk.Entry(info, textvariable=self.hook_var).grid(row=1, column=1, sticky="ew", padx=8, pady=(8, 0))
+        ttk.Label(info, text="처음 2.5초 크게 표시 · 비우면 제목 · '-'면 없음", style="Muted.TLabel").grid(
+            row=1, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        info.columnconfigure(1, weight=1)
+
+        # 아래쪽(만들기/진행/결과)을 먼저 붙여야 창이 작아도 가려지지 않는다
+        result = ttk.Labelframe(tab, text=" ④ 결과 ", padding=(12, 8))
+        result.pack(side="bottom", fill="x", pady=(8, 0))
         self.video_path_var = tk.StringVar(value="-")
-        ttk.Entry(row3, textvariable=self.video_path_var, state="readonly").pack(
-            side="left", fill="x", expand=True, padx=4)
-        self.btn_upload_info = ttk.Button(row3, text="📋 업로드 정보", state="disabled",
+        ttk.Entry(result, textvariable=self.video_path_var, state="readonly").pack(
+            side="left", fill="x", expand=True, padx=(0, 8))
+        self.btn_upload_info = ttk.Button(result, text="📋 업로드 정보", style="Accent.TButton", state="disabled",
                                           command=self._open_upload_info)
         self.btn_upload_info.pack(side="right")
-        ttk.Button(row3, text="🎵 BGM 폴더", command=self._open_bgm_dir).pack(side="right")
-        self.btn_open_video = ttk.Button(row3, text="▶ 영상 열기", state="disabled",
+        ttk.Button(result, text="🎵 BGM 폴더", command=self._open_bgm_dir).pack(side="right", padx=4)
+        self.btn_open_video = ttk.Button(result, text="▶ 영상 열기", state="disabled",
                                          command=lambda: self._open_result(select=False))
         self.btn_open_video.pack(side="right")
-        self.btn_open_folder = ttk.Button(row3, text="📂 폴더 열기", state="disabled",
+        self.btn_open_folder = ttk.Button(result, text="📂 폴더", state="disabled",
                                           command=lambda: self._open_result(select=True))
         self.btn_open_folder.pack(side="right", padx=4)
 
-        self.video_log = scrolledtext.ScrolledText(tab, wrap="word", font=self.text_font, height=5)
-        self.video_log.configure(state="disabled")
-        self.video_log.pack(side="bottom", fill="x")
-
-        row2 = ttk.Frame(tab, padding=(0, 6))
-        row2.pack(side="bottom", fill="x")
-        self.btn_video = ttk.Button(row2, text="🎬 영상 만들기", command=self.make_video)
+        run = ttk.Labelframe(tab, text=" ③ 만들기 ", padding=(12, 8))
+        run.pack(side="bottom", fill="x", pady=(8, 0))
+        self.btn_video = ttk.Button(run, text="🎬 영상 만들기", style="Accent.TButton", command=self.make_video)
         self.btn_video.pack(side="left")
-        self.btn_video_cancel = ttk.Button(row2, text="취소", command=self.cancel, state="disabled")
-        self.btn_video_cancel.pack(side="left", padx=4)
-        self.video_progress = ttk.Progressbar(row2, mode="determinate", maximum=6, length=160)
+        self.btn_video_cancel = ttk.Button(run, text="취소", command=self.cancel, state="disabled")
+        self.btn_video_cancel.pack(side="left", padx=6)
+        self.video_progress = ttk.Progressbar(run, mode="determinate", maximum=6, length=220)
         self.video_progress.pack(side="left", padx=8)
         self.video_step_var = tk.StringVar(value="대본을 넣고 [영상 만들기]를 누르세요.")
-        ttk.Label(row2, textvariable=self.video_step_var).pack(side="left")
+        ttk.Label(run, textvariable=self.video_step_var).pack(side="left")
 
-        ttk.Label(tab, text="대본 (한 줄에 한 문장 권장. [효과음], (화면 전환), 이모지, 마크다운은 자동으로 빠집니다)",
-                  foreground="#777").pack(anchor="w")
-        self.video_script = scrolledtext.ScrolledText(tab, wrap="word", font=self.text_font, height=6, undo=True)
+        # ② 대본 (왼쪽) + 진행 기록 (오른쪽)
+        script = ttk.Labelframe(tab, text=" ② 대본 ", padding=(12, 8))
+        script.pack(fill="both", expand=True, pady=(8, 0))
+        top = ttk.Frame(script)
+        top.pack(fill="x", pady=(0, 6))
+        ttk.Label(top, text="한 줄에 한 문장 · [효과음], (화면 전환), 이모지, 마크다운은 자동으로 빠져요",
+                  style="Muted.TLabel").pack(side="left")
+        ttk.Button(top, text="📥 주제/대본 탭에서 가져오기", command=self.import_script).pack(side="right")
+        split = ttk.PanedWindow(script, orient="horizontal")
+        split.pack(fill="both", expand=True)
+        left = ttk.Frame(split)
+        self.video_script = self._text(left, wrap="word", height=6, undo=True)
         self.video_script.pack(fill="both", expand=True)
+        right = ttk.Frame(split)
+        ttk.Label(right, text="진행 기록", style="Muted.TLabel").pack(anchor="w", padx=(8, 0))
+        self.video_log = self._text(right, wrap="word", height=6, width=40, readonly_bg=True)
+        self.video_log.configure(state="disabled")
+        self.video_log.pack(fill="both", expand=True, padx=(8, 0))
+        split.add(left, weight=3)
+        split.add(right, weight=2)
 
-        self.nb.add(tab, text="영상 생성")
-
+        self.nb.add(tab, text="🎬 영상 생성")
 
     # ---- 스레드 도우미 ------------------------------------------------------------
 
@@ -813,14 +873,14 @@ class App:
     def _on_ollama_status(self, st, startup: bool):
         self.ollama_ok = st.ok
         if st.ok:
-            self.ollama_label.configure(text=f"● Ollama 준비됨 ({st.model})", foreground="#1a7f37")
+            self.ollama_label.configure(text=f"● Ollama 준비됨 ({st.model})", style="Success.TLabel")
         elif st.server_up:
-            self.ollama_label.configure(text=f"● 모델 없음 ({st.model})", foreground="#c62828")
+            self.ollama_label.configure(text=f"● 모델 없음 ({st.model})", style="Danger.TLabel")
             messagebox.showerror(APP_TITLE, st.message + "\n\n모델을 받은 뒤 프로그램을 다시 실행하세요.")
             if startup:
                 self.close()
         else:
-            self.ollama_label.configure(text="● Ollama 꺼짐", foreground="#c62828")
+            self.ollama_label.configure(text="● Ollama 꺼짐", style="Danger.TLabel")
             if startup:
                 messagebox.showwarning(APP_TITLE, st.message + "\n\n조회수 체크는 계속 사용할 수 있고, "
                                        "주제/대본 생성은 Ollama를 켠 뒤 사용할 수 있습니다.")
@@ -871,7 +931,8 @@ class App:
                           fnum(a.weekly_views), sparkline(gains or []),
                           checked.astimezone(self.tz).strftime("%m-%d %H:%M") if checked else "-")
                 label = ch.name or a.channel_title
-            self.tree.insert("", "end", iid=iid, text=label, values=values)
+            tag = "empty" if a is None else ("slow" if a.slowdown else "ok")
+            self.tree.insert("", "end", iid=iid, text=label, values=values, tags=(tag,))
         keep = [s for s in selected if self.tree.exists(s)]
         if keep or self.tree.get_children():
             self.tree.selection_set(keep or self.tree.get_children()[0])
@@ -1360,10 +1421,6 @@ def run_gui(config_path: Path | str | None = None) -> int:
         except Exception:
             pass
     root = tk.Tk()
-    try:
-        ttk.Style(root).theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
     App(root, Path(config_path) if config_path else default_config_path())
     root.mainloop()
     return 0
