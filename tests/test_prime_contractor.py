@@ -1534,7 +1534,7 @@ def test_readme_still_documents_every_feature():
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
                  "우선순위 진단", "직원당 매출", "Gemini", "지출 파일",
-                 "제안서 만들기"):
+                 "제안서 만들기", "자동으로 저장"):
         assert must in text, must
 
 

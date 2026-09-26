@@ -45,6 +45,8 @@ SALES_COLUMNS = (("연월", 85), ("실제 매출", 110), ("목표", 110),
                  ("달성률", 65), ("모자란 돈", 105), ("실제 지출", 100), ("손익", 110))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
+#: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
+AUTOSAVE_MS = 60_000
 
 
 def _Button(parent, **kw):
@@ -123,6 +125,26 @@ class App:
         self._pump_messages()
         if should_check_updates():
             threading.Thread(target=self._check_update, daemon=True).start()
+
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.after(AUTOSAVE_MS, self._autosave)
+
+    # --- 자동저장 -------------------------------------------------------------
+
+    def _autosave(self) -> None:
+        """입력 칸을 조용히 저장한다. 실패해도 화면은 계속 써야 하니 그냥 넘어간다."""
+        try:
+            save_settings(self.current_options())
+        except OSError:
+            pass
+        self.root.after(AUTOSAVE_MS, self._autosave)
+
+    def on_close(self) -> None:
+        try:
+            save_settings(self.current_options())
+        except OSError:
+            pass
+        self.root.destroy()
 
     # --- 화면 구성 -----------------------------------------------------------
 
