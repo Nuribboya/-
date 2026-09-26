@@ -1764,7 +1764,7 @@ def test_diagnosis_flags_a_loss_month_as_top_priority():
     assert "비용" in diag.priorities[0].text
 
 
-def test_diagnosis_computes_revenue_per_employee_and_trend():
+def test_diagnosis_computes_revenue_per_employee():
     from datetime import date
     from prime_contractor.diagnosis import analyze
     book = _book([
@@ -1773,9 +1773,24 @@ def test_diagnosis_computes_revenue_per_employee_and_trend():
     ])
     diag = analyze(book, employees=10, today=date(2026, 10, 1))
     assert diag.revenue_per_employee == 6_000_000          # 6천만 ÷ 10명
-    assert diag.revenue_per_employee_prior == 10_000_000
-    assert diag.revenue_per_employee_trend == "감소"
-    assert any("인력" in p.text for p in diag.priorities)
+    assert diag.revenue_trend == "감소"
+
+
+def test_falling_revenue_is_diagnosed_as_sales_not_staffing():
+    """직원 수는 한 번 받는 고정값이라, '직원당 매출 감소'는 사실 매출 감소와 같은 숫자다.
+
+    매출이 준 걸 인력 문제로 넘겨짚으면 실제 원인(원청 발주량 감소)을 놓친다.
+    그래서 매출이 줄었을 땐 인력이 아니라 영업/일감 쪽 문구가 나와야 한다.
+    """
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    book = _book([
+        ("2026-04", 100_000_000), ("2026-05", 100_000_000), ("2026-06", 100_000_000),
+        ("2026-07", 60_000_000), ("2026-08", 60_000_000), ("2026-09", 60_000_000),
+    ])
+    diag = analyze(book, employees=6, today=date(2026, 10, 1))
+    assert any("영업" in p.text or "일감" in p.text for p in diag.priorities)
+    assert not any("인력" in p.text or "채용" in p.text for p in diag.priorities)
 
 
 def test_diagnosis_flags_high_variable_ratio():
