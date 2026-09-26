@@ -74,29 +74,3 @@ def build_proposal(cand: Candidate, profile: CompanyProfile) -> str:
         lines += ["", f"연락처: {contact}"]
 
     return "\n".join(lines)
-
-
-_POLISH_INSTRUCTION = (
-    "다음은 자동제어 판넬 제조회사가 잠재 거래처에 보내는 협력 제안 메일 초안입니다. "
-    "회사명·숫자·공고명 같은 사실 관계는 절대 바꾸지 말고, 문장만 자연스럽고 정중하게 "
-    "다듬어 주세요. 존댓말로, 과장 없이, 실무자가 바로 보낼 수 있는 톤으로 다시 써 주세요.\n\n"
-)
-
-
-def polish_with_ai(draft: str, api_key: str, client=None) -> tuple[str, str]:
-    """(다듬은 글, 오류) 튜플. 실패해도 규칙 기반 초안은 그대로 쓸 수 있다."""
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-
-    if client is None:
-        if not api_key:
-            return "", "Gemini API 키가 없습니다."
-        try:
-            client = GeminiClient(api_key)
-        except GeminiError as exc:
-            return "", str(exc)
-
-    try:
-        text = client.generate(_POLISH_INSTRUCTION + draft)
-    except GeminiError as exc:
-        return "", str(exc)
-    return text, ""

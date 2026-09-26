@@ -216,8 +216,7 @@ class App:
         ttk.Label(profile, text="연락처").grid(row=1, column=4, sticky=W, padx=(20, 8))
         ttk.Entry(profile, textvariable=self.profile_phone, width=24).grid(
             row=1, column=5, sticky=W)
-        ttk.Label(profile, text="비워 둔 항목은 제안서에서 빠집니다. Gemini API 키(② 탭)를 넣어 두면 "
-                  "문장을 AI로 한 번 더 다듬습니다.",
+        ttk.Label(profile, text="비워 둔 항목은 제안서에서 빠집니다.",
                   foreground="#666").grid(row=2, column=0, columnspan=6, sticky=W, pady=(6, 0))
 
         buttons = ttk.Frame(root)
@@ -1076,32 +1075,15 @@ class App:
         folder = filedialog.askdirectory(title="제안서를 저장할 폴더를 고르세요")
         if not folder:
             return
-        self.proposal_button.configure(state="disabled")
-        self.say(f"제안서 {len(candidates)}곳 분 만드는 중...")
-        threading.Thread(target=self._make_proposals, args=(candidates, folder), daemon=True).start()
-
-    def _make_proposals(self, candidates, folder: str) -> None:
-        from prime_contractor.proposal import build_proposal, polish_with_ai
+        from prime_contractor.proposal import build_proposal
         profile = self._current_profile()
-        key = self.gemini_key.get().strip()
         made = []
         for cand in candidates:
-            draft = build_proposal(cand, profile)
-            text = draft
-            if key:
-                polished, error = polish_with_ai(draft, key)
-                if polished:
-                    text = polished
-                else:
-                    self.messages.put(f"{cand.name}: AI 다듬기 실패({error}) — 원본 초안으로 저장합니다.")
+            text = build_proposal(cand, profile)
             safe_name = re.sub(r'[\\/*?:"<>|]', "_", cand.name).strip() or "회사"
             path = Path(folder) / f"제안서_{safe_name}.txt"
             path.write_text(text, encoding="utf-8")
             made.append(path.name)
-        self.root.after(0, self._finish_proposals, made, folder)
-
-    def _finish_proposals(self, made: list[str], folder: str) -> None:
-        self.proposal_button.configure(state="normal")
         self.say(f"제안서 {len(made)}개를 만들었습니다: {folder}")
         messagebox.showinfo("만들었습니다",
                             f"{len(made)}개 파일을 저장했습니다 — 보내기 전에 한 번 읽어보세요.\n\n{folder}")

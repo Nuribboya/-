@@ -2177,24 +2177,3 @@ def test_proposal_without_awards_or_profile_still_works():
     text = build_proposal(cand, CompanyProfile())
     assert "정보없는회사 담당자님께" in text
     assert "저희 회사" in text          # 회사명을 안 적으면 이 말로 대신한다
-
-
-def test_proposal_ai_polish_returns_the_model_text():
-    from prime_contractor.proposal import polish_with_ai
-    fake = _FakeGeminiClient(text="다듬어진 문장입니다.")
-    text, error = polish_with_ai("원본 초안", api_key="ignored", client=fake)
-    assert text == "다듬어진 문장입니다." and error == ""
-    assert "원본 초안" in fake.prompts[0]
-
-
-def test_proposal_ai_polish_failure_is_surfaced_not_raised():
-    from prime_contractor.proposal import polish_with_ai
-    fake = _FakeGeminiClient(error="오늘 무료 사용량을 다 썼습니다.")
-    text, error = polish_with_ai("원본 초안", api_key="ignored", client=fake)
-    assert text == "" and "사용량" in error
-
-
-def test_proposal_ai_polish_without_a_key_fails_without_calling_out():
-    from prime_contractor.proposal import polish_with_ai
-    text, error = polish_with_ai("원본 초안", api_key="")
-    assert text == "" and error
