@@ -291,6 +291,19 @@ class App:
                   foreground="#666").pack(side=LEFT, padx=(0, 16))
         _Button(diag_row, text="진단하기", command=self.on_diagnose,
                 bootstyle="primary").pack(side=LEFT)
+
+        ai_row = ttk.Frame(diag)
+        ai_row.pack(fill=X, pady=(6, 0))
+        ttk.Label(ai_row, text="Gemini API 키 (선택)").pack(side=LEFT)
+        self.gemini_key = StringVar(value=saved.get("gemini_key", ""))
+        ttk.Entry(ai_row, textvariable=self.gemini_key, width=30, show="*").pack(
+            side=LEFT, padx=(4, 8))
+        self.ai_button = _Button(ai_row, text="AI에게 한 번 더 물어보기",
+                                 command=self.on_ai_insight, bootstyle="info-outline")
+        self.ai_button.pack(side=LEFT)
+        ttk.Label(ai_row, text="무료 키 발급: aistudio.google.com/apikey",
+                  foreground="#666").pack(side=LEFT, padx=(8, 0))
+
         self.diag_text = scrolledtext.ScrolledText(diag, height=6, wrap="word", state="disabled")
         self.diag_text.pack(fill=X, pady=(8, 0))
 
@@ -434,16 +447,18 @@ class App:
             "'재료·외주비' 비율은 그만큼 낮춰서 고쳐 주세요.\n\n"
             "[손익분기로 목표 잡기]를 누르면 반영됩니다.")
 
+    def _current_diagnosis(self):
+        from prime_contractor.diagnosis import analyze
+        employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
+        return analyze(self.book, employees, self.cost_model)
+
     def on_diagnose(self) -> None:
         if not self.book:
             messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
             return
-        from prime_contractor.diagnosis import analyze
-        employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
-        diag = analyze(self.book, employees, self.cost_model)
-        self._render_diagnosis(diag)
+        self._render_diagnosis(self._current_diagnosis())
 
-    def _render_diagnosis(self, diag) -> None:
+    def _render_diagnosis(self, diag, extra: str = "") -> None:
         lines: list[str] = []
         if diag.note:
             lines.append(diag.note)
@@ -457,10 +472,44 @@ class App:
             lines.append("[뭐부터 챙길지]")
             for i, p in enumerate(diag.priorities, 1):
                 lines.append(f"{i}. {p.text} — {p.reason}")
+        if extra:
+            lines.append("")
+            lines.append(extra)
         self.diag_text.configure(state="normal")
         self.diag_text.delete("1.0", END)
         self.diag_text.insert(END, "\n".join(lines) if lines else "장부에서 끝난 달을 찾지 못했습니다.")
         self.diag_text.configure(state="disabled")
+
+    def on_ai_insight(self) -> None:
+        if not self.book:
+            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
+            return
+        key = self.gemini_key.get().strip()
+        if not key:
+            messagebox.showwarning(
+                "API 키가 필요합니다",
+                "Gemini API 키가 있어야 합니다.\n\n"
+                "aistudio.google.com/apikey 에서 무료로 발급받아 위 칸에 붙여넣고 "
+                "다시 눌러 주세요.")
+            return
+        diag = self._current_diagnosis()
+        self.ai_button.configure(state="disabled")
+        self.say("AI에게 물어보는 중... (인터넷 연결이 필요합니다)")
+        threading.Thread(target=self._run_ai_insight, args=(diag, key), daemon=True).start()
+
+    def _run_ai_insight(self, diag, key: str) -> None:
+        from prime_contractor.ai_insight import ask
+        text, error = ask(self.book, diag, key, self.cost_model)
+        self.root.after(0, self._show_ai_insight, diag, text, error)
+
+    def _show_ai_insight(self, diag, text: str, error: str) -> None:
+        self.ai_button.configure(state="normal")
+        if error:
+            self._render_diagnosis(diag, extra=f"[AI 응답 실패] {error}")
+        elif text:
+            self._render_diagnosis(diag, extra=f"[AI가 한 번 더 본 의견]\n{text}")
+        else:
+            self._render_diagnosis(diag)
 
     def on_apply_target(self) -> None:
         if not self.book:
@@ -601,6 +650,7 @@ class App:
             "variable_ratio": self.variable_ratio.get(),
             "target_profit": self.target_profit.get(),
             "employees": self.employees.get(),
+            "gemini_key": self.gemini_key.get(),
             "months_back": self.months_back.get(),
             "goal_target": self.goal_target.get(),
             "goal_current": self.goal_current.get(),

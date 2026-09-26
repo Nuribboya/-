@@ -1533,7 +1533,7 @@ def test_readme_still_documents_every_feature():
     text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
-                 "우선순위 진단", "직원당 매출"):
+                 "우선순위 진단", "직원당 매출", "Gemini"):
         assert must in text, must
 
 
@@ -1825,3 +1825,125 @@ def test_diagnosis_priorities_are_sorted_by_severity():
     severities = [p.severity for p in diag.priorities]
     assert severities == sorted(severities, key=lambda s: {"high": 0, "medium": 1, "low": 2}[s])
     assert severities[0] == "high"
+
+
+# --- Gemini 클라이언트 -----------------------------------------------------------
+
+class FakePostResponse:
+    def __init__(self, status_code: int, payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class FakePostSession:
+    def __init__(self, response: FakePostResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[str, dict, dict]] = []
+
+    def post(self, url, params=None, json=None, headers=None, timeout=None):
+        self.calls.append((url, params or {}, json or {}))
+        return self.response
+
+
+def _gemini_ok(text: str) -> FakePostResponse:
+    return FakePostResponse(200, {"candidates": [{"content": {"parts": [{"text": text}]}}]})
+
+
+def test_gemini_requires_a_key():
+    from prime_contractor.sources.gemini import GeminiClient, GeminiError
+    with pytest.raises(GeminiError):
+        GeminiClient("")
+
+
+def test_gemini_extracts_text_from_the_response():
+    from prime_contractor.sources.gemini import GeminiClient
+    session = FakePostSession(_gemini_ok("이렇게 해보세요."))
+    client = GeminiClient("dummy-key", session=session)
+    assert client.generate("질문") == "이렇게 해보세요."
+    url, params, body = session.calls[0]
+    assert params == {"key": "dummy-key"}
+    assert body["contents"][0]["parts"][0]["text"] == "질문"
+
+
+def test_gemini_quota_exceeded_is_a_friendly_error():
+    from prime_contractor.sources.gemini import GeminiClient, GeminiError
+    client = GeminiClient("k", session=FakePostSession(FakePostResponse(429)))
+    with pytest.raises(GeminiError, match="사용량"):
+        client.generate("질문")
+
+
+def test_gemini_bad_key_is_a_friendly_error():
+    from prime_contractor.sources.gemini import GeminiClient, GeminiError
+    client = GeminiClient("k", session=FakePostSession(FakePostResponse(403)))
+    with pytest.raises(GeminiError, match="키"):
+        client.generate("질문")
+
+
+def test_gemini_network_failure_is_a_friendly_error():
+    from prime_contractor.sources.gemini import GeminiClient, GeminiError
+
+    class Boom:
+        def post(self, *a, **kw):
+            raise __import__("requests").RequestException("연결 안 됨")
+
+    client = GeminiClient("k", session=Boom())
+    with pytest.raises(GeminiError, match="인터넷"):
+        client.generate("질문")
+
+
+def test_gemini_empty_response_is_an_error():
+    from prime_contractor.sources.gemini import GeminiClient, GeminiError
+    session = FakePostSession(_gemini_ok(""))
+    client = GeminiClient("k", session=session)
+    with pytest.raises(GeminiError):
+        client.generate("질문")
+
+
+# --- AI 한 번 더 물어보기 ---------------------------------------------------------
+
+class _FakeGeminiClient:
+    def __init__(self, text: str = "", error: str = "") -> None:
+        self.text = text
+        self.error = error
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        if self.error:
+            from prime_contractor.sources.gemini import GeminiError
+            raise GeminiError(self.error)
+        return self.text
+
+
+def test_ai_insight_without_a_key_fails_without_calling_out():
+    from prime_contractor.ai_insight import ask
+    from prime_contractor.diagnosis import Diagnosis
+    text, error = ask(_book([("2026-07", 100_000_000)]), Diagnosis(), api_key="")
+    assert text == "" and error
+
+
+def test_ai_insight_returns_the_model_text():
+    from prime_contractor.ai_insight import ask
+    from prime_contractor.diagnosis import analyze
+    book = _book([("2026-07", 80_000_000), ("2026-08", 90_000_000)])
+    diag = analyze(book, employees=6)
+    fake = _FakeGeminiClient(text="특이한 점은 없어 보입니다.")
+    text, error = ask(book, diag, api_key="ignored", client=fake)
+    assert text == "특이한 점은 없어 보입니다." and error == ""
+    assert "2026-08" in fake.prompts[0]           # 실제 장부 숫자가 프롬프트에 들어갔는지
+
+
+def test_ai_insight_surfaces_the_error_without_raising():
+    from prime_contractor.ai_insight import ask
+    from prime_contractor.diagnosis import Diagnosis
+    fake = _FakeGeminiClient(error="오늘 무료 사용량을 다 썼습니다.")
+    text, error = ask(_book([("2026-07", 100_000_000)]), Diagnosis(), api_key="ignored", client=fake)
+    assert text == "" and "사용량" in error
