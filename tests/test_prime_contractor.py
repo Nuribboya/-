@@ -1533,7 +1533,8 @@ def test_readme_still_documents_every_feature():
     text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
-                 "우선순위 진단", "직원당 매출", "Gemini", "지출 파일"):
+                 "우선순위 진단", "직원당 매출", "Gemini", "지출 파일",
+                 "제안서 만들기"):
         assert must in text, must
 
 
@@ -2139,3 +2140,61 @@ def test_falls_back_to_breakeven_guess_when_no_expense_data_for_that_month():
     diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
     assert not diag.latest_month_profit_is_actual
     assert diag.latest_month_profit == cost.profit_at(100_000_000)
+
+
+# --- 후보별 맞춤 제안서 -----------------------------------------------------------
+
+def test_proposal_mentions_the_target_company_and_our_profile():
+    from prime_contractor.proposal import CompanyProfile, build_proposal
+    cand = _cand("대성전기", region="천안",
+                 awards=[Award(title="정수장 배전반 교체공사", demand_org="천안시",
+                               amount=300_000_000, category="공사")])
+    profile = CompanyProfile(name="안성판넬", founded_year="2005", certifications="ISO9001",
+                             track_record="한전 배전반 100면 납품", contact_name="김철수",
+                             contact_phone="010-0000-0000")
+    text = build_proposal(cand, profile)
+    assert "대성전기 담당자님께" in text
+    assert "안성판넬" in text
+    assert "정수장 배전반 교체공사" in text and "천안시" in text
+    assert "ISO9001" in text and "한전 배전반 100면 납품" in text
+    assert "010-0000-0000" in text
+
+
+def test_proposal_picks_the_largest_award_as_the_hook():
+    from prime_contractor.proposal import CompanyProfile, build_proposal
+    cand = _cand("여러공사전기", awards=[
+        Award(title="소규모 전기공사", demand_org="A시", amount=10_000_000, category="공사"),
+        Award(title="대형 배전반 공사", demand_org="B시", amount=900_000_000, category="공사"),
+    ])
+    text = build_proposal(cand, CompanyProfile())
+    assert "대형 배전반 공사" in text
+    assert "소규모 전기공사" not in text
+
+
+def test_proposal_without_awards_or_profile_still_works():
+    from prime_contractor.proposal import CompanyProfile, build_proposal
+    cand = _cand("정보없는회사")
+    text = build_proposal(cand, CompanyProfile())
+    assert "정보없는회사 담당자님께" in text
+    assert "저희 회사" in text          # 회사명을 안 적으면 이 말로 대신한다
+
+
+def test_proposal_ai_polish_returns_the_model_text():
+    from prime_contractor.proposal import polish_with_ai
+    fake = _FakeGeminiClient(text="다듬어진 문장입니다.")
+    text, error = polish_with_ai("원본 초안", api_key="ignored", client=fake)
+    assert text == "다듬어진 문장입니다." and error == ""
+    assert "원본 초안" in fake.prompts[0]
+
+
+def test_proposal_ai_polish_failure_is_surfaced_not_raised():
+    from prime_contractor.proposal import polish_with_ai
+    fake = _FakeGeminiClient(error="오늘 무료 사용량을 다 썼습니다.")
+    text, error = polish_with_ai("원본 초안", api_key="ignored", client=fake)
+    assert text == "" and "사용량" in error
+
+
+def test_proposal_ai_polish_without_a_key_fails_without_calling_out():
+    from prime_contractor.proposal import polish_with_ai
+    text, error = polish_with_ai("원본 초안", api_key="")
+    assert text == "" and error

@@ -188,6 +188,38 @@ class App:
         ttk.Checkbutton(box, text="저장해 둔 결과 무시하고 전부 새로 받기 (느림)",
                         variable=self.fresh).grid(row=6, column=1, columnspan=3, sticky=W)
 
+        profile = ttk.LabelFrame(root, text="제안서에 넣을 우리 회사 정보 (선택)", padding=10)
+        profile.pack(fill=X, padx=10, pady=5)
+        self.profile_name = StringVar(value=saved.get("profile_name", ""))
+        self.profile_founded = StringVar(value=saved.get("profile_founded", ""))
+        self.profile_certs = StringVar(value=saved.get("profile_certs", ""))
+        self.profile_track = StringVar(value=saved.get("profile_track", ""))
+        self.profile_contact = StringVar(value=saved.get("profile_contact", ""))
+        self.profile_phone = StringVar(value=saved.get("profile_phone", ""))
+
+        ttk.Label(profile, text="회사명").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(profile, textvariable=self.profile_name, width=22).grid(
+            row=0, column=1, sticky=W, pady=4)
+        ttk.Label(profile, text="설립연도").grid(row=0, column=2, sticky=W, padx=(20, 8))
+        ttk.Entry(profile, textvariable=self.profile_founded, width=10).grid(
+            row=0, column=3, sticky=W)
+        ttk.Label(profile, text="보유 인증").grid(row=0, column=4, sticky=W, padx=(20, 8))
+        ttk.Entry(profile, textvariable=self.profile_certs, width=24).grid(
+            row=0, column=5, sticky=W)
+
+        ttk.Label(profile, text="대표 실적").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(profile, textvariable=self.profile_track, width=22).grid(
+            row=1, column=1, sticky=W, pady=4)
+        ttk.Label(profile, text="담당자").grid(row=1, column=2, sticky=W, padx=(20, 8))
+        ttk.Entry(profile, textvariable=self.profile_contact, width=10).grid(
+            row=1, column=3, sticky=W)
+        ttk.Label(profile, text="연락처").grid(row=1, column=4, sticky=W, padx=(20, 8))
+        ttk.Entry(profile, textvariable=self.profile_phone, width=24).grid(
+            row=1, column=5, sticky=W)
+        ttk.Label(profile, text="비워 둔 항목은 제안서에서 빠집니다. Gemini API 키(② 탭)를 넣어 두면 "
+                  "문장을 AI로 한 번 더 다듬습니다.",
+                  foreground="#666").grid(row=2, column=0, columnspan=6, sticky=W, pady=(6, 0))
+
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
         self.run_button = _Button(buttons, text="  후보 찾기  ", command=self.on_run,
@@ -201,6 +233,10 @@ class App:
         _Button(buttons, text="고른 회사를 영업 목록에 넣기",
                 command=self.on_add_to_leads,
                 bootstyle="info-outline").pack(side=LEFT, padx=6)
+        self.proposal_button = _Button(buttons, text="제안서 만들기",
+                                       command=self.on_make_proposal,
+                                       bootstyle="info-outline")
+        self.proposal_button.pack(side=LEFT, padx=6)
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -692,6 +728,12 @@ class App:
             "overlap": self.overlap.get(),
             "sector": self.sector.get(),
             "include_demand_orgs": self.include_orgs.get(),
+            "profile_name": self.profile_name.get(),
+            "profile_founded": self.profile_founded.get(),
+            "profile_certs": self.profile_certs.get(),
+            "profile_track": self.profile_track.get(),
+            "profile_contact": self.profile_contact.get(),
+            "profile_phone": self.profile_phone.get(),
             "sales_path": self.sales_path.get(),
             "expense_path": self.expense_path.get(),
             "monthly_target": self.monthly_target.get(),
@@ -1001,6 +1043,68 @@ class App:
             added += created
         self._save_leads()
         self.say(f"영업 목록에 {added}곳 넣었습니다. ★ 최우선 목표 탭에서 진행을 기록하세요.")
+
+    def _current_profile(self):
+        from prime_contractor.proposal import CompanyProfile
+        return CompanyProfile(
+            name=self.profile_name.get().strip(),
+            founded_year=self.profile_founded.get().strip(),
+            certifications=self.profile_certs.get().strip(),
+            track_record=self.profile_track.get().strip(),
+            contact_name=self.profile_contact.get().strip(),
+            contact_phone=self.profile_phone.get().strip(),
+        )
+
+    def on_make_proposal(self) -> None:
+        if not self.result:
+            messagebox.showinfo("먼저 찾아 주세요", "[후보 찾기]로 회사를 찾은 뒤 표에서 골라 주세요.")
+            return
+        picked = self.tree.selection() or ((self.tree.focus(),) if self.tree.focus() else ())
+        if not picked:
+            messagebox.showinfo("회사를 고르세요",
+                                "표에서 회사를 클릭해 고르세요.\n"
+                                "Ctrl 을 누른 채 클릭하면 여러 곳을 한 번에 고를 수 있습니다.")
+            return
+        candidates = []
+        for item in picked:
+            try:
+                candidates.append(self.result.passed[int(self.tree.item(item, "values")[0]) - 1])
+            except (ValueError, IndexError):
+                continue
+        if not candidates:
+            return
+        folder = filedialog.askdirectory(title="제안서를 저장할 폴더를 고르세요")
+        if not folder:
+            return
+        self.proposal_button.configure(state="disabled")
+        self.say(f"제안서 {len(candidates)}곳 분 만드는 중...")
+        threading.Thread(target=self._make_proposals, args=(candidates, folder), daemon=True).start()
+
+    def _make_proposals(self, candidates, folder: str) -> None:
+        from prime_contractor.proposal import build_proposal, polish_with_ai
+        profile = self._current_profile()
+        key = self.gemini_key.get().strip()
+        made = []
+        for cand in candidates:
+            draft = build_proposal(cand, profile)
+            text = draft
+            if key:
+                polished, error = polish_with_ai(draft, key)
+                if polished:
+                    text = polished
+                else:
+                    self.messages.put(f"{cand.name}: AI 다듬기 실패({error}) — 원본 초안으로 저장합니다.")
+            safe_name = re.sub(r'[\\/*?:"<>|]', "_", cand.name).strip() or "회사"
+            path = Path(folder) / f"제안서_{safe_name}.txt"
+            path.write_text(text, encoding="utf-8")
+            made.append(path.name)
+        self.root.after(0, self._finish_proposals, made, folder)
+
+    def _finish_proposals(self, made: list[str], folder: str) -> None:
+        self.proposal_button.configure(state="normal")
+        self.say(f"제안서 {len(made)}개를 만들었습니다: {folder}")
+        messagebox.showinfo("만들었습니다",
+                            f"{len(made)}개 파일을 저장했습니다 — 보내기 전에 한 번 읽어보세요.\n\n{folder}")
 
     def on_lead_move(self) -> None:
         lead = self._selected_lead()
