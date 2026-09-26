@@ -17,6 +17,15 @@ from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, W, X, Y, StringVar, BooleanVar, Tk, filedialog, messagebox
 from tkinter import ttk, scrolledtext
 
+try:
+    # 순정 tkinter/ttk 는 위젯이 딱딱해 보여서, 있으면 부트스트랩 계열 테마를 입힌다.
+    # 위젯 코드는 그대로 ttk.* 를 쓰고, Style 하나만 깔아서 전체 룩을 바꾼다.
+    import ttkbootstrap as tb
+    _HAS_BOOTSTRAP = True
+except ImportError:                     # 소스에서 바로 실행할 때 설치 안 돼 있어도 앱은 뜬다
+    tb = None
+    _HAS_BOOTSTRAP = False
+
 from prime_contractor.app_settings import (
     DISTANCE_CHOICES, MODE_INDUSTRY, MODE_PUBLIC, MODE_SAMPLE, MODES,
     OVERLAP_CHOICES, SECTOR_ALL, build_config, load_settings, save_settings, sector_names,
@@ -36,6 +45,11 @@ SALES_COLUMNS = (("연월", 85), ("실제 매출", 110), ("목표", 110),
                  ("달성률", 65), ("모자란 돈", 105), ("예상 손익", 110))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
+
+
+def _accent(**kw) -> dict:
+    """ttkbootstrap 이 있을 때만 bootstyle 을 넘긴다. 없으면 빈 dict — 순정 ttk 로 그냥 뜬다."""
+    return kw if _HAS_BOOTSTRAP else {}
 
 
 def _label_for(choices: dict, value) -> str:
@@ -168,14 +182,17 @@ class App:
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
-        self.run_button = ttk.Button(buttons, text="  후보 찾기  ", command=self.on_run)
+        self.run_button = ttk.Button(buttons, text="  후보 찾기  ", command=self.on_run,
+                                     **_accent(bootstyle="primary"))
         self.run_button.pack(side=LEFT)
         self.save_button = ttk.Button(buttons, text="엑셀로 저장",
-                                      command=self.on_save, state="disabled")
+                                      command=self.on_save, state="disabled",
+                                      **_accent(bootstyle="success-outline"))
         self.save_button.pack(side=LEFT, padx=6)
         ttk.Button(buttons, text="입력 내용 저장", command=self.on_remember).pack(side=LEFT)
         ttk.Button(buttons, text="고른 회사를 영업 목록에 넣기",
-                   command=self.on_add_to_leads).pack(side=LEFT, padx=6)
+                   command=self.on_add_to_leads,
+                   **_accent(bootstyle="info-outline")).pack(side=LEFT, padx=6)
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -249,7 +266,8 @@ class App:
         buttons = ttk.Frame(cost)
         buttons.grid(row=1, column=3, columnspan=3, sticky=W, pady=(6, 0))
         ttk.Button(buttons, text="손익분기로 목표 잡기",
-                   command=self.on_apply_breakeven).pack(side=LEFT)
+                   command=self.on_apply_breakeven,
+                   **_accent(bootstyle="primary")).pack(side=LEFT)
         ttk.Button(buttons, text="재무제표로 채우기",
                    command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
         self.cost_model = None
@@ -272,7 +290,8 @@ class App:
         ttk.Combobox(act, textvariable=self.months_back, values=["1", "2", "3", "6"],
                      state="readonly", width=4).pack(side=LEFT)
         self.gap_button = ttk.Button(act, text="  이만큼 채울 회사 찾기  ",
-                                     command=self.on_find_for_gap, state="disabled")
+                                     command=self.on_find_for_gap, state="disabled",
+                                     **_accent(bootstyle="primary"))
         self.gap_button.pack(side=RIGHT)
 
         bottom = ttk.LabelFrame(root, text="어디에 연락하면 되나", padding=6)
@@ -692,7 +711,8 @@ class App:
             ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, pady=2)
             ttk.Entry(box, textvariable=var, width=14).grid(row=row, column=1, sticky=W, pady=2)
             ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=2, sticky=W, padx=6)
-        ttk.Button(box, text="  계산하기  ", command=self.on_goal).grid(
+        ttk.Button(box, text="  계산하기  ", command=self.on_goal,
+                   **_accent(bootstyle="primary")).grid(
             row=0, column=3, rowspan=2, padx=(20, 0))
         ttk.Label(box, text="월매출은 ② 탭에서 불러온 장부로,\n위험은 ② 탭의 고정비로 계산합니다.",
                   foreground="#666").grid(row=2, column=3, rowspan=3, padx=(20, 0), sticky=W)
@@ -727,7 +747,8 @@ class App:
         ttk.Button(act, text="단계로 옮기기", command=self.on_lead_move).pack(side=LEFT)
         ttk.Button(act, text="다음 할 일·결제조건 적기",
                    command=self.on_lead_edit).pack(side=LEFT, padx=6)
-        ttk.Button(act, text="빼기", command=self.on_lead_remove).pack(side=LEFT)
+        ttk.Button(act, text="빼기", command=self.on_lead_remove,
+                   **_accent(bootstyle="danger-outline")).pack(side=LEFT)
         ttk.Label(act, text="빨간 줄 = 할 일 날짜가 지남 · 초록 줄 = 첫 수주",
                   foreground="#666").pack(side=RIGHT)
         self._render_leads()
@@ -953,8 +974,20 @@ def _open_folder(folder: Path) -> None:
         pass
 
 
+#: 밝고 차분한 파랑 계열 — 사무용 도구에 무난한 부트스트랩 테마.
+#: 다른 느낌을 원하면 "cosmo"(더 쨍한 파랑), "minty"(초록), "darkly"(어두운 테마) 로 바꿔볼 수 있다.
+THEME = "flatly"
+
+
+def _make_root() -> Tk:
+    if _HAS_BOOTSTRAP:
+        window = tb.Window(themename=THEME)
+        return window
+    return Tk()          # ttkbootstrap 이 없는 환경(소스 직접 실행 등)에서도 앱은 떠야 한다
+
+
 def main() -> int:
-    root = Tk()
+    root = _make_root()
     App(root)
     root.mainloop()
     return 0

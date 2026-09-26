@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 echo 필요한 것 설치 중...
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet requests pyinstaller
+python -m pip install --quiet requests pyinstaller ttkbootstrap
 if errorlevel 1 (
     echo [오류] 설치 실패. 인터넷 연결을 확인하세요.
     pause
