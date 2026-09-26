@@ -1533,7 +1533,7 @@ def test_readme_still_documents_every_feature():
     text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
-                 "우선순위 진단", "직원당 매출", "Gemini"):
+                 "우선순위 진단", "직원당 매출", "Gemini", "지출 파일"):
         assert must in text, must
 
 
@@ -1947,3 +1947,78 @@ def test_ai_insight_surfaces_the_error_without_raising():
     fake = _FakeGeminiClient(error="오늘 무료 사용량을 다 썼습니다.")
     text, error = ask(_book([("2026-07", 100_000_000)]), Diagnosis(), api_key="ignored", client=fake)
     assert text == "" and "사용량" in error
+
+
+# --- 지출 장부 읽기 --------------------------------------------------------------
+
+def test_reads_a_monthly_expense_ledger(tmp_path):
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"지출": {
+        "C2": "2026년 지출", "C3": "지출금액",
+        "B4": "1월", "C4": 13241045,
+        "B5": "2월", "C5": 15481813,
+    }})
+    book = load_expenses(path)
+    assert book.amount("2026-01") == 13241045
+    assert book.amount("2026-02") == 15481813
+    assert book.amount("2026-03") == 0          # 없는 달은 0
+
+
+def test_expense_ledger_drops_the_total_row(tmp_path):
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"지출": {
+        "C2": "2026년 지출", "C3": "지출금액",
+        "B4": "1월", "C4": 100.0,
+        "B5": "2월", "C5": 200.0,
+        "B6": "3월", "C6": 300.0,
+    }})
+    book = load_expenses(path)
+    assert [m.ym for m in book.months] == ["2026-01", "2026-02"]
+
+
+def test_expense_ledger_rejects_non_excel():
+    from prime_contractor.expenses import load_expenses
+    with pytest.raises(ValueError, match="엑셀"):
+        load_expenses("장부.csv")
+
+
+def test_expense_ledger_without_month_rows_says_so(tmp_path):
+    from prime_contractor.expenses import load_expenses
+    path = _make_xlsx(tmp_path, {"연차표": {"B2": "홍길동", "C2": 15}})
+    with pytest.raises(ValueError, match="월별 지출"):
+        load_expenses(path)
+
+
+# --- 실제 지출이 손익분기 어림값보다 우선 ------------------------------------------
+
+def test_actual_expense_overrides_breakeven_guess_for_the_loss_check():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+
+    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
+    # 어림값으로는 흑자(손익분기 60,000,000)로 보이지만, 실제 지출을 넣으면 적자다.
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)
+    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=120_000_000)])
+
+    diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
+    assert diag.latest_month_profit == -20_000_000
+    assert diag.latest_month_profit_is_actual
+    assert any("비용부터" in p.text for p in diag.priorities)
+    assert any("실제 지출" in p.reason for p in diag.priorities)
+
+
+def test_falls_back_to_breakeven_guess_when_no_expense_data_for_that_month():
+    from datetime import date
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+
+    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)
+    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=999)])   # 딴 달 자료뿐
+
+    diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
+    assert not diag.latest_month_profit_is_actual
+    assert diag.latest_month_profit == cost.profit_at(100_000_000)

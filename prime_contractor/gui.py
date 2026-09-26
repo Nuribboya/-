@@ -42,7 +42,7 @@ from prime_contractor.build_info import label, should_check_updates
 COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
            ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
 SALES_COLUMNS = (("연월", 85), ("실제 매출", 110), ("목표", 110),
-                 ("달성률", 65), ("모자란 돈", 105), ("예상 손익", 110))
+                 ("달성률", 65), ("모자란 돈", 105), ("실제 지출", 100), ("손익", 110))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
 
@@ -250,6 +250,18 @@ class App:
                   foreground="#666").pack(side=LEFT, padx=6)
         ttk.Button(target_row, text="적용", command=self.on_apply_target).pack(side=LEFT)
 
+        expense = ttk.LabelFrame(root, text="지출 파일 불러오기 (선택) — 있으면 어림값 대신 실제 지출로 계산",
+                                 padding=10)
+        expense.pack(fill=X, padx=10, pady=5)
+        self.expense_path = StringVar(value=saved.get("expense_path", ""))
+        ttk.Entry(expense, textvariable=self.expense_path, width=62).grid(row=0, column=0, sticky=W)
+        ttk.Button(expense, text="파일 찾기", command=self.on_pick_expenses).grid(row=0, column=1, padx=6)
+        ttk.Button(expense, text="불러오기", command=self.on_load_expenses).grid(row=0, column=2)
+        ttk.Label(expense, text="매출 파일과 같은 형식입니다 — '1월' 옆 칸에 그 달 지출(전기요금·부가세·"
+                  "인건비 등을 합친 금액)이 있는 엑셀이면 됩니다. 안 넣어도 손익분기 어림값으로 그대로 동작합니다.",
+                  foreground="#666").grid(row=1, column=0, columnspan=3, sticky=W, pady=(6, 0))
+        self.expense_book = None
+
         cost = ttk.LabelFrame(root, text="손익분기로 목표 잡기 — 이 밑으로 가면 적자인 선",
                               padding=10)
         cost.pack(fill=X, padx=10, pady=5)
@@ -368,6 +380,35 @@ class App:
             self.sales_path.set(path)
             self.on_load_sales()
 
+    # --- 지출 -----------------------------------------------------------------
+
+    def on_pick_expenses(self) -> None:
+        path = filedialog.askopenfilename(
+            filetypes=[("엑셀", "*.xlsx *.xlsm"), ("모든 파일", "*.*")])
+        if path:
+            self.expense_path.set(path)
+            self.on_load_expenses()
+
+    def on_load_expenses(self) -> None:
+        path = self.expense_path.get().strip()
+        if not path:
+            messagebox.showwarning("파일 필요", "지출 파일을 먼저 고르세요.")
+            return
+        from prime_contractor.expenses import load_expenses
+        try:
+            self.expense_book = load_expenses(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("파일을 읽지 못했습니다", str(exc))
+            return
+        if not self.expense_book.months:
+            messagebox.showwarning("비어 있음", "지출 기록이 비어 있습니다.")
+            return
+        self.say(f"지출 파일에서 {len(self.expense_book.months)}개월치를 읽었습니다. "
+                 "그 달은 어림값 대신 실제 지출로 손익을 계산합니다.")
+        if self.book:
+            self._render_sales()
+            self.on_diagnose()
+
     # --- 손익분기 -------------------------------------------------------------
 
     def _read_cost_model(self, quiet: bool = False):
@@ -450,7 +491,7 @@ class App:
     def _current_diagnosis(self):
         from prime_contractor.diagnosis import analyze
         employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
-        return analyze(self.book, employees, self.cost_model)
+        return analyze(self.book, employees, self.cost_model, self.expense_book)
 
     def on_diagnose(self) -> None:
         if not self.book:
@@ -562,10 +603,17 @@ class App:
     def _render_sales(self) -> None:
         book = self.book
         model = self.cost_model
+        expenses = self.expense_book
         self.sales_tree.delete(*self.sales_tree.get_children())
         for m in book.sorted_months():
             rate = f"{m.rate * 100:.0f}%" if m.rate is not None else "-"
-            profit = model.profit_at(m.revenue) if model else None
+            actual_expense = expenses.amount(m.ym) if expenses else 0
+            if actual_expense:
+                profit = m.revenue - actual_expense
+                expense_text = f"{actual_expense / 1e4:,.0f}만원"
+            else:
+                profit = model.profit_at(m.revenue) if model else None
+                expense_text = "-"
             if profit is None:
                 profit_text = "-"
             else:
@@ -574,7 +622,7 @@ class App:
             self.sales_tree.insert("", END, values=(
                 m.ym, f"{m.revenue / 1e4:,.0f}만원",
                 f"{m.target / 1e4:,.0f}만원" if m.target else "-",
-                rate, f"{m.gap / 1e4:,.0f}만원" if m.gap else "-", profit_text),
+                rate, f"{m.gap / 1e4:,.0f}만원" if m.gap else "-", expense_text, profit_text),
                 tags=(tag,) if tag else ())
         self.sales_tree.tag_configure("miss", background="#fff4e5")    # 목표 미달
         self.sales_tree.tag_configure("loss", background="#fdecea")    # 실제 적자
@@ -645,6 +693,7 @@ class App:
             "sector": self.sector.get(),
             "include_demand_orgs": self.include_orgs.get(),
             "sales_path": self.sales_path.get(),
+            "expense_path": self.expense_path.get(),
             "monthly_target": self.monthly_target.get(),
             "fixed_cost": self.fixed_cost.get(),
             "variable_ratio": self.variable_ratio.get(),

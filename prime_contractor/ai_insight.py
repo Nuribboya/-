@@ -39,7 +39,8 @@ def build_prompt(book: SalesBook, diag: Diagnosis, cost: CostModel | None = None
                      f"재료·외주비 비율 {cost.variable_ratio * 100:.0f}%, "
                      f"손익분기 매출 {cost.breakeven / 1e4:,.0f}만원")
     if diag.latest_month_profit is not None:
-        lines.append(f"{diag.latest_month} 추정 손익: {diag.latest_month_profit / 1e4:+,.0f}만원")
+        basis = "실제 지출 기준" if diag.latest_month_profit_is_actual else "손익분기 어림값"
+        lines.append(f"{diag.latest_month} 손익({basis}): {diag.latest_month_profit / 1e4:+,.0f}만원")
     if diag.revenue_per_employee is not None:
         lines.append(f"직원당 매출(최근 평균): {diag.revenue_per_employee / 1e4:,.0f}만원/인")
 
