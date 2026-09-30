@@ -43,9 +43,15 @@ jobs:
           python-version: '3.12'
 
       - name: 의존성 설치
+        # PyInstaller 는 소스에서 부트로더를 새로 컴파일해 설치한다. pip 로 받는 기본
+        # 부트로더는 악성코드도 똑같이 쓰는 파일이라 윈도우 디펜더가 우리 exe까지
+        # '바이러스'로 오탐해 지웠다. 직접 컴파일하면 그 흔한 지문과 달라져 오탐이 준다.
+        env:
+          PYINSTALLER_COMPILE_BOOTLOADER: "1"
         run: |
-          python -m pip install --upgrade pip
-          pip install requests pyinstaller pytest ttkbootstrap
+          python -m pip install --upgrade pip wheel
+          pip install --no-binary pyinstaller pyinstaller
+          pip install requests pytest ttkbootstrap
 
       - name: 테스트
         run: python -m pytest tests/test_prime_contractor.py -q

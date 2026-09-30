@@ -8,8 +8,34 @@
 """
 
 from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct,
+    VSVersionInfo,
+)
+
+import prime_contractor
 
 block_cipher = None
+
+# 윈도우 디펜더는 '파일 정보(이름·버전)가 하나도 없는 exe'를 더 의심한다. 서명까지는
+# 못 하더라도 속성 창에 뜨는 파일 정보는 채워 둔다. 오탐을 완전히 막진 못하고 줄여 줄 뿐.
+_ver = tuple(int(x) for x in prime_contractor.__version__.split(".")) + (0,)
+_ver = (_ver + (0, 0, 0, 0))[:4]
+_ver_text = ".".join(str(x) for x in _ver)
+version_info = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=_ver, prodvers=_ver),
+    kids=[
+        StringFileInfo([StringTable("041204B0", [
+            StringStruct("FileDescription", "원청 찾기 — 일감 줄 회사 찾기"),
+            StringStruct("ProductName", "원청 찾기"),
+            StringStruct("InternalName", "PrimeFinder"),
+            StringStruct("OriginalFilename", "PrimeFinder.exe"),
+            StringStruct("FileVersion", _ver_text),
+            StringStruct("ProductVersion", _ver_text),
+        ])]),
+        VarFileInfo([VarStruct("Translation", [0x0412, 1200])]),
+    ],
+)
 
 # ttkbootstrap 은 테마 정의(JSON)를 패키지 안에 데이터 파일로 들고 있다. PyInstaller가
 # 파이썬 코드만 보고는 이 파일들을 안 챙기므로, 명시적으로 모아서 datas 에 넣는다.
@@ -52,4 +78,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=version_info,
 )
