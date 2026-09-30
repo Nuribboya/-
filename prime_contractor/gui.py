@@ -436,11 +436,6 @@ class App:
             parts.append("손익은 '월 고정비'와 '재료·외주비'를 둘 다 적어야 나옵니다")
         self.target_basis = basis if target else ""
         diag = self._current_diagnosis()
-        if diag.margin is not None:
-            from prime_contractor.diagnosis import SUSPICIOUS_MARGIN
-            if diag.margin > SUSPICIOUS_MARGIN:
-                parts.append(f"⚠ 손익이 매출의 {diag.margin * 100:.0f}%로 나옵니다 — "
-                             "숫자가 빠졌는지 '뭐부터 챙길지' 탭을 보세요")
         self.calc_summary.configure(text="  ·  ".join(parts))
 
         self._render_sales()

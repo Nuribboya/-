@@ -2140,27 +2140,19 @@ def _read_all_blocks(path):
     return totals
 
 
-def test_diagnosis_flags_implausibly_good_margin_first():
-    """고정비·재료비로 계산한 손익이 매출의 절반씩 남는다면 숫자가 빠진 것."""
+def test_no_margin_warning_for_consigned_materials():
+    """주재료를 원청이 대주면(무상사급) 우리 재료비는 부자재뿐이라 이익률이 높게 나온다.
+
+    한때 '손익이 매출의 30%를 넘으면 숫자부터 점검'이라는 경고를 띄웠는데, 이 회사
+    구조에선 매번 뜨는 오탐이라 뺐다. 이익률만 보고 진단 맨 위에 경고를 올리지 않는다.
+    """
     from datetime import date
     from prime_contractor.breakeven import CostModel
     from prime_contractor.diagnosis import analyze
     book = _book([("2026-07", 100_000_000), ("2026-08", 80_000_000)])
-    cost = CostModel(monthly_fixed=20_000_000, variable_ratio=0.13)
+    cost = CostModel(monthly_fixed=24_000_000, variable_ratio=0.128)
     diag = analyze(book, employees=6, cost=cost, today=date(2026, 9, 30))
-    assert round(diag.margin, 3) == round((180_000_000 * 0.87 - 40_000_000) / 180_000_000, 3)
-    assert diag.priorities[0].text.startswith("숫자부터 점검")
-
-
-def test_diagnosis_normal_margin_is_not_flagged():
-    from datetime import date
-    from prime_contractor.breakeven import CostModel
-    from prime_contractor.diagnosis import analyze
-    book = _book([("2026-08", 100_000_000)])
-    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.6)
-    diag = analyze(book, employees=6, cost=cost, today=date(2026, 9, 30))
-    assert round(diag.margin, 2) == 0.10
-    assert not any(p.text.startswith("숫자부터 점검") for p in diag.priorities)
+    assert not any("점검" in p.text for p in diag.priorities)
 
 
 def test_sales_tab_has_only_the_sales_ledger_file():

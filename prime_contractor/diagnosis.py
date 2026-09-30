@@ -27,10 +27,6 @@ HIGH_VARIABLE_RATIO = 0.70
 REVENUE_MOVE = 0.10
 #: 추세를 볼 때 최근 몇 달 평균끼리 비교할지.
 TREND_WINDOW = 3
-#: 계산된 손익이 매출의 이 비율을 넘으면 숫자가 빠졌다고 본다. 판넬 제작은 보통
-#: 한 자릿수~10%대다. 이보다 훨씬 좋게 나오면 회사가 잘 된다기보다 재료비 %를
-#: 너무 낮게 적었거나 고정비에 4대보험·임차료가 빠진 경우가 대부분이다.
-SUSPICIOUS_MARGIN = 0.30
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -49,7 +45,6 @@ class Diagnosis:
     revenue_per_employee_trend: str = ""
     latest_month: str = ""
     latest_month_profit: int | None = None
-    margin: float | None = None              # 끝난 달들의 손익 합 ÷ 매출 합 (손익분기 어림값)
     priorities: list[Priority] = field(default_factory=list)
     note: str = ""
 
@@ -73,8 +68,6 @@ def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
     diag.latest_month = latest.ym
     if cost is not None:
         diag.latest_month_profit = cost.profit_at(latest.revenue)
-        revenue = sum(m.revenue for m in closed)
-        diag.margin = sum(cost.profit_at(m.revenue) for m in closed) / revenue
 
     recent = closed[-window:]
     prior = closed[-2 * window:-window]
@@ -103,17 +96,6 @@ def _trend(recent_avg: float, prior_avg: float) -> str:
 
 def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
     items: list[Priority] = []
-
-    if diag.margin is not None and diag.margin > SUSPICIOUS_MARGIN:
-        items.append(Priority(
-            text="숫자부터 점검 — 손익이 너무 좋게 나옵니다",
-            reason=f"적어 주신 월 고정비·재료비 %로 계산하면 매출의 {diag.margin * 100:.0f}%가 "
-                   "남습니다. 판넬 제작은 보통 한 자릿수~10%대라, '재료·외주비' %를 너무 낮게 "
-                   "적었거나 '월 고정비'에 4대보험 회사분·임차료·차량·이자가 빠졌을 가능성이 "
-                   "큽니다. 매출 장부 금액에 부가세가 섞여 있어도 이렇게 나옵니다. 이대로면 "
-                   "목표(손익분기)도 실제보다 훨씬 낮게 잡히니, 아래 판단보다 이것부터 확인하세요.",
-            severity="high",
-        ))
 
     if diag.latest_month_profit is not None and diag.latest_month_profit < 0:
         items.append(Priority(
