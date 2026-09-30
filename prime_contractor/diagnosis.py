@@ -53,13 +53,15 @@ class Diagnosis:
 
 def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
            expenses: ExpenseBook | None = None, monthly_fixed: int | None = None,
-           window: int = TREND_WINDOW, today: date | None = None) -> Diagnosis:
+           window: int = TREND_WINDOW, today: date | None = None,
+           fixed_by_month=None) -> Diagnosis:
     """끝난 달의 매출·손익·직원당 매출로 진단을 만든다.
 
     진행 중인 달은 아직 다 안 찍힌 숫자라 뺀다(다른 매출 계산과 동일한 규칙).
     실제 지출 장부(expenses)가 있고 그 달 값이 있으면, 손익분기 어림값보다
     '매출 − 실제 지출 − 월 고정비'를 우선한다(expenses.month_profit).
-    monthly_fixed 를 안 주면 cost 의 고정비를 쓴다.
+    monthly_fixed 를 안 주면 cost 의 고정비를 쓴다. 고정비 장부(fixed_by_month)에
+    그 달 값이 있으면 그게 먼저다.
     """
     if monthly_fixed is None:
         monthly_fixed = cost.monthly_fixed if cost else 0
@@ -74,7 +76,7 @@ def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
     latest = closed[-1]
     diag.latest_month = latest.ym
     diag.latest_month_profit, diag.latest_month_profit_is_actual = month_profit(
-        latest.revenue, latest.ym, expenses, cost, monthly_fixed)
+        latest.revenue, latest.ym, expenses, cost, monthly_fixed, fixed_by_month)
 
     recent = closed[-window:]
     prior = closed[-2 * window:-window]

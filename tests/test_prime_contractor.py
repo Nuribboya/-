@@ -1534,7 +1534,8 @@ def test_readme_still_documents_every_feature():
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
                  "우선순위 진단", "직원당 매출", "Gemini", "지출 파일",
-                 "제안서 만들기", "자동으로 저장", "우리 회사 숫자"):
+                 "제안서 만들기", "자동으로 저장", "우리 회사 숫자",
+                 "고정비 장부"):
         assert must in text, must
 
 
@@ -2256,3 +2257,118 @@ def test_diagnosis_uses_fixed_cost_even_without_a_cost_model():
                    today=date(2026, 9, 1))
     assert diag.latest_month_profit == -5_000_000
     assert any("비용부터" in p.text for p in diag.priorities)
+
+
+# --- 고정비 장부 --------------------------------------------------------------
+
+def test_fixed_costs_monthly_rows_sum_every_item_column(tmp_path):
+    """'1월 | 인건비 | 임차료 | 보험료' — 한 달 고정비는 그 줄을 다 더한 값."""
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"2026 고정비": {
+        "A1": "2026년 고정비", "A2": "월", "B2": "인건비", "C2": "임차료", "D2": "보험료",
+        "A3": "1월", "B3": 18_000_000, "C3": 3_000_000, "D3": 900_000,
+        "A4": "2월", "B4": 18_500_000, "C4": 3_000_000, "D4": 900_000,
+        "A5": "3월", "B5": 24_000_000, "C5": 3_000_000, "D5": 900_000,   # 상여금 달
+    }}, name="고정비.xlsx")
+    fc = load_fixed_costs(path)
+    assert fc.amount("2026-01") == 21_900_000
+    assert fc.amount("2026-03") == 27_900_000
+    assert fc.typical() == (21_900_000 + 22_400_000 + 27_900_000) // 3
+
+
+def test_fixed_costs_total_column_is_not_counted_twice(tmp_path):
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"고정비": {
+        "A2": "월", "B2": "인건비", "C2": "임차료", "D2": "합계",
+        "A3": "1월", "B3": 18_000_000, "C3": 3_000_000, "D3": 21_000_000,
+        "A4": "2월", "B4": 18_000_000, "C4": 3_000_000, "D4": 21_000_000,
+    }}, name="고정비_2026.xlsx")
+    fc = load_fixed_costs(path)
+    assert fc.amount("2026-01") == 21_000_000
+
+
+def test_fixed_costs_months_across_items_down(tmp_path):
+    """달이 가로로 늘어서고 항목이 세로로 — 한 달 = 그 열을 다 더한 값('합계' 줄이 있으면 그것)."""
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"2026": {
+        "A1": "항목", "B1": "1월", "C1": "2월",
+        "A2": "인건비", "B2": 18_000_000, "C2": 18_000_000,
+        "A3": "임차료", "B3": 3_000_000, "C3": 3_000_000,
+        "A4": "월 평균", "B4": 999, "C4": 999,
+    }}, name="고정비.xlsx")
+    fc = load_fixed_costs(path)
+    assert fc.amount("2026-01") == 21_000_000
+    assert fc.amount("2026-02") == 21_000_000
+
+
+def test_fixed_costs_plain_item_list_is_one_monthly_number(tmp_path):
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"고정비": {
+        "A1": "항목", "B1": "금액",
+        "A2": "인건비 (6명)", "B2": 18_000_000,
+        "A3": "공장 임차료", "B3": 3_000_000,
+        "A4": "4대보험 회사분", "B4": 1_800_000,
+    }})
+    fc = load_fixed_costs(path)
+    assert fc.by_month is None
+    assert fc.typical() == 22_800_000
+    assert fc.amount("2026-01") == 0                 # 달별 값이 없으면 '월 고정비' 칸으로
+
+
+def test_fixed_costs_item_list_prefers_its_total_row(tmp_path):
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"고정비": {
+        "A2": "인건비", "B2": 18_000_000,
+        "A3": "임차료", "B3": 3_000_000,
+        "A4": "합계", "B4": 21_000_000,
+    }})
+    assert load_fixed_costs(path).typical() == 21_000_000
+
+
+def test_fixed_costs_side_by_side_tables_not_read_as_a_row_of_months(tmp_path):
+    """세로 표 두 개가 나란히 있으면 같은 행에 '1월'이 둘 — 가로 표로 착각하면 안 된다."""
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"2026": {
+        "A1": "인건비", "A2": "1월", "B2": 18_000_000, "A3": "2월", "B3": 18_000_000,
+        "D1": "임차료", "D2": "1월", "E2": 3_000_000, "D3": "2월", "E3": 3_000_000,
+    }}, name="고정비.xlsx")
+    fc = load_fixed_costs(path)
+    assert fc.amount("2026-01") == 21_000_000
+    assert fc.amount("2026-02") == 21_000_000
+
+
+def test_fixed_costs_without_numbers_says_what_shape_it_wants(tmp_path):
+    import pytest
+    from prime_contractor.fixed_costs import load_fixed_costs
+    path = _make_xlsx(tmp_path, {"빈 시트": {"A1": "메모"}})
+    with pytest.raises(ValueError, match="고정비를 찾지 못했습니다"):
+        load_fixed_costs(path)
+
+
+def test_month_profit_uses_that_months_fixed_cost_first():
+    """상여금 달처럼 고정비 장부의 그 달 값이 '월 고정비' 한 숫자보다 먼저다."""
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
+    from prime_contractor.fixed_costs import FixedCosts
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-03", amount=20_000_000)])
+    fixed = FixedCosts(by_month=ExpenseBook(months=[ExpenseRecord(ym="2026-03", amount=30_000_000)]))
+    profit, actual = month_profit(80_000_000, "2026-03", ledger, None,
+                                  monthly_fixed=22_000_000, fixed_by_month=fixed)
+    assert (profit, actual) == (80_000_000 - 20_000_000 - 30_000_000, True)
+    # 그 달 지출 장부가 없으면 어림값이지만, 고정비는 그 달 값으로
+    cost = CostModel(monthly_fixed=22_000_000, variable_ratio=0.6)
+    profit, actual = month_profit(80_000_000, "2026-03", None, cost, fixed_by_month=fixed)
+    assert (profit, actual) == (round(80_000_000 * 0.4) - 30_000_000, False)
+
+
+def test_diagnosis_uses_fixed_cost_ledger_for_the_latest_month():
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+    from prime_contractor.fixed_costs import FixedCosts
+    book = _book([("2026-08", 50_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=20_000_000)])
+    fixed = FixedCosts(by_month=ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=35_000_000)]))
+    diag = analyze(book, employees=0, expenses=ledger, monthly_fixed=22_000_000,
+                   today=date(2026, 9, 1), fixed_by_month=fixed)
+    assert diag.latest_month_profit == -5_000_000
