@@ -623,14 +623,22 @@ class App:
         gap = self.book.recent_gap(months_back) if months_back > 1 else record.gap
         self.gap_target_preview = gap
         if gap:
-            rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "-"
-            span = f"최근 {months_back}개월" if months_back > 1 else record.ym
             loss = ""
             profit = self._month_profit(record)
             if profit is not None and profit < 0:
                 loss = f"  · {record.ym} 은 적자입니다"
-            self.gap_label.configure(
-                text=f"{span}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate}){loss}")
+            if months_back > 1:
+                # 여러 달이면 '목표의 몇 %'는 마지막 달 값이라 헷갈린다(6개월을 골라도
+                # 8월 달성률이 나왔다). 몇 달이 모자랐는지로 말한다 — 모자란 달의
+                # 부족분만 더한 값이라 넘친 달이 있어도 합계가 줄지 않는다.
+                closed = [m for m in self.book.sorted_months() if m.ym <= record.ym]
+                short = sum(1 for m in closed[-months_back:] if m.gap)
+                text = (f"최근 {months_back}개월 중 {short}달 목표 미달 — "
+                        f"모자란 달만 더하면 {gap / 1e4:,.0f}만원")
+            else:
+                rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "-"
+                text = f"{record.ym}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate})"
+            self.gap_label.configure(text=text + loss)
             self.gap_button.configure(state="normal")
         else:
             span = f"최근 {months_back}개월" if months_back > 1 else record.ym
