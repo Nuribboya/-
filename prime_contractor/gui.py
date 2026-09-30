@@ -502,10 +502,17 @@ class App:
                              f"− 고정비 {self.monthly_fixed / 1e4:,.0f}만원")
             else:
                 parts.append("⚠ 월 고정비가 비어 인건비가 손익에서 빠져 있습니다")
+        self.target_basis = basis if target else ""
+        diag = self._current_diagnosis()
+        if diag.actual_margin is not None:
+            from prime_contractor.diagnosis import SUSPICIOUS_MARGIN
+            if diag.actual_margin > SUSPICIOUS_MARGIN:
+                parts.append(f"⚠ 손익이 매출의 {diag.actual_margin * 100:.0f}%로 나옵니다 — "
+                             "빠진 지출이 있는지 '뭐부터 챙길지' 탭을 보세요")
         self.calc_summary.configure(text="  ·  ".join(parts))
 
         self._render_sales()
-        self._render_diagnosis(self._current_diagnosis())
+        self._render_diagnosis(diag)
 
     def _auto_fill_ratio(self, book, expenses) -> str:
         """'재료·외주비' 칸이 비었거나 지난번 자동값 그대로면 지출 장부로 계산해 채운다."""
@@ -654,13 +661,29 @@ class App:
             self._render_diagnosis(diag)
 
     def _render_sales(self) -> None:
+        from datetime import date
         book = self.book
         expenses = self.expense_book
+        today = date.today()
+        current = f"{today.year:04d}-{today.month:02d}"
+        # 목표가 손익분기면 '목표'가 아니라 '적자 안 나는 선'이다. 391% 같은 달성률이
+        # 이상해 보이지 않게, 무엇을 기준으로 잡았는지 머리글에 적는다.
+        basis = getattr(self, "target_basis", "")
+        heading = "목표(손익분기)" if basis.startswith("손익분기") else "목표"
+        self.sales_tree.heading("목표", text=heading)
         self.sales_tree.delete(*self.sales_tree.get_children())
         for m in book.sorted_months():
             rate = f"{m.rate * 100:.0f}%" if m.rate is not None else "-"
             actual_expense = expenses.amount(m.ym) if expenses else 0
             expense_text = f"{actual_expense / 1e4:,.0f}만원" if actual_expense else "-"
+            if m.ym >= current:
+                # 아직 안 끝난 달: 매출·지출은 들어온 만큼만인데 고정비는 한 달치를 다 빼면
+                # 손익이 엉뚱하게 나온다. 달성률(지금까지 얼마나 왔나)만 보여 준다.
+                self.sales_tree.insert("", END, values=(
+                    m.ym, f"{m.revenue / 1e4:,.0f}만원",
+                    f"{m.target / 1e4:,.0f}만원" if m.target else "-",
+                    rate, "-", expense_text, "진행 중"))
+                continue
             profit = self._month_profit(m)
             if profit is None:
                 profit_text = "-"
@@ -700,7 +723,8 @@ class App:
                 text=f"{span}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate}){loss}")
             self.gap_button.configure(state="normal")
         else:
-            self.gap_label.configure(text=f"{record.ym} 목표 달성 — 부족분 없음")
+            span = f"최근 {months_back}개월" if months_back > 1 else record.ym
+            self.gap_label.configure(text=f"{span} 목표 달성 — 부족분 없음")
             self.gap_button.configure(state="disabled")
 
     def on_find_for_gap(self) -> None:

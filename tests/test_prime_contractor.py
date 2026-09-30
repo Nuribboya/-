@@ -2403,3 +2403,30 @@ def test_material_ratio_skips_the_month_still_in_progress():
 def test_material_ratio_without_ledger_is_none():
     from prime_contractor.expenses import material_ratio
     assert material_ratio(_book([("2026-01", 1)]), None) is None
+
+
+def test_diagnosis_flags_implausibly_good_margin_first():
+    """실제 지출 기준 손익이 매출의 절반씩 남는다면 장사가 잘 되는 게 아니라 숫자가 빠진 것."""
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+    book = _book([("2026-07", 100_000_000), ("2026-08", 80_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-07", amount=15_000_000),
+                                 ExpenseRecord(ym="2026-08", amount=5_000_000)])
+    diag = analyze(book, employees=6, expenses=ledger, monthly_fixed=20_000_000,
+                   today=date(2026, 9, 30))
+    assert diag.actual_margin_months == 2
+    assert round(diag.actual_margin, 3) == round((180 - 20 - 40) / 180, 3)
+    assert diag.priorities[0].text.startswith("숫자부터 점검")
+
+
+def test_diagnosis_normal_margin_is_not_flagged():
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+    book = _book([("2026-08", 100_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=60_000_000)])
+    diag = analyze(book, employees=6, expenses=ledger, monthly_fixed=30_000_000,
+                   today=date(2026, 9, 30))
+    assert round(diag.actual_margin, 2) == 0.10
+    assert not any(p.text.startswith("숫자부터 점검") for p in diag.priorities)

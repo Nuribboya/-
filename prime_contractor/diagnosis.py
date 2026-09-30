@@ -28,6 +28,10 @@ HIGH_VARIABLE_RATIO = 0.70
 REVENUE_MOVE = 0.10
 #: 추세를 볼 때 최근 몇 달 평균끼리 비교할지.
 TREND_WINDOW = 3
+#: 실제 지출 기준 손익이 매출의 이 비율을 넘으면 숫자가 빠졌다고 본다. 판넬 제작은
+#: 보통 한 자릿수~10%대다. 이보다 훨씬 좋게 나오면 회사가 잘 된다기보다 지출
+#: 장부에 자재 거래처가 빠졌거나 고정비에 4대보험·임차료가 빠진 경우가 대부분이다.
+SUSPICIOUS_MARGIN = 0.30
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -47,6 +51,8 @@ class Diagnosis:
     latest_month: str = ""
     latest_month_profit: int | None = None
     latest_month_profit_is_actual: bool = False   # True면 어림값이 아니라 실제 지출 기준
+    actual_margin: float | None = None       # 실제 지출이 있는 끝난 달들의 손익 ÷ 매출
+    actual_margin_months: int = 0
     priorities: list[Priority] = field(default_factory=list)
     note: str = ""
 
@@ -78,6 +84,13 @@ def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
     diag.latest_month_profit, diag.latest_month_profit_is_actual = month_profit(
         latest.revenue, latest.ym, expenses, cost, monthly_fixed, fixed_by_month)
 
+    profits = [(m.revenue, month_profit(m.revenue, m.ym, expenses, cost, monthly_fixed,
+                                        fixed_by_month)) for m in closed]
+    actual = [(rev, profit) for rev, (profit, is_actual) in profits if is_actual]
+    if actual:
+        diag.actual_margin = sum(p for _, p in actual) / sum(r for r, _ in actual)
+        diag.actual_margin_months = len(actual)
+
     recent = closed[-window:]
     prior = closed[-2 * window:-window]
     recent_avg = sum(m.revenue for m in recent) / len(recent)
@@ -105,6 +118,18 @@ def _trend(recent_avg: float, prior_avg: float) -> str:
 
 def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
     items: list[Priority] = []
+
+    if diag.actual_margin is not None and diag.actual_margin > SUSPICIOUS_MARGIN:
+        items.append(Priority(
+            text="숫자부터 점검 — 손익이 너무 좋게 나옵니다",
+            reason=f"지출 장부가 있는 {diag.actual_margin_months}개월 동안 매출의 "
+                   f"{diag.actual_margin * 100:.0f}%가 남은 걸로 계산됩니다. 판넬 제작은 보통 "
+                   "한 자릿수~10%대라, 지출 장부에 빠진 자재 거래처가 있거나 월 고정비에 "
+                   "4대보험 회사분·임차료·차량·이자가 빠졌을 가능성이 큽니다. 매출 장부 금액에 "
+                   "부가세가 섞여 있어도 이렇게 나옵니다. 이대로면 목표(손익분기)도 실제보다 "
+                   "훨씬 낮게 잡히니, 아래 판단보다 이것부터 확인하세요.",
+            severity="high",
+        ))
 
     if diag.latest_month_profit is not None and diag.latest_month_profit < 0:
         basis = "실제 지출·고정비" if diag.latest_month_profit_is_actual else "손익분기 어림값"
