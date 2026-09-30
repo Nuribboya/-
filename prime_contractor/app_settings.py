@@ -112,7 +112,9 @@ def apply_target(book, cost, typed: int) -> str:
         book.apply_target(cost.target, overwrite=True)
         basis = f"손익분기 {cost.breakeven / 1e4:,.0f}만원"
         if cost.monthly_profit:
-            basis += f" + 목표이익 {cost.monthly_profit / 1e4:,.0f}만원"
+            # 목표 = 손익분기 + 목표이익 이 아니다. 500만원을 더 남기려면 재료비가 같이
+            # 늘어서 매출은 500 ÷ (1 − 재료비 %) 만큼 더 필요하다. 합이 안 맞아 보이지 않게.
+            basis += f"에 목표이익 {cost.monthly_profit / 1e4:,.0f}만원까지 남기는 매출"
         return basis
     if typed > 0:
         book.apply_target(typed, overwrite=True)

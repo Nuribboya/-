@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from prime_contractor.breakeven import CostModel
-from prime_contractor.expenses import ExpenseBook, month_profit
 from prime_contractor.sales import SalesBook
 
 #: 재료·외주비가 매출의 이 비율을 넘으면 원가 쪽을 먼저 보라고 권한다.
@@ -28,9 +27,9 @@ HIGH_VARIABLE_RATIO = 0.70
 REVENUE_MOVE = 0.10
 #: 추세를 볼 때 최근 몇 달 평균끼리 비교할지.
 TREND_WINDOW = 3
-#: 실제 지출 기준 손익이 매출의 이 비율을 넘으면 숫자가 빠졌다고 본다. 판넬 제작은
-#: 보통 한 자릿수~10%대다. 이보다 훨씬 좋게 나오면 회사가 잘 된다기보다 지출
-#: 장부에 자재 거래처가 빠졌거나 고정비에 4대보험·임차료가 빠진 경우가 대부분이다.
+#: 계산된 손익이 매출의 이 비율을 넘으면 숫자가 빠졌다고 본다. 판넬 제작은 보통
+#: 한 자릿수~10%대다. 이보다 훨씬 좋게 나오면 회사가 잘 된다기보다 재료비 %를
+#: 너무 낮게 적었거나 고정비에 4대보험·임차료가 빠진 경우가 대부분이다.
 SUSPICIOUS_MARGIN = 0.30
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -50,27 +49,18 @@ class Diagnosis:
     revenue_per_employee_trend: str = ""
     latest_month: str = ""
     latest_month_profit: int | None = None
-    latest_month_profit_is_actual: bool = False   # True면 어림값이 아니라 실제 지출 기준
-    actual_margin: float | None = None       # 실제 지출이 있는 끝난 달들의 손익 ÷ 매출
-    actual_margin_months: int = 0
+    margin: float | None = None              # 끝난 달들의 손익 합 ÷ 매출 합 (손익분기 어림값)
     priorities: list[Priority] = field(default_factory=list)
     note: str = ""
 
 
 def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
-           expenses: ExpenseBook | None = None, monthly_fixed: int | None = None,
-           window: int = TREND_WINDOW, today: date | None = None,
-           fixed_by_month=None) -> Diagnosis:
+           window: int = TREND_WINDOW, today: date | None = None) -> Diagnosis:
     """끝난 달의 매출·손익·직원당 매출로 진단을 만든다.
 
     진행 중인 달은 아직 다 안 찍힌 숫자라 뺀다(다른 매출 계산과 동일한 규칙).
-    실제 지출 장부(expenses)가 있고 그 달 값이 있으면, 손익분기 어림값보다
-    '매출 − 실제 지출 − 월 고정비'를 우선한다(expenses.month_profit).
-    monthly_fixed 를 안 주면 cost 의 고정비를 쓴다. 고정비 장부(fixed_by_month)에
-    그 달 값이 있으면 그게 먼저다.
+    손익은 '월 고정비·재료비 %'로 잡은 손익분기 어림값(cost)으로 계산한다.
     """
-    if monthly_fixed is None:
-        monthly_fixed = cost.monthly_fixed if cost else 0
     diag = Diagnosis()
     today = today or date.today()
     current = f"{today.year:04d}-{today.month:02d}"
@@ -81,15 +71,10 @@ def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
 
     latest = closed[-1]
     diag.latest_month = latest.ym
-    diag.latest_month_profit, diag.latest_month_profit_is_actual = month_profit(
-        latest.revenue, latest.ym, expenses, cost, monthly_fixed, fixed_by_month)
-
-    profits = [(m.revenue, month_profit(m.revenue, m.ym, expenses, cost, monthly_fixed,
-                                        fixed_by_month)) for m in closed]
-    actual = [(rev, profit) for rev, (profit, is_actual) in profits if is_actual]
-    if actual:
-        diag.actual_margin = sum(p for _, p in actual) / sum(r for r, _ in actual)
-        diag.actual_margin_months = len(actual)
+    if cost is not None:
+        diag.latest_month_profit = cost.profit_at(latest.revenue)
+        revenue = sum(m.revenue for m in closed)
+        diag.margin = sum(cost.profit_at(m.revenue) for m in closed) / revenue
 
     recent = closed[-window:]
     prior = closed[-2 * window:-window]
@@ -119,23 +104,21 @@ def _trend(recent_avg: float, prior_avg: float) -> str:
 def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
     items: list[Priority] = []
 
-    if diag.actual_margin is not None and diag.actual_margin > SUSPICIOUS_MARGIN:
+    if diag.margin is not None and diag.margin > SUSPICIOUS_MARGIN:
         items.append(Priority(
             text="숫자부터 점검 — 손익이 너무 좋게 나옵니다",
-            reason=f"지출 장부가 있는 {diag.actual_margin_months}개월 동안 매출의 "
-                   f"{diag.actual_margin * 100:.0f}%가 남은 걸로 계산됩니다. 판넬 제작은 보통 "
-                   "한 자릿수~10%대라, 지출 장부에 빠진 자재 거래처가 있거나 월 고정비에 "
-                   "4대보험 회사분·임차료·차량·이자가 빠졌을 가능성이 큽니다. 매출 장부 금액에 "
-                   "부가세가 섞여 있어도 이렇게 나옵니다. 이대로면 목표(손익분기)도 실제보다 "
-                   "훨씬 낮게 잡히니, 아래 판단보다 이것부터 확인하세요.",
+            reason=f"적어 주신 월 고정비·재료비 %로 계산하면 매출의 {diag.margin * 100:.0f}%가 "
+                   "남습니다. 판넬 제작은 보통 한 자릿수~10%대라, '재료·외주비' %를 너무 낮게 "
+                   "적었거나 '월 고정비'에 4대보험 회사분·임차료·차량·이자가 빠졌을 가능성이 "
+                   "큽니다. 매출 장부 금액에 부가세가 섞여 있어도 이렇게 나옵니다. 이대로면 "
+                   "목표(손익분기)도 실제보다 훨씬 낮게 잡히니, 아래 판단보다 이것부터 확인하세요.",
             severity="high",
         ))
 
     if diag.latest_month_profit is not None and diag.latest_month_profit < 0:
-        basis = "실제 지출·고정비" if diag.latest_month_profit_is_actual else "손익분기 어림값"
         items.append(Priority(
             text="비용부터 줄이기",
-            reason=f"{diag.latest_month} 은 {basis} 기준으로 약 "
+            reason=f"{diag.latest_month} 은 손익분기 어림값 기준으로 약 "
                    f"{abs(diag.latest_month_profit) / 1e4:,.0f}만원 적자입니다. "
                    "매출을 늘리는 것보다 고정비·변동비를 줄이는 쪽이 더 급합니다.",
             severity="high",

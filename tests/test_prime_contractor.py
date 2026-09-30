@@ -1533,9 +1533,8 @@ def test_readme_still_documents_every_feature():
     text = (Path(__file__).parent.parent / "prime_contractor" / "README.md").read_text(encoding="utf-8")
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
-                 "우선순위 진단", "직원당 매출", "Gemini", "지출 파일",
-                 "제안서 만들기", "자동으로 저장", "우리 회사 숫자",
-                 "고정비 장부"):
+                 "우선순위 진단", "직원당 매출", "Gemini",
+                 "제안서 만들기", "자동으로 저장", "우리 회사 숫자"):
         assert must in text, must
 
 
@@ -1951,66 +1950,7 @@ def test_ai_insight_surfaces_the_error_without_raising():
     assert text == "" and "사용량" in error
 
 
-# --- 지출 장부 읽기 --------------------------------------------------------------
-
-def test_reads_a_monthly_expense_ledger(tmp_path):
-    from prime_contractor.expenses import load_expenses
-    path = _make_xlsx(tmp_path, {"지출": {
-        "C2": "2026년 지출", "C3": "지출금액",
-        "B4": "1월", "C4": 13241045,
-        "B5": "2월", "C5": 15481813,
-    }})
-    book = load_expenses(path)
-    assert book.amount("2026-01") == 13241045
-    assert book.amount("2026-02") == 15481813
-    assert book.amount("2026-03") == 0          # 없는 달은 0
-
-
-def test_expense_ledger_drops_the_total_row(tmp_path):
-    from prime_contractor.expenses import load_expenses
-    path = _make_xlsx(tmp_path, {"지출": {
-        "C2": "2026년 지출", "C3": "지출금액",
-        "B4": "1월", "C4": 100.0,
-        "B5": "2월", "C5": 200.0,
-        "B6": "3월", "C6": 300.0,
-    }})
-    book = load_expenses(path)
-    assert [m.ym for m in book.months] == ["2026-01", "2026-02"]
-
-
-def test_expense_ledger_rejects_non_excel():
-    from prime_contractor.expenses import load_expenses
-    with pytest.raises(ValueError, match="엑셀"):
-        load_expenses("장부.csv")
-
-
-def test_expense_ledger_without_month_rows_says_so(tmp_path):
-    from prime_contractor.expenses import load_expenses
-    path = _make_xlsx(tmp_path, {"연차표": {"B2": "홍길동", "C2": 15}})
-    with pytest.raises(ValueError, match="월별 지출"):
-        load_expenses(path)
-
-
-def test_expense_ledger_sums_multiple_category_blocks(tmp_path):
-    """식대비·전기요금처럼 서로 다른 지출 항목이 나란히 있으면 둘 다 더해야 한다.
-
-    예전엔 매출 장부처럼 '더 그럴듯한 블록 하나'만 골라, 나머지 항목을
-    통째로 빠뜨렸다(실제로 겪은 버그).
-    """
-    from prime_contractor.expenses import load_expenses
-    path = _make_xlsx(tmp_path, {"결제내역": {
-        "A2": "2026년",
-        "A3": "월별", "B3": "식대비",
-        "A4": "1월", "B4": 238000,
-        "A5": "2월", "B5": 476000,
-        "D3": "월별", "E3": "전기요금",
-        "D4": "1월", "E4": 13003045,
-        "D5": "2월", "E5": 15005813,
-    }})
-    book = load_expenses(path)
-    assert book.amount("2026-01") == 238000 + 13003045
-    assert book.amount("2026-02") == 476000 + 15005813
-
+# --- 표 블록 읽기 (블록마다 연도·같은 열에 쌓인 표·날짜 라벨) ---------------------
 
 def test_year_is_not_borrowed_from_an_unrelated_block(tmp_path, monkeypatch):
     """식대비 블록엔 연도가 없고, 한참 아래 부가세 블록에만 '2025년'이 적혀 있다.
@@ -2030,7 +1970,6 @@ def test_year_is_not_borrowed_from_an_unrelated_block(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sales_module, "date", _FixedToday)
 
-    from prime_contractor.expenses import load_expenses
     path = _make_xlsx(tmp_path, {"결제내역": {
         "A2": "공단식당 식대비",
         "A3": "월별", "B3": "결제금액",
@@ -2039,7 +1978,7 @@ def test_year_is_not_borrowed_from_an_unrelated_block(tmp_path, monkeypatch):
         "A21": "1기분", "B21": "부가가치세",
         "A22": "7월25일", "B22": 7998390,
     }})
-    book = load_expenses(path)
+    book = _read_all_blocks(path)
     assert book.amount("2026-01") == 238000     # 오늘 연도(2026) — 남의 블록 연도를 빌리지 않는다
     assert book.amount("2025-07") == 7998390    # 부가세 블록은 자기 근처 연도를 그대로 쓴다
 
@@ -2063,7 +2002,6 @@ def test_stacked_tables_in_the_same_column_stay_separate(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sales_module, "date", _FixedToday)
 
-    from prime_contractor.expenses import load_expenses
 
     cells = {"A2": "공단식당 식대비", "A3": "월별", "B3": "결제금액"}
     food = [238000, 476000, 514000, 679000, 336000, 546000, 574000, 573000, 245000]
@@ -2084,7 +2022,7 @@ def test_stacked_tables_in_the_same_column_stay_separate(tmp_path, monkeypatch):
     cells["B26"] = sum(a for _, a in vat)
 
     path = _make_xlsx(tmp_path, {"결제내역": cells})
-    book = load_expenses(path)
+    book = _read_all_blocks(path)
 
     assert book.amount("2025-07") == 7998390     # 부가세(작년 몫) — 안 잃어버림
     assert book.amount("2025-08") == 8000000
@@ -2096,51 +2034,15 @@ def test_stacked_tables_in_the_same_column_stay_separate(tmp_path, monkeypatch):
 
 def test_month_day_labels_are_recognized(tmp_path):
     """'7월25일'처럼 날짜까지 적힌 라벨도 그 달로 잡는다 (부가가치세 납부일정 등)."""
-    from prime_contractor.expenses import load_expenses
     path = _make_xlsx(tmp_path, {"지출": {
         "A2": "2026년 부가가치세",
         "A3": "1기분", "B3": "부가가치세",
         "A4": "7월25일", "B4": 7998390,
         "A5": "8월25일", "B5": 8000000,
     }})
-    book = load_expenses(path)
+    book = _read_all_blocks(path)
     assert book.amount("2026-07") == 7998390
     assert book.amount("2026-08") == 8000000
-
-
-# --- 실제 지출이 손익분기 어림값보다 우선 ------------------------------------------
-
-def test_actual_expense_overrides_breakeven_guess_for_the_loss_check():
-    from datetime import date
-    from prime_contractor.breakeven import CostModel
-    from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
-
-    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
-    # 어림값으로는 흑자(손익분기 60,000,000)로 보이지만, 실제 지출을 넣으면 적자다.
-    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)
-    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=80_000_000)])
-
-    diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
-    assert diag.latest_month_profit == 100_000_000 - 80_000_000 - 30_000_000   # 고정비도 뺀다
-    assert diag.latest_month_profit_is_actual
-    assert any("비용부터" in p.text for p in diag.priorities)
-    assert any("실제 지출" in p.reason for p in diag.priorities)
-
-
-def test_falls_back_to_breakeven_guess_when_no_expense_data_for_that_month():
-    from datetime import date
-    from prime_contractor.breakeven import CostModel
-    from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
-
-    book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
-    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)
-    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=999)])   # 딴 달 자료뿐
-
-    diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
-    assert not diag.latest_month_profit_is_actual
-    assert diag.latest_month_profit == cost.profit_at(100_000_000)
 
 
 # --- 후보별 맞춤 제안서 -----------------------------------------------------------
@@ -2217,216 +2119,54 @@ def test_average_is_the_last_resort():
     assert "평균" in basis
 
 
-# --- 그 달 손익: 지출 장부 + 월 고정비 --------------------------------------------------
+def _read_all_blocks(path):
+    """시트의 '1월 | 금액' 블록을 전부 찾아 달별로 더한다 — 블록 나누기·연도 찾기 확인용.
 
-def test_ledger_month_profit_subtracts_fixed_costs_too():
-    """지출 장부엔 자재·식대만 있고 인건비는 없다. 고정비를 안 빼면 흑자가 부풀어 보인다.
-
-    실제로 식대비+자재 장부만 넣었더니 월매출 8,816만원 회사가 +7,492만원 흑자로 나왔다.
+    매출 장부는 이 중 블록 하나를 고르지만, 블록을 제대로 나누고 블록마다 연도를
+    제대로 잡는지는 전부 읽어 봐야 확인된다.
     """
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=13_241_045)])
-    profit, actual = month_profit(88_158_000, "2026-01", ledger, None, monthly_fixed=25_000_000)
-    assert profit == 88_158_000 - 13_241_045 - 25_000_000
-    assert actual
+    from prime_contractor.sales import _block_to_months, _guess_year, _month_blocks
+    from prime_contractor.xlsx import col_index, read_sheets
 
+    class _Totals(dict):
+        def amount(self, ym):
+            return self.get(ym, 0)
 
-def test_month_without_ledger_falls_back_to_breakeven_guess():
-    from prime_contractor.breakeven import CostModel
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
-    cost = CostModel(monthly_fixed=25_000_000, variable_ratio=0.6)
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=1)])
-    profit, actual = month_profit(80_000_000, "2026-02", ledger, cost, monthly_fixed=25_000_000)
-    assert profit == cost.profit_at(80_000_000)
-    assert not actual
-
-
-def test_month_profit_unknown_without_ledger_or_costs():
-    from prime_contractor.expenses import month_profit
-    assert month_profit(80_000_000, "2026-02", None, None) == (None, False)
-
-
-def test_diagnosis_uses_fixed_cost_even_without_a_cost_model():
-    """재료비 %를 안 적어 손익분기는 없어도, 적어 둔 고정비는 지출 장부와 함께 빠져야 한다."""
-    from datetime import date
-    from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
-    book = _book([("2026-08", 50_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=30_000_000)])
-    diag = analyze(book, employees=0, cost=None, expenses=ledger, monthly_fixed=25_000_000,
-                   today=date(2026, 9, 1))
-    assert diag.latest_month_profit == -5_000_000
-    assert any("비용부터" in p.text for p in diag.priorities)
-
-
-# --- 고정비 장부 --------------------------------------------------------------
-
-def test_fixed_costs_monthly_rows_sum_every_item_column(tmp_path):
-    """'1월 | 인건비 | 임차료 | 보험료' — 한 달 고정비는 그 줄을 다 더한 값."""
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"2026 고정비": {
-        "A1": "2026년 고정비", "A2": "월", "B2": "인건비", "C2": "임차료", "D2": "보험료",
-        "A3": "1월", "B3": 18_000_000, "C3": 3_000_000, "D3": 900_000,
-        "A4": "2월", "B4": 18_500_000, "C4": 3_000_000, "D4": 900_000,
-        "A5": "3월", "B5": 24_000_000, "C5": 3_000_000, "D5": 900_000,   # 상여금 달
-    }}, name="고정비.xlsx")
-    fc = load_fixed_costs(path)
-    assert fc.amount("2026-01") == 21_900_000
-    assert fc.amount("2026-03") == 27_900_000
-    assert fc.typical() == (21_900_000 + 22_400_000 + 27_900_000) // 3
-
-
-def test_fixed_costs_total_column_is_not_counted_twice(tmp_path):
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"고정비": {
-        "A2": "월", "B2": "인건비", "C2": "임차료", "D2": "합계",
-        "A3": "1월", "B3": 18_000_000, "C3": 3_000_000, "D3": 21_000_000,
-        "A4": "2월", "B4": 18_000_000, "C4": 3_000_000, "D4": 21_000_000,
-    }}, name="고정비_2026.xlsx")
-    fc = load_fixed_costs(path)
-    assert fc.amount("2026-01") == 21_000_000
-
-
-def test_fixed_costs_months_across_items_down(tmp_path):
-    """달이 가로로 늘어서고 항목이 세로로 — 한 달 = 그 열을 다 더한 값('합계' 줄이 있으면 그것)."""
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"2026": {
-        "A1": "항목", "B1": "1월", "C1": "2월",
-        "A2": "인건비", "B2": 18_000_000, "C2": 18_000_000,
-        "A3": "임차료", "B3": 3_000_000, "C3": 3_000_000,
-        "A4": "월 평균", "B4": 999, "C4": 999,
-    }}, name="고정비.xlsx")
-    fc = load_fixed_costs(path)
-    assert fc.amount("2026-01") == 21_000_000
-    assert fc.amount("2026-02") == 21_000_000
-
-
-def test_fixed_costs_plain_item_list_is_one_monthly_number(tmp_path):
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"고정비": {
-        "A1": "항목", "B1": "금액",
-        "A2": "인건비 (6명)", "B2": 18_000_000,
-        "A3": "공장 임차료", "B3": 3_000_000,
-        "A4": "4대보험 회사분", "B4": 1_800_000,
-    }})
-    fc = load_fixed_costs(path)
-    assert fc.by_month is None
-    assert fc.typical() == 22_800_000
-    assert fc.amount("2026-01") == 0                 # 달별 값이 없으면 '월 고정비' 칸으로
-
-
-def test_fixed_costs_item_list_prefers_its_total_row(tmp_path):
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"고정비": {
-        "A2": "인건비", "B2": 18_000_000,
-        "A3": "임차료", "B3": 3_000_000,
-        "A4": "합계", "B4": 21_000_000,
-    }})
-    assert load_fixed_costs(path).typical() == 21_000_000
-
-
-def test_fixed_costs_side_by_side_tables_not_read_as_a_row_of_months(tmp_path):
-    """세로 표 두 개가 나란히 있으면 같은 행에 '1월'이 둘 — 가로 표로 착각하면 안 된다."""
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"2026": {
-        "A1": "인건비", "A2": "1월", "B2": 18_000_000, "A3": "2월", "B3": 18_000_000,
-        "D1": "임차료", "D2": "1월", "E2": 3_000_000, "D3": "2월", "E3": 3_000_000,
-    }}, name="고정비.xlsx")
-    fc = load_fixed_costs(path)
-    assert fc.amount("2026-01") == 21_000_000
-    assert fc.amount("2026-02") == 21_000_000
-
-
-def test_fixed_costs_without_numbers_says_what_shape_it_wants(tmp_path):
-    import pytest
-    from prime_contractor.fixed_costs import load_fixed_costs
-    path = _make_xlsx(tmp_path, {"빈 시트": {"A1": "메모"}})
-    with pytest.raises(ValueError, match="고정비를 찾지 못했습니다"):
-        load_fixed_costs(path)
-
-
-def test_month_profit_uses_that_months_fixed_cost_first():
-    """상여금 달처럼 고정비 장부의 그 달 값이 '월 고정비' 한 숫자보다 먼저다."""
-    from prime_contractor.breakeven import CostModel
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
-    from prime_contractor.fixed_costs import FixedCosts
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-03", amount=20_000_000)])
-    fixed = FixedCosts(by_month=ExpenseBook(months=[ExpenseRecord(ym="2026-03", amount=30_000_000)]))
-    profit, actual = month_profit(80_000_000, "2026-03", ledger, None,
-                                  monthly_fixed=22_000_000, fixed_by_month=fixed)
-    assert (profit, actual) == (80_000_000 - 20_000_000 - 30_000_000, True)
-    # 그 달 지출 장부가 없으면 어림값이지만, 고정비는 그 달 값으로
-    cost = CostModel(monthly_fixed=22_000_000, variable_ratio=0.6)
-    profit, actual = month_profit(80_000_000, "2026-03", None, cost, fixed_by_month=fixed)
-    assert (profit, actual) == (round(80_000_000 * 0.4) - 30_000_000, False)
-
-
-def test_diagnosis_uses_fixed_cost_ledger_for_the_latest_month():
-    from datetime import date
-    from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
-    from prime_contractor.fixed_costs import FixedCosts
-    book = _book([("2026-08", 50_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=20_000_000)])
-    fixed = FixedCosts(by_month=ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=35_000_000)]))
-    diag = analyze(book, employees=0, expenses=ledger, monthly_fixed=22_000_000,
-                   today=date(2026, 9, 1), fixed_by_month=fixed)
-    assert diag.latest_month_profit == -5_000_000
-
-
-# --- 재료·외주비 자동 계산 ------------------------------------------------------
-
-def test_material_ratio_is_period_total_over_period_revenue():
-    """한 달씩 나누면 들쭉날쭉하니, 지출 장부가 덮는 기간을 통째로 더해 나눈다."""
-    from datetime import date
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, material_ratio
-    book = _book([("2026-01", 100_000_000), ("2026-02", 100_000_000),
-                  ("2026-03", 100_000_000), ("2026-04", 100_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=30_000_000),
-                                 ExpenseRecord(ym="2026-03", amount=10_000_000)])
-    ratio, months = material_ratio(book, ledger, today=date(2026, 9, 1))
-    # 1~3월(장부가 덮는 기간), 2월은 결제 없음 = 0원으로 센다. 4월은 기간 밖.
-    assert months == 3
-    assert ratio == 40_000_000 / 300_000_000
-
-
-def test_material_ratio_skips_the_month_still_in_progress():
-    from datetime import date
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, material_ratio
-    book = _book([("2026-08", 100_000_000), ("2026-09", 10_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=20_000_000),
-                                 ExpenseRecord(ym="2026-09", amount=20_000_000)])
-    ratio, months = material_ratio(book, ledger, today=date(2026, 9, 15))
-    assert (ratio, months) == (0.2, 1)
-
-
-def test_material_ratio_without_ledger_is_none():
-    from prime_contractor.expenses import material_ratio
-    assert material_ratio(_book([("2026-01", 1)]), None) is None
+    totals = _Totals()
+    for name, grid in read_sheets(path).items():
+        for block in _month_blocks(grid, col_index):
+            for m in _block_to_months(block, _guess_year(grid, name, path, block)):
+                totals[m.ym] = totals.get(m.ym, 0) + m.revenue
+    return totals
 
 
 def test_diagnosis_flags_implausibly_good_margin_first():
-    """실제 지출 기준 손익이 매출의 절반씩 남는다면 장사가 잘 되는 게 아니라 숫자가 빠진 것."""
+    """고정비·재료비로 계산한 손익이 매출의 절반씩 남는다면 숫자가 빠진 것."""
     from datetime import date
+    from prime_contractor.breakeven import CostModel
     from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
     book = _book([("2026-07", 100_000_000), ("2026-08", 80_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-07", amount=15_000_000),
-                                 ExpenseRecord(ym="2026-08", amount=5_000_000)])
-    diag = analyze(book, employees=6, expenses=ledger, monthly_fixed=20_000_000,
-                   today=date(2026, 9, 30))
-    assert diag.actual_margin_months == 2
-    assert round(diag.actual_margin, 3) == round((180 - 20 - 40) / 180, 3)
+    cost = CostModel(monthly_fixed=20_000_000, variable_ratio=0.13)
+    diag = analyze(book, employees=6, cost=cost, today=date(2026, 9, 30))
+    assert round(diag.margin, 3) == round((180_000_000 * 0.87 - 40_000_000) / 180_000_000, 3)
     assert diag.priorities[0].text.startswith("숫자부터 점검")
 
 
 def test_diagnosis_normal_margin_is_not_flagged():
     from datetime import date
+    from prime_contractor.breakeven import CostModel
     from prime_contractor.diagnosis import analyze
-    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
     book = _book([("2026-08", 100_000_000)])
-    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=60_000_000)])
-    diag = analyze(book, employees=6, expenses=ledger, monthly_fixed=30_000_000,
-                   today=date(2026, 9, 30))
-    assert round(diag.actual_margin, 2) == 0.10
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.6)
+    diag = analyze(book, employees=6, cost=cost, today=date(2026, 9, 30))
+    assert round(diag.margin, 2) == 0.10
     assert not any(p.text.startswith("숫자부터 점검") for p in diag.priorities)
+
+
+def test_sales_tab_has_only_the_sales_ledger_file():
+    """지출 장부·고정비 장부 칸은 화면이 복잡해져서 뺐다. 다시 슬쩍 생기지 않게."""
+    from pathlib import Path
+    source = (Path(__file__).parent.parent / "prime_contractor" / "gui.py").read_text(encoding="utf-8")
+    assert "expense_path" not in source
+    assert "fixed_path" not in source
+
