@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from prime_contractor.breakeven import CostModel
-from prime_contractor.expenses import ExpenseBook
+from prime_contractor.expenses import ExpenseBook, month_profit
 from prime_contractor.sales import SalesBook
 
 #: 재료·외주비가 매출의 이 비율을 넘으면 원가 쪽을 먼저 보라고 권한다.
@@ -52,14 +52,17 @@ class Diagnosis:
 
 
 def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
-           expenses: ExpenseBook | None = None,
+           expenses: ExpenseBook | None = None, monthly_fixed: int | None = None,
            window: int = TREND_WINDOW, today: date | None = None) -> Diagnosis:
     """끝난 달의 매출·손익·직원당 매출로 진단을 만든다.
 
     진행 중인 달은 아직 다 안 찍힌 숫자라 뺀다(다른 매출 계산과 동일한 규칙).
     실제 지출 장부(expenses)가 있고 그 달 값이 있으면, 손익분기 어림값보다
-    '매출 − 실제 지출'을 우선한다 — 실제 숫자가 있는데 어림값을 쓸 이유가 없다.
+    '매출 − 실제 지출 − 월 고정비'를 우선한다(expenses.month_profit).
+    monthly_fixed 를 안 주면 cost 의 고정비를 쓴다.
     """
+    if monthly_fixed is None:
+        monthly_fixed = cost.monthly_fixed if cost else 0
     diag = Diagnosis()
     today = today or date.today()
     current = f"{today.year:04d}-{today.month:02d}"
@@ -70,12 +73,8 @@ def analyze(book: SalesBook, employees: int, cost: CostModel | None = None,
 
     latest = closed[-1]
     diag.latest_month = latest.ym
-    actual_expense = expenses.amount(latest.ym) if expenses else 0
-    if actual_expense:
-        diag.latest_month_profit = latest.revenue - actual_expense
-        diag.latest_month_profit_is_actual = True
-    elif cost:
-        diag.latest_month_profit = cost.profit_at(latest.revenue)
+    diag.latest_month_profit, diag.latest_month_profit_is_actual = month_profit(
+        latest.revenue, latest.ym, expenses, cost, monthly_fixed)
 
     recent = closed[-window:]
     prior = closed[-2 * window:-window]
@@ -106,7 +105,7 @@ def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
     items: list[Priority] = []
 
     if diag.latest_month_profit is not None and diag.latest_month_profit < 0:
-        basis = "실제 지출" if diag.latest_month_profit_is_actual else "손익분기 어림값"
+        basis = "실제 지출·고정비" if diag.latest_month_profit_is_actual else "손익분기 어림값"
         items.append(Priority(
             text="비용부터 줄이기",
             reason=f"{diag.latest_month} 은 {basis} 기준으로 약 "

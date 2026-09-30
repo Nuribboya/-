@@ -101,6 +101,28 @@ def build_config(options: dict, base: ScreenConfig | None = None) -> ScreenConfi
     return replace(cfg, **patch) if patch else cfg
 
 
+def apply_target(book, cost, typed: int) -> str:
+    """② 탭 [계산하기]가 목표를 잡는 규칙. 무엇을 기준으로 잡았는지 문구를 돌려준다.
+
+    고정비·재료비가 있으면 손익분기(+목표이익)가 '월 목표' 칸보다 우선이다.
+    저장된 '월 목표'에는 예전 버전이 미리 채워 둔 평균이 남아 있을 수 있어서,
+    칸이 이기게 두면 그 평균이 손익분기를 조용히 덮어쓴다.
+    """
+    if cost is not None:
+        book.apply_target(cost.target, overwrite=True)
+        basis = f"손익분기 {cost.breakeven / 1e4:,.0f}만원"
+        if cost.monthly_profit:
+            basis += f" + 목표이익 {cost.monthly_profit / 1e4:,.0f}만원"
+        return basis
+    if typed > 0:
+        book.apply_target(typed, overwrite=True)
+        return "'월 목표' 칸"
+    if book.has_targets:
+        return "장부에 적힌 목표"
+    book.apply_target(book.average_revenue())
+    return "최근 평균 (월 목표 칸이 비어서)"
+
+
 def sector_names(cfg: ScreenConfig) -> list[str]:
     """업종 드롭다운 항목."""
     return [SECTOR_ALL] + [s.name for s in cfg.sectors]

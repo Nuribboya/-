@@ -1534,7 +1534,7 @@ def test_readme_still_documents_every_feature():
     for must in ("finder-beta", "최우선 목표", "영업 진행 기록", "손익분기",
                  "엑셀 장부", "폐업", "모자란 만큼", "적합도", "어림값",
                  "우선순위 진단", "직원당 매출", "Gemini", "지출 파일",
-                 "제안서 만들기", "자동으로 저장"):
+                 "제안서 만들기", "자동으로 저장", "우리 회사 숫자"):
         assert must in text, must
 
 
@@ -2118,10 +2118,10 @@ def test_actual_expense_overrides_breakeven_guess_for_the_loss_check():
     book = _book([("2026-07", 100_000_000), ("2026-08", 100_000_000)])
     # 어림값으로는 흑자(손익분기 60,000,000)로 보이지만, 실제 지출을 넣으면 적자다.
     cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.5)
-    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=120_000_000)])
+    expenses = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=80_000_000)])
 
     diag = analyze(book, employees=0, cost=cost, expenses=expenses, today=date(2026, 9, 1))
-    assert diag.latest_month_profit == -20_000_000
+    assert diag.latest_month_profit == 100_000_000 - 80_000_000 - 30_000_000   # 고정비도 뺀다
     assert diag.latest_month_profit_is_actual
     assert any("비용부터" in p.text for p in diag.priorities)
     assert any("실제 지출" in p.reason for p in diag.priorities)
@@ -2177,3 +2177,82 @@ def test_proposal_without_awards_or_profile_still_works():
     text = build_proposal(cand, CompanyProfile())
     assert "정보없는회사 담당자님께" in text
     assert "저희 회사" in text          # 회사명을 안 적으면 이 말로 대신한다
+
+
+# --- ② 탭 [계산하기] 목표 잡는 규칙 --------------------------------------------------
+
+def test_breakeven_beats_a_leftover_typed_target():
+    """저장된 '월 목표'(예전 버전이 채운 평균)가 손익분기를 덮어쓰면 안 된다."""
+    from prime_contractor.app_settings import apply_target
+    from prime_contractor.breakeven import CostModel
+    book = _book([("2026-07", 90_000_000), ("2026-08", 80_000_000)])
+    cost = CostModel(monthly_fixed=30_000_000, variable_ratio=0.6, monthly_profit=5_000_000)
+    basis = apply_target(book, cost, typed=98_415_696)
+    assert book.month("2026-08").target == cost.target == 87_500_000
+    assert "손익분기" in basis and "목표이익" in basis
+
+
+def test_typed_target_used_when_no_cost_numbers():
+    from prime_contractor.app_settings import apply_target
+    book = _book([("2026-07", 90_000_000)], {"2026-07": 50_000_000})
+    basis = apply_target(book, None, typed=100_000_000)
+    assert book.month("2026-07").target == 100_000_000     # 장부 목표도 덮는다
+    assert "월 목표" in basis
+
+
+def test_ledger_targets_kept_when_nothing_typed():
+    from prime_contractor.app_settings import apply_target
+    book = _book([("2026-07", 90_000_000)], {"2026-07": 95_000_000})
+    basis = apply_target(book, None, typed=0)
+    assert book.month("2026-07").target == 95_000_000
+    assert "장부" in basis
+
+
+def test_average_is_the_last_resort():
+    from prime_contractor.app_settings import apply_target
+    book = _book([("2020-01", 60_000_000), ("2020-02", 80_000_000)])   # 오래전 = 다 끝난 달
+    basis = apply_target(book, None, typed=0)
+    assert book.month("2020-01").target == 70_000_000
+    assert "평균" in basis
+
+
+# --- 그 달 손익: 지출 장부 + 월 고정비 --------------------------------------------------
+
+def test_ledger_month_profit_subtracts_fixed_costs_too():
+    """지출 장부엔 자재·식대만 있고 인건비는 없다. 고정비를 안 빼면 흑자가 부풀어 보인다.
+
+    실제로 식대비+자재 장부만 넣었더니 월매출 8,816만원 회사가 +7,492만원 흑자로 나왔다.
+    """
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=13_241_045)])
+    profit, actual = month_profit(88_158_000, "2026-01", ledger, None, monthly_fixed=25_000_000)
+    assert profit == 88_158_000 - 13_241_045 - 25_000_000
+    assert actual
+
+
+def test_month_without_ledger_falls_back_to_breakeven_guess():
+    from prime_contractor.breakeven import CostModel
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, month_profit
+    cost = CostModel(monthly_fixed=25_000_000, variable_ratio=0.6)
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=1)])
+    profit, actual = month_profit(80_000_000, "2026-02", ledger, cost, monthly_fixed=25_000_000)
+    assert profit == cost.profit_at(80_000_000)
+    assert not actual
+
+
+def test_month_profit_unknown_without_ledger_or_costs():
+    from prime_contractor.expenses import month_profit
+    assert month_profit(80_000_000, "2026-02", None, None) == (None, False)
+
+
+def test_diagnosis_uses_fixed_cost_even_without_a_cost_model():
+    """재료비 %를 안 적어 손익분기는 없어도, 적어 둔 고정비는 지출 장부와 함께 빠져야 한다."""
+    from datetime import date
+    from prime_contractor.diagnosis import analyze
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord
+    book = _book([("2026-08", 50_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=30_000_000)])
+    diag = analyze(book, employees=0, cost=None, expenses=ledger, monthly_fixed=25_000_000,
+                   today=date(2026, 9, 1))
+    assert diag.latest_month_profit == -5_000_000
+    assert any("비용부터" in p.text for p in diag.priorities)

@@ -37,6 +37,23 @@ class ExpenseBook:
         return rec.amount if rec else 0
 
 
+def month_profit(revenue: int, ym: str, expenses: ExpenseBook | None, cost,
+                 monthly_fixed: int = 0) -> tuple[int | None, bool]:
+    """그 달 손익과, 그게 실제 지출 기준인지. 표와 진단이 같은 규칙을 쓰게 한 곳에 둔다.
+
+    지출 장부에는 보통 자재·외주·식대 같은 결제 내역만 있고 인건비·임차료는
+    없다. 그래서 실제 손익 = 매출 − 지출 장부 − 월 고정비(인건비 포함)로 본다.
+    고정비를 빼지 않으면 인건비가 통째로 빠져 흑자가 크게 부풀어 보인다.
+    그 달 지출 장부가 없으면 손익분기 어림값(cost)으로, 그것도 없으면 None.
+    """
+    actual = expenses.amount(ym) if expenses else 0
+    if actual:
+        return revenue - actual - monthly_fixed, True
+    if cost is not None:
+        return cost.profit_at(revenue), False
+    return None, False
+
+
 def load_expenses(path: str | Path) -> ExpenseBook:
     """지출 장부(.xlsx)를 읽는다. '1월' 같은 월 이름과 그 옆 칸의 금액을 찾아 다 더한다."""
     path = Path(path)

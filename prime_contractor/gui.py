@@ -28,7 +28,8 @@ except ImportError:                     # 소스에서 바로 실행할 때 설�
 
 from prime_contractor.app_settings import (
     DISTANCE_CHOICES, MODE_INDUSTRY, MODE_PUBLIC, MODE_SAMPLE, MODES,
-    OVERLAP_CHOICES, SECTOR_ALL, build_config, load_settings, save_settings, sector_names,
+    OVERLAP_CHOICES, SECTOR_ALL, apply_target, build_config, load_settings, save_settings,
+    sector_names,
 )
 from prime_contractor.help_text import HELP_TEXT
 from prime_contractor.config import load_config
@@ -210,36 +211,14 @@ class App:
         ttk.Checkbutton(box, text="저장해 둔 결과 무시하고 전부 새로 받기 (느림)",
                         variable=self.fresh).grid(row=6, column=1, columnspan=3, sticky=W)
 
-        profile = ttk.LabelFrame(root, text="제안서에 넣을 우리 회사 정보 (선택)", padding=10)
-        profile.pack(fill=X, padx=10, pady=5)
+        # 제안서에만 쓰는 우리 회사 정보. 화면에 늘 펼쳐 둘 필요가 없어서
+        # [제안서 만들기]를 누를 때 뜨는 작은 창에서 받는다(값은 자동저장된다).
         self.profile_name = StringVar(value=saved.get("profile_name", ""))
         self.profile_founded = StringVar(value=saved.get("profile_founded", ""))
         self.profile_certs = StringVar(value=saved.get("profile_certs", ""))
         self.profile_track = StringVar(value=saved.get("profile_track", ""))
         self.profile_contact = StringVar(value=saved.get("profile_contact", ""))
         self.profile_phone = StringVar(value=saved.get("profile_phone", ""))
-
-        ttk.Label(profile, text="회사명").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(profile, textvariable=self.profile_name, width=22).grid(
-            row=0, column=1, sticky=W, pady=4)
-        ttk.Label(profile, text="설립연도").grid(row=0, column=2, sticky=W, padx=(20, 8))
-        ttk.Entry(profile, textvariable=self.profile_founded, width=10).grid(
-            row=0, column=3, sticky=W)
-        ttk.Label(profile, text="보유 인증").grid(row=0, column=4, sticky=W, padx=(20, 8))
-        ttk.Entry(profile, textvariable=self.profile_certs, width=24).grid(
-            row=0, column=5, sticky=W)
-
-        ttk.Label(profile, text="대표 실적").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(profile, textvariable=self.profile_track, width=22).grid(
-            row=1, column=1, sticky=W, pady=4)
-        ttk.Label(profile, text="담당자").grid(row=1, column=2, sticky=W, padx=(20, 8))
-        ttk.Entry(profile, textvariable=self.profile_contact, width=10).grid(
-            row=1, column=3, sticky=W)
-        ttk.Label(profile, text="연락처").grid(row=1, column=4, sticky=W, padx=(20, 8))
-        ttk.Entry(profile, textvariable=self.profile_phone, width=24).grid(
-            row=1, column=5, sticky=W)
-        ttk.Label(profile, text="비워 둔 항목은 제안서에서 빠집니다.",
-                  foreground="#666").grid(row=2, column=0, columnspan=6, sticky=W, pady=(6, 0))
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
@@ -288,80 +267,99 @@ class App:
         text.configure(state="disabled")
 
     def _build_sales(self, root, saved: dict) -> None:
-        top = ttk.LabelFrame(root, text="매출 파일 불러오기", padding=10)
-        top.pack(fill=X, padx=10, pady=(10, 5))
+        """입력은 한 상자에 모으고 [계산하기] 하나로 전부 돌린다. 결과는 작은 탭 셋.
+
+        예전엔 불러오기·적용·손익분기·진단 버튼이 상자마다 따로 있어서 순서대로
+        눌러야 했고, 인건비는 '고정비'에, 직원 수는 '진단'에, 실제 지출은 또 다른
+        상자에 흩어져 있었다. 회사 숫자는 한곳에서 넣고 한 번에 계산한다.
+        """
+        self.expense_book = None
+        self.cost_model = None
+        self.monthly_fixed = 0
+
+        box = ttk.LabelFrame(root, text="우리 회사 숫자", padding=10)
+        box.pack(fill=X, padx=10, pady=(10, 5))
 
         self.sales_path = StringVar(value=saved.get("sales_path", ""))
-        ttk.Entry(top, textvariable=self.sales_path, width=62).grid(row=0, column=0, sticky=W)
-        ttk.Button(top, text="파일 찾기", command=self.on_pick_sales).grid(row=0, column=1, padx=6)
-        ttk.Button(top, text="불러오기", command=self.on_load_sales).grid(row=0, column=2)
-        ttk.Label(top, text="엑셀 장부(.xlsx)를 그대로 고르셔도 됩니다. '1월' 옆 칸의 금액을 읽고,\n합계 줄은 알아서 걸러냅니다.  매출 앱이 내보낸 .json 이나 .csv 도 됩니다.",
-                  foreground="#666").grid(row=1, column=0, columnspan=3, sticky=W, pady=(6, 0))
-
-        ttk.Label(top, text="월 목표").grid(row=2, column=0, sticky=W, pady=(8, 0))
-        self.monthly_target = StringVar(value=str(saved.get("monthly_target", "")))
-        target_row = ttk.Frame(top)
-        target_row.grid(row=2, column=1, columnspan=2, sticky=W, pady=(8, 0))
-        ttk.Entry(target_row, textvariable=self.monthly_target, width=16).pack(side=LEFT)
-        ttk.Label(target_row, text="원  — 장부에 목표가 없을 때 여기에 적으세요",
-                  foreground="#666").pack(side=LEFT, padx=6)
-        ttk.Button(target_row, text="적용", command=self.on_apply_target).pack(side=LEFT)
-
-        expense = ttk.LabelFrame(root, text="지출 파일 불러오기 (선택) — 있으면 어림값 대신 실제 지출로 계산",
-                                 padding=10)
-        expense.pack(fill=X, padx=10, pady=5)
         self.expense_path = StringVar(value=saved.get("expense_path", ""))
-        ttk.Entry(expense, textvariable=self.expense_path, width=62).grid(row=0, column=0, sticky=W)
-        ttk.Button(expense, text="파일 찾기", command=self.on_pick_expenses).grid(row=0, column=1, padx=6)
-        ttk.Button(expense, text="불러오기", command=self.on_load_expenses).grid(row=0, column=2)
-        ttk.Label(expense, text="매출 파일과 같은 형식입니다 — '1월' 옆 칸에 그 달 지출(전기요금·부가세·"
-                  "인건비 등을 합친 금액)이 있는 엑셀이면 됩니다. 안 넣어도 손익분기 어림값으로 그대로 동작합니다.",
-                  foreground="#666").grid(row=1, column=0, columnspan=3, sticky=W, pady=(6, 0))
-        self.expense_book = None
+        for row, (label, var, pick, hint) in enumerate((
+                ("매출 장부", self.sales_path, self.on_pick_sales, ""),
+                ("지출 장부", self.expense_path, self.on_pick_expenses, "(선택)"))):
+            ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, padx=(0, 8), pady=3)
+            ttk.Entry(box, textvariable=var, width=58).grid(
+                row=row, column=1, columnspan=5, sticky=W, pady=3)
+            ttk.Button(box, text="파일 찾기", command=pick).grid(row=row, column=6, padx=6)
+            if hint:
+                ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=7, sticky=W)
 
-        cost = ttk.LabelFrame(root, text="손익분기로 목표 잡기 — 이 밑으로 가면 적자인 선",
-                              padding=10)
-        cost.pack(fill=X, padx=10, pady=5)
         self.fixed_cost = StringVar(value=str(saved.get("fixed_cost", "")))
         self.variable_ratio = StringVar(value=str(saved.get("variable_ratio", "")))
+        self.employees = StringVar(value=str(saved.get("employees", "")))
+        self.monthly_target = StringVar(value=str(saved.get("monthly_target", "")))
         self.target_profit = StringVar(value=str(saved.get("target_profit", "")))
 
-        ttk.Label(cost, text="월 고정비").grid(row=0, column=0, sticky=W)
-        ttk.Entry(cost, textvariable=self.fixed_cost, width=14).grid(row=0, column=1, sticky=W)
-        ttk.Label(cost, text="원  (인건비·임차료·경비·이자)", foreground="#666").grid(
-            row=0, column=2, sticky=W, padx=(4, 16))
-        ttk.Label(cost, text="재료·외주비").grid(row=0, column=3, sticky=W)
-        ttk.Entry(cost, textvariable=self.variable_ratio, width=6).grid(row=0, column=4, sticky=W)
-        ttk.Label(cost, text="%  (매출 대비)", foreground="#666").grid(
-            row=0, column=5, sticky=W, padx=(4, 0))
+        def field(row: int, col: int, label: str, var, width: int, unit: str) -> None:
+            ttk.Label(box, text=label).grid(row=row, column=col, sticky=W,
+                                            padx=(0 if col == 0 else 16, 6), pady=(8, 0))
+            cell = ttk.Frame(box)
+            cell.grid(row=row, column=col + 1, sticky=W, pady=(8, 0))
+            ttk.Entry(cell, textvariable=var, width=width).pack(side=LEFT)
+            ttk.Label(cell, text=unit, foreground="#666").pack(side=LEFT, padx=(3, 0))
 
-        ttk.Label(cost, text="월 목표이익").grid(row=1, column=0, sticky=W, pady=(6, 0))
-        ttk.Entry(cost, textvariable=self.target_profit, width=14).grid(
-            row=1, column=1, sticky=W, pady=(6, 0))
-        ttk.Label(cost, text="원  (비워두면 손익분기가 곧 목표)", foreground="#666").grid(
-            row=1, column=2, sticky=W, padx=(4, 16), pady=(6, 0))
-        buttons = ttk.Frame(cost)
-        buttons.grid(row=1, column=3, columnspan=3, sticky=W, pady=(6, 0))
-        _Button(buttons, text="손익분기로 목표 잡기",
-                command=self.on_apply_breakeven,
+        field(2, 0, "월 고정비", self.fixed_cost, 13, "원 (인건비 포함)")
+        field(2, 2, "재료·외주비", self.variable_ratio, 5, "%")
+        field(2, 4, "직원 수", self.employees, 5, "명")
+        field(3, 0, "월 목표", self.monthly_target, 13, "원")
+        field(3, 2, "목표이익", self.target_profit, 13, "원")
+
+        buttons = ttk.Frame(box)
+        buttons.grid(row=4, column=0, columnspan=8, sticky=W, pady=(12, 0))
+        _Button(buttons, text="  계산하기  ", command=self.on_calculate,
                 bootstyle="primary").pack(side=LEFT)
-        ttk.Button(buttons, text="재무제표로 채우기",
+        ttk.Button(buttons, text="재무제표로 고정비 채우기",
                    command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
-        self.cost_model = None
+        self.calc_summary = ttk.Label(buttons, text="매출 장부를 고르고 [계산하기]를 누르세요.",
+                                      font=("", 10, "bold"))
+        self.calc_summary.pack(side=LEFT, padx=(12, 0))
+        ttk.Label(box, text="목표: 고정비·재료비가 있으면 손익분기(+목표이익) → 없으면 '월 목표' → "
+                            "비었으면 최근 평균.\n"
+                            "손익: 지출 장부가 있는 달은 매출 − 지출 장부 − 월 고정비. 지출 장부에 없는 "
+                            "인건비·임차료는 '월 고정비'에 넣으세요.",
+                  foreground="#666").grid(row=5, column=0, columnspan=8, sticky=W, pady=(6, 0))
 
-        diag = ttk.LabelFrame(root, text="회사 안쪽 우선순위 진단 — 뭐부터 챙길지", padding=10)
-        diag.pack(fill=X, padx=10, pady=5)
-        diag_row = ttk.Frame(diag)
-        diag_row.pack(fill=X)
-        ttk.Label(diag_row, text="직원 수").pack(side=LEFT)
-        self.employees = StringVar(value=str(saved.get("employees", "")))
-        ttk.Entry(diag_row, textvariable=self.employees, width=6).pack(side=LEFT, padx=(4, 4))
-        ttk.Label(diag_row, text="명  (엑셀엔 없어서 직접 적어주세요 — 직원당 매출 계산용)",
-                  foreground="#666").pack(side=LEFT, padx=(0, 16))
-        _Button(diag_row, text="진단하기", command=self.on_diagnose,
-                bootstyle="primary").pack(side=LEFT)
+        self.result_tabs = ttk.Notebook(root)
+        self.result_tabs.pack(fill=BOTH, expand=True, padx=10, pady=(5, 10))
+        monthly = ttk.Frame(self.result_tabs, padding=6)
+        advice = ttk.Frame(self.result_tabs, padding=6)
+        self.plan_tab = ttk.Frame(self.result_tabs, padding=6)
+        self.result_tabs.add(monthly, text="  달마다 손익  ")
+        self.result_tabs.add(advice, text="  뭐부터 챙길지  ")
+        self.result_tabs.add(self.plan_tab, text="  모자란 만큼 채울 회사  ")
 
-        ai_row = ttk.Frame(diag)
+        self.sales_tree = ttk.Treeview(monthly, columns=[c for c, _ in SALES_COLUMNS],
+                                       show="headings", height=9)
+        for name, width in SALES_COLUMNS:
+            self.sales_tree.heading(name, text=name)
+            self.sales_tree.column(name, width=width, anchor=W)
+        self.sales_tree.pack(fill=BOTH, expand=True)
+        act = ttk.Frame(monthly)
+        act.pack(fill=X, pady=(6, 0))
+        self.gap_label = ttk.Label(act, text="", font=("", 10, "bold"))
+        self.gap_label.pack(side=LEFT)
+        self.months_back = StringVar(value=str(saved.get("months_back", 1)))
+        ttk.Label(act, text="몇 달치로 볼까요").pack(side=LEFT, padx=(20, 4))
+        months = ttk.Combobox(act, textvariable=self.months_back, values=["1", "2", "3", "6"],
+                              state="readonly", width=4)
+        months.pack(side=LEFT)
+        months.bind("<<ComboboxSelected>>", lambda _e: self.book and self._refresh_gap())
+        self.gap_button = _Button(act, text="  이만큼 채울 회사 찾기  ",
+                                   command=self.on_find_for_gap, state="disabled",
+                                   bootstyle="primary")
+        self.gap_button.pack(side=RIGHT)
+
+        self.diag_text = scrolledtext.ScrolledText(advice, height=8, wrap="word", state="disabled")
+        self.diag_text.pack(fill=BOTH, expand=True)
+        ai_row = ttk.Frame(advice)
         ai_row.pack(fill=X, pady=(6, 0))
         ttk.Label(ai_row, text="Gemini API 키 (선택)").pack(side=LEFT)
         self.gemini_key = StringVar(value=saved.get("gemini_key", ""))
@@ -370,43 +368,18 @@ class App:
         self.ai_button = _Button(ai_row, text="AI에게 한 번 더 물어보기",
                                  command=self.on_ai_insight, bootstyle="info-outline")
         self.ai_button.pack(side=LEFT)
-        ttk.Label(ai_row, text="무료 키 발급: aistudio.google.com/apikey",
+        ttk.Label(ai_row, text="무료 키: aistudio.google.com/apikey",
                   foreground="#666").pack(side=LEFT, padx=(8, 0))
 
-        self.diag_text = scrolledtext.ScrolledText(diag, height=6, wrap="word", state="disabled")
-        self.diag_text.pack(fill=X, pady=(8, 0))
-
-        mid = ttk.LabelFrame(root, text="달마다 얼마 벌었나", padding=6)
-        mid.pack(fill=BOTH, expand=True, padx=10, pady=5)
-        self.sales_tree = ttk.Treeview(mid, columns=[c for c, _ in SALES_COLUMNS],
-                                       show="headings", height=8)
-        for name, width in SALES_COLUMNS:
-            self.sales_tree.heading(name, text=name)
-            self.sales_tree.column(name, width=width, anchor=W)
-        self.sales_tree.pack(fill=BOTH, expand=True)
-
-        act = ttk.Frame(root)
-        act.pack(fill=X, padx=10, pady=(0, 5))
-        self.gap_label = ttk.Label(act, text="위에서 매출 파일을 먼저 불러오세요.", font=("", 10, "bold"))
-        self.gap_label.pack(side=LEFT)
-        self.months_back = StringVar(value=str(saved.get("months_back", 1)))
-        ttk.Label(act, text="몇 달치로 볼까요").pack(side=LEFT, padx=(20, 4))
-        ttk.Combobox(act, textvariable=self.months_back, values=["1", "2", "3", "6"],
-                     state="readonly", width=4).pack(side=LEFT)
-        self.gap_button = _Button(act, text="  이만큼 채울 회사 찾기  ",
-                                   command=self.on_find_for_gap, state="disabled",
-                                   bootstyle="primary")
-        self.gap_button.pack(side=RIGHT)
-
-        bottom = ttk.LabelFrame(root, text="어디에 연락하면 되나", padding=6)
-        bottom.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
-        self.plan_tree = ttk.Treeview(bottom, columns=[c for c, _ in PLAN_COLUMNS],
-                                      show="headings", height=8)
+        self.plan_tree = ttk.Treeview(self.plan_tab, columns=[c for c, _ in PLAN_COLUMNS],
+                                      show="headings", height=9)
         for name, width in PLAN_COLUMNS:
             self.plan_tree.heading(name, text=name)
             self.plan_tree.column(name, width=width, anchor=W)
         self.plan_tree.pack(fill=BOTH, expand=True)
-        self.plan_note = ttk.Label(bottom, text="", foreground="#333", wraplength=980)
+        self.plan_note = ttk.Label(self.plan_tab, text="'달마다 손익' 탭에서 [이만큼 채울 회사 찾기]를 "
+                                                       "누르면 여기에 나옵니다.",
+                                   foreground="#333", wraplength=980)
         self.plan_note.pack(fill=X, pady=(4, 0))
 
     # --- 업데이트 -------------------------------------------------------------
@@ -435,36 +408,71 @@ class App:
                        ("엑셀", "*.xlsx *.xlsm"), ("모든 파일", "*.*")])
         if path:
             self.sales_path.set(path)
-            self.on_load_sales()
-
-    # --- 지출 -----------------------------------------------------------------
+            self.on_calculate()
 
     def on_pick_expenses(self) -> None:
         path = filedialog.askopenfilename(
             filetypes=[("엑셀", "*.xlsx *.xlsm"), ("모든 파일", "*.*")])
         if path:
             self.expense_path.set(path)
-            self.on_load_expenses()
+            if self.sales_path.get().strip():
+                self.on_calculate()
 
-    def on_load_expenses(self) -> None:
-        path = self.expense_path.get().strip()
+    def on_calculate(self) -> None:
+        """장부 읽기 → 지출 읽기 → 목표 잡기 → 표·진단까지 한 번에."""
+        path = self.sales_path.get().strip()
         if not path:
-            messagebox.showwarning("파일 필요", "지출 파일을 먼저 고르세요.")
+            messagebox.showwarning("매출 장부 필요", "'매출 장부' 칸에 파일을 먼저 골라 주세요.")
             return
-        from prime_contractor.expenses import load_expenses
         try:
-            self.expense_book = load_expenses(path)
+            book = load_sales(path)
         except (OSError, ValueError) as exc:
-            messagebox.showerror("파일을 읽지 못했습니다", str(exc))
+            messagebox.showerror("매출 장부를 읽지 못했습니다",
+                                 f"{exc}\n\n도움말 탭의 '매출 파일 만들기' 를 참고하세요.")
             return
-        if not self.expense_book.months:
-            messagebox.showwarning("비어 있음", "지출 기록이 비어 있습니다.")
+        if not book.months:
+            messagebox.showwarning("비어 있음", "매출 기록이 비어 있습니다.")
             return
-        self.say(f"지출 파일에서 {len(self.expense_book.months)}개월치를 읽었습니다. "
-                 "그 달은 어림값 대신 실제 지출로 손익을 계산합니다.")
-        if self.book:
-            self._render_sales()
-            self.on_diagnose()
+
+        expenses = None
+        expense_path = self.expense_path.get().strip()
+        if expense_path:
+            from prime_contractor.expenses import load_expenses
+            try:
+                expenses = load_expenses(expense_path)
+            except (OSError, ValueError) as exc:
+                messagebox.showwarning("지출 장부는 빼고 계산합니다",
+                                       f"{exc}\n\n매출과 손익분기 어림값만으로 계속합니다.")
+
+        cost = self._read_cost_model(quiet=True)
+        if cost is None and (self.fixed_cost.get().strip() or self.variable_ratio.get().strip()):
+            self._read_cost_model()          # 반쯤만 채운 칸은 왜 안 쓰는지 알려 준다
+
+        typed = int(re.sub(r"[^\d]", "", self.monthly_target.get() or "") or 0)
+        basis = apply_target(book, cost, typed)
+
+        self.book, self.expense_book, self.cost_model = book, expenses, cost
+        # 재료비 %를 안 적어 손익분기는 못 잡아도, 지출 장부와 함께 뺄 고정비는 쓴다.
+        self.monthly_fixed = int(re.sub(r"[^\d]", "", self.fixed_cost.get() or "") or 0)
+        latest = book.latest_closed()
+        target = latest.target if latest else 0
+        parts = [f"목표 월 {target / 1e4:,.0f}만원 — {basis}" if target else "목표 없음"]
+        if expenses:
+            if self.monthly_fixed:
+                parts.append(f"손익 = 매출 − 지출 장부({len(expenses.months)}개월치) "
+                             f"− 고정비 {self.monthly_fixed / 1e4:,.0f}만원")
+            else:
+                parts.append("⚠ 월 고정비가 비어 인건비가 손익에서 빠져 있습니다")
+        self.calc_summary.configure(text="  ·  ".join(parts))
+
+        self._render_sales()
+        self._render_diagnosis(self._current_diagnosis())
+
+    def _month_profit(self, month) -> int | None:
+        from prime_contractor.expenses import month_profit
+        profit, _ = month_profit(month.revenue, month.ym, self.expense_book,
+                                 self.cost_model, self.monthly_fixed)
+        return profit
 
     # --- 손익분기 -------------------------------------------------------------
 
@@ -492,23 +500,6 @@ class App:
             if not quiet:
                 messagebox.showwarning("숫자를 확인해 주세요", str(exc))
             return None
-
-    def on_apply_breakeven(self) -> None:
-        if not self.book:
-            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
-            return
-        model = self._read_cost_model()
-        if model is None:
-            return
-        self.cost_model = model
-        self.book.apply_target(model.target, overwrite=True)
-        self.monthly_target.set(str(model.target))
-        self._render_sales()
-        self.say(f"손익분기 매출은 월 {model.breakeven / 1e4:,.0f}만원입니다. "
-                 f"이 밑이면 적자입니다.")
-        if model.monthly_profit:
-            self.say(f"이익 {model.monthly_profit / 1e4:,.0f}만원까지 보면 "
-                     f"목표는 월 {model.target / 1e4:,.0f}만원입니다.")
 
     def on_fill_from_financials(self) -> None:
         """손익계산서 숫자 세 개로 고정비와 비율을 채운다."""
@@ -543,18 +534,13 @@ class App:
             "이 계산은 손익분기를 실제보다 낮게 — 즉 더 안전해 보이게 — 잡습니다.\n"
             "공장 인건비·감가상각을 아시면 '월 고정비'에 더하고,\n"
             "'재료·외주비' 비율은 그만큼 낮춰서 고쳐 주세요.\n\n"
-            "[손익분기로 목표 잡기]를 누르면 반영됩니다.")
+            "[계산하기]를 누르면 반영됩니다.")
 
     def _current_diagnosis(self):
         from prime_contractor.diagnosis import analyze
         employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
-        return analyze(self.book, employees, self.cost_model, self.expense_book)
-
-    def on_diagnose(self) -> None:
-        if not self.book:
-            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
-            return
-        self._render_diagnosis(self._current_diagnosis())
+        return analyze(self.book, employees, self.cost_model, self.expense_book,
+                       monthly_fixed=self.monthly_fixed)
 
     def _render_diagnosis(self, diag, extra: str = "") -> None:
         lines: list[str] = []
@@ -609,68 +595,15 @@ class App:
         else:
             self._render_diagnosis(diag)
 
-    def on_apply_target(self) -> None:
-        if not self.book:
-            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
-            return
-        try:
-            target = int(re.sub(r"[^\d]", "", self.monthly_target.get() or "0"))
-        except ValueError:
-            target = 0
-        if target <= 0:
-            messagebox.showwarning("금액 확인", "월 목표 금액을 숫자로 적어주세요. (예: 100000000)")
-            return
-        self.book.apply_target(target, overwrite=True)
-        self._render_sales()
-        self.say(f"월 목표를 {target / 1e4:,.0f}만원으로 잡았습니다.")
-
-    def on_load_sales(self) -> None:
-        path = self.sales_path.get().strip()
-        if not path:
-            messagebox.showwarning("파일 필요", "매출 파일을 먼저 고르세요.")
-            return
-        try:
-            book = load_sales(path)
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("파일을 읽지 못했습니다",
-                                 f"{exc}\n\n도움말 탭의 '매출 파일 만들기' 를 참고하세요.")
-            return
-        if not book.months:
-            messagebox.showwarning("비어 있음", "매출 기록이 비어 있습니다.")
-            return
-
-        self.book = book
-        # 저장해 둔 고정비·비율이 있으면 손익분기 목표를 바로 적용한다.
-        saved_model = self._read_cost_model(quiet=True)
-        if saved_model is not None:
-            self.cost_model = saved_model
-            book.apply_target(saved_model.target, overwrite=True)
-            self.say(f"저장해 둔 비용 숫자로 손익분기(월 {saved_model.breakeven / 1e4:,.0f}만원)를 "
-                     f"적용했습니다.")
-        # 장부에 목표가 없으면 최근 평균을 제안해 둔다. 그대로 쓰든 고치든 사장님 몫.
-        elif not book.has_targets and not self.monthly_target.get().strip():
-            average = book.average_revenue()
-            if average:
-                self.monthly_target.set(str(average))
-                self.say(f"장부에 목표가 없어 최근 평균({average / 1e4:,.0f}만원)을 "
-                         f"'월 목표' 칸에 넣어 두었습니다. 고치고 [적용]을 누르세요.")
-        self._render_sales()
-        self.on_diagnose()   # 올리면 바로 진단까지 — 버튼을 따로 안 눌러도 되게
-
     def _render_sales(self) -> None:
         book = self.book
-        model = self.cost_model
         expenses = self.expense_book
         self.sales_tree.delete(*self.sales_tree.get_children())
         for m in book.sorted_months():
             rate = f"{m.rate * 100:.0f}%" if m.rate is not None else "-"
             actual_expense = expenses.amount(m.ym) if expenses else 0
-            if actual_expense:
-                profit = m.revenue - actual_expense
-                expense_text = f"{actual_expense / 1e4:,.0f}만원"
-            else:
-                profit = model.profit_at(m.revenue) if model else None
-                expense_text = "-"
+            expense_text = f"{actual_expense / 1e4:,.0f}만원" if actual_expense else "-"
+            profit = self._month_profit(m)
             if profit is None:
                 profit_text = "-"
             else:
@@ -692,7 +625,7 @@ class App:
             self.gap_button.configure(state="disabled")
             return
         if not self.book.has_targets:
-            self.gap_label.configure(text="'월 목표'를 적고 [적용]을 누르세요.")
+            self.gap_label.configure(text="목표가 없습니다. '월 목표'를 적고 [계산하기]를 누르세요.")
             self.gap_button.configure(state="disabled")
             return
         months_back = int(self.months_back.get() or 1)
@@ -702,7 +635,8 @@ class App:
             rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "-"
             span = f"최근 {months_back}개월" if months_back > 1 else record.ym
             loss = ""
-            if self.cost_model and self.cost_model.profit_at(record.revenue) < 0:
+            profit = self._month_profit(record)
+            if profit is not None and profit < 0:
                 loss = f"  · {record.ym} 은 적자입니다"
             self.gap_label.configure(
                 text=f"{span}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate}){loss}")
@@ -1094,21 +1028,65 @@ class App:
                 continue
         if not candidates:
             return
+        if not self._ask_profile(len(candidates)):
+            return
         folder = filedialog.askdirectory(title="제안서를 저장할 폴더를 고르세요")
         if not folder:
             return
         from prime_contractor.proposal import build_proposal
         profile = self._current_profile()
         made = []
-        for cand in candidates:
-            text = build_proposal(cand, profile)
-            safe_name = re.sub(r'[\\/*?:"<>|]', "_", cand.name).strip() or "회사"
-            path = Path(folder) / f"제안서_{safe_name}.txt"
-            path.write_text(text, encoding="utf-8")
-            made.append(path.name)
+        try:
+            for cand in candidates:
+                text = build_proposal(cand, profile)
+                safe_name = re.sub(r'[\\/*?:"<>|]', "_", cand.name).strip() or "회사"
+                path = Path(folder) / f"제안서_{safe_name}.txt"
+                path.write_text(text, encoding="utf-8")
+                made.append(path.name)
+        except OSError as exc:
+            messagebox.showerror("저장하지 못했습니다", str(exc))
+            return
         self.say(f"제안서 {len(made)}개를 만들었습니다: {folder}")
         messagebox.showinfo("만들었습니다",
                             f"{len(made)}개 파일을 저장했습니다 — 보내기 전에 한 번 읽어보세요.\n\n{folder}")
+
+    def _ask_profile(self, count: int) -> bool:
+        """제안서에 넣을 우리 회사 정보를 작은 창에서 확인받는다. [만들기]를 누르면 True."""
+        from tkinter import Toplevel
+        win = Toplevel(self.root)
+        win.title("제안서에 넣을 우리 회사 정보")
+        win.transient(self.root)
+        win.resizable(False, False)
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill=BOTH, expand=True)
+
+        fields = (("회사명", self.profile_name, 24), ("설립연도", self.profile_founded, 8),
+                  ("보유 인증", self.profile_certs, 24), ("대표 실적", self.profile_track, 24),
+                  ("담당자", self.profile_contact, 12), ("연락처", self.profile_phone, 18))
+        for i, (label, var, width) in enumerate(fields):
+            row, col = divmod(i, 2)
+            ttk.Label(body, text=label).grid(row=row, column=col * 2, sticky=W,
+                                             padx=(0 if col == 0 else 16, 6), pady=4)
+            ttk.Entry(body, textvariable=var, width=width).grid(
+                row=row, column=col * 2 + 1, sticky=W, pady=4)
+        ttk.Label(body, text="비워 둔 항목은 제안서에서 빠집니다. 적은 내용은 다음에도 그대로 남습니다.",
+                  foreground="#666").grid(row=3, column=0, columnspan=4, sticky=W, pady=(8, 0))
+
+        confirmed = BooleanVar(value=False)
+
+        def go() -> None:
+            confirmed.set(True)
+            win.destroy()
+
+        row = ttk.Frame(body)
+        row.grid(row=4, column=0, columnspan=4, sticky="e", pady=(12, 0))
+        ttk.Button(row, text="취소", command=win.destroy).pack(side=RIGHT)
+        _Button(row, text=f"  {count}곳 제안서 만들기  ", command=go,
+                bootstyle="primary").pack(side=RIGHT, padx=6)
+
+        win.grab_set()
+        self.root.wait_window(win)
+        return confirmed.get()
 
     def on_lead_move(self) -> None:
         lead = self._selected_lead()
@@ -1192,6 +1170,7 @@ class App:
                  " 곱한 값입니다. 모두 어림짐작이니 연락할 순서를 정하는 데만 쓰세요.")
         self.gap_target = 0
         self.tabs.select(self.sales_tab)
+        self.result_tabs.select(self.plan_tab)
         self.say(f"모자란 만큼 채우려면: {plan.note}")
 
     def _failed(self, exc: Exception) -> None:
