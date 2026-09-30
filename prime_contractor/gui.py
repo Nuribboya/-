@@ -286,12 +286,17 @@ class App:
         self.fixed_path = StringVar(value=saved.get("fixed_path", ""))
         for row, (label, var, pick, hint) in enumerate((
                 ("매출 장부", self.sales_path, self.on_pick_sales, ""),
-                ("지출 장부", self.expense_path, self.on_pick_expenses, "(선택) 자재·외주·식대"),
-                ("고정비 장부", self.fixed_path, self.on_pick_fixed, "(선택) 인건비·임차료"))):
+                ("지출 장부", self.expense_path, self.on_pick_expenses, "(선택)"),
+                ("고정비 장부", self.fixed_path, self.on_pick_fixed, "(선택)"))):
             ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, padx=(0, 8), pady=3)
-            ttk.Entry(box, textvariable=var, width=52).grid(
+            ttk.Entry(box, textvariable=var, width=48).grid(
                 row=row, column=1, columnspan=5, sticky=W, pady=3)
-            ttk.Button(box, text="파일 찾기", command=pick).grid(row=row, column=6, padx=6)
+            cell = ttk.Frame(box)
+            cell.grid(row=row, column=6, padx=6, sticky=W)
+            ttk.Button(cell, text="파일 찾기", command=pick).pack(side=LEFT)
+            ttk.Button(cell, text="빼기", width=5,
+                       command=lambda v=var, n=label: self.on_remove_file(v, n)).pack(
+                side=LEFT, padx=(4, 0))
             if hint:
                 ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=7, sticky=W)
 
@@ -433,6 +438,30 @@ class App:
             self.fixed_path.set(path)
             if self.sales_path.get().strip():
                 self.on_calculate()
+
+    def on_remove_file(self, var: StringVar, name: str) -> None:
+        """고른 파일을 뺀다. 빼고 나면 그 파일 없이 다시 계산한다."""
+        if not var.get().strip():
+            return
+        var.set("")
+        if var is self.sales_path:
+            # 매출 장부가 없으면 계산할 게 없다. 지난 결과가 남아 헷갈리지 않게 비운다.
+            self.book = None
+            self.sales_tree.delete(*self.sales_tree.get_children())
+            self.gap_label.configure(text="")
+            self.gap_button.configure(state="disabled")
+            self._render_diagnosis_text("")
+            self.calc_summary.configure(text="매출 장부를 고르고 [계산하기]를 누르세요.")
+            return
+        if var is self.fixed_path:
+            note = "고정비 장부를 뺐습니다. '월 고정비' 칸엔 파일에서 읽은 값이 남아 있으니 필요하면 고치세요."
+        else:
+            note = f"{name}를 뺐습니다."
+        if self.sales_path.get().strip():
+            self.on_calculate()
+            self.calc_summary.configure(text=f"{note}  ·  {self.calc_summary.cget('text')}")
+        else:
+            self.calc_summary.configure(text=note)
 
     def on_calculate(self) -> None:
         """장부 읽기 → 지출 읽기 → 목표 잡기 → 표·진단까지 한 번에."""
@@ -624,9 +653,13 @@ class App:
         if extra:
             lines.append("")
             lines.append(extra)
+        self._render_diagnosis_text(
+            "\n".join(lines) if lines else "장부에서 끝난 달을 찾지 못했습니다.")
+
+    def _render_diagnosis_text(self, text: str) -> None:
         self.diag_text.configure(state="normal")
         self.diag_text.delete("1.0", END)
-        self.diag_text.insert(END, "\n".join(lines) if lines else "장부에서 끝난 달을 찾지 못했습니다.")
+        self.diag_text.insert(END, text)
         self.diag_text.configure(state="disabled")
 
     def on_ai_insight(self) -> None:
