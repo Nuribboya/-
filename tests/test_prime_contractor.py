@@ -2372,3 +2372,34 @@ def test_diagnosis_uses_fixed_cost_ledger_for_the_latest_month():
     diag = analyze(book, employees=0, expenses=ledger, monthly_fixed=22_000_000,
                    today=date(2026, 9, 1), fixed_by_month=fixed)
     assert diag.latest_month_profit == -5_000_000
+
+
+# --- 재료·외주비 자동 계산 ------------------------------------------------------
+
+def test_material_ratio_is_period_total_over_period_revenue():
+    """한 달씩 나누면 들쭉날쭉하니, 지출 장부가 덮는 기간을 통째로 더해 나눈다."""
+    from datetime import date
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, material_ratio
+    book = _book([("2026-01", 100_000_000), ("2026-02", 100_000_000),
+                  ("2026-03", 100_000_000), ("2026-04", 100_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-01", amount=30_000_000),
+                                 ExpenseRecord(ym="2026-03", amount=10_000_000)])
+    ratio, months = material_ratio(book, ledger, today=date(2026, 9, 1))
+    # 1~3월(장부가 덮는 기간), 2월은 결제 없음 = 0원으로 센다. 4월은 기간 밖.
+    assert months == 3
+    assert ratio == 40_000_000 / 300_000_000
+
+
+def test_material_ratio_skips_the_month_still_in_progress():
+    from datetime import date
+    from prime_contractor.expenses import ExpenseBook, ExpenseRecord, material_ratio
+    book = _book([("2026-08", 100_000_000), ("2026-09", 10_000_000)])
+    ledger = ExpenseBook(months=[ExpenseRecord(ym="2026-08", amount=20_000_000),
+                                 ExpenseRecord(ym="2026-09", amount=20_000_000)])
+    ratio, months = material_ratio(book, ledger, today=date(2026, 9, 15))
+    assert (ratio, months) == (0.2, 1)
+
+
+def test_material_ratio_without_ledger_is_none():
+    from prime_contractor.expenses import material_ratio
+    assert material_ratio(_book([("2026-01", 1)]), None) is None

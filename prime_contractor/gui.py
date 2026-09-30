@@ -297,6 +297,9 @@ class App:
 
         self.fixed_cost = StringVar(value=str(saved.get("fixed_cost", "")))
         self.variable_ratio = StringVar(value=str(saved.get("variable_ratio", "")))
+        # 지출 장부로 자동 계산해 채운 값. 칸이 이 값 그대로면 다음에도 다시 계산하고,
+        # 사용자가 다른 숫자로 고쳐 적었으면 그 숫자를 존중한다.
+        self.ratio_auto_text = str(saved.get("variable_ratio_auto", ""))
         self.employees = StringVar(value=str(saved.get("employees", "")))
         self.monthly_target = StringVar(value=str(saved.get("monthly_target", "")))
         self.target_profit = StringVar(value=str(saved.get("target_profit", "")))
@@ -327,7 +330,7 @@ class App:
                                       font=("", 10, "bold"), wraplength=900, justify=LEFT)
         self.calc_summary.grid(row=6, column=0, columnspan=8, sticky=W, pady=(8, 0))
         ttk.Label(box, text="목표: 고정비·재료비가 있으면 손익분기(+목표이익) → 없으면 '월 목표' → "
-                            "비었으면 최근 평균.\n"
+                            "비었으면 최근 평균. 재료·외주비 칸을 비워 두면 지출 장부 ÷ 매출로 자동 계산.\n"
                             "손익: 지출 장부가 있는 달은 매출 − 지출 장부 − 고정비. 고정비 장부를 고르면 "
                             "'월 고정비' 칸은 그 파일 값으로 채워지고, 달마다 적힌 표면 그 달 값을 씁니다.",
                   foreground="#666").grid(row=7, column=0, columnspan=8, sticky=W, pady=(6, 0))
@@ -470,6 +473,8 @@ class App:
                 # 파일이 있으면 파일이 기준이다. 칸은 손익분기 계산에 쓸 대표값으로 채운다.
                 self.fixed_cost.set(str(fixed_costs.typical()))
 
+        ratio_note = self._auto_fill_ratio(book, expenses)
+
         cost = self._read_cost_model(quiet=True)
         if cost is None and (self.fixed_cost.get().strip() or self.variable_ratio.get().strip()):
             self._read_cost_model()          # 반쯤만 채운 칸은 왜 안 쓰는지 알려 준다
@@ -484,6 +489,8 @@ class App:
         latest = book.latest_closed()
         target = latest.target if latest else 0
         parts = [f"목표 월 {target / 1e4:,.0f}만원 — {basis}" if target else "목표 없음"]
+        if ratio_note:
+            parts.append(ratio_note)
         if fixed_costs:
             parts.append(fixed_costs.describe())
         if expenses:
@@ -499,6 +506,25 @@ class App:
 
         self._render_sales()
         self._render_diagnosis(self._current_diagnosis())
+
+    def _auto_fill_ratio(self, book, expenses) -> str:
+        """'재료·외주비' 칸이 비었거나 지난번 자동값 그대로면 지출 장부로 계산해 채운다."""
+        from prime_contractor.expenses import MIN_AUTO_RATIO, material_ratio
+        typed = self.variable_ratio.get().strip()
+        if typed and typed != self.ratio_auto_text:
+            return ""                                   # 직접 적은 숫자가 우선
+        found = material_ratio(book, expenses)
+        if found is None:
+            return ""
+        ratio, months = found
+        if not MIN_AUTO_RATIO <= ratio < 1:
+            # 너무 작으면 장부에 자재가 거의 없는 것, 1 이상이면 장부가 이상한 것.
+            return (f"재료·외주비는 자동으로 못 채웠습니다 (지출 장부 ÷ 매출 = "
+                    f"{ratio * 100:.1f}%) — 직접 적어 주세요")
+        text = f"{ratio * 100:.1f}".rstrip("0").rstrip(".")
+        self.variable_ratio.set(text)
+        self.ratio_auto_text = text
+        return f"재료·외주비 {text}% (지출 장부 ÷ 매출, {months}개월 자동)"
 
     def _month_profit(self, month) -> int | None:
         from prime_contractor.expenses import month_profit
@@ -727,6 +753,7 @@ class App:
             "monthly_target": self.monthly_target.get(),
             "fixed_cost": self.fixed_cost.get(),
             "variable_ratio": self.variable_ratio.get(),
+            "variable_ratio_auto": self.ratio_auto_text,
             "target_profit": self.target_profit.get(),
             "employees": self.employees.get(),
             "gemini_key": self.gemini_key.get(),

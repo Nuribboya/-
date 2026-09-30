@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from prime_contractor.sales import _block_to_months, _guess_year, _month_blocks
@@ -57,6 +58,33 @@ def month_profit(revenue: int, ym: str, expenses: ExpenseBook | None, cost,
             return round(revenue * cost.margin_ratio - fixed_this_month), False
         return cost.profit_at(revenue), False
     return None, False
+
+
+#: 이보다 작게 나오면 지출 장부에 자재가 거의 없다는 뜻이라 자동으로 채우지 않는다.
+MIN_AUTO_RATIO = 0.02
+
+
+def material_ratio(book, expenses: ExpenseBook | None, today: date | None = None
+                   ) -> tuple[float, int] | None:
+    """재료·외주비 비율 = 지출 장부 합계 ÷ 같은 기간 매출 합계. (비율, 개월 수)
+
+    자재는 미리 사 두고 매출은 나중에 잡히니 한 달씩 나누면 30%였다 3%였다
+    들쭉날쭉하다. 여러 달을 한꺼번에 더해 나누면 그 차이가 서로 상쇄된다.
+    기간은 지출 장부가 덮는 달(처음~끝) 중 끝난 달만. 그 사이에 결제가 없는
+    달은 0원 지출로 센다 — 그 달 매출만 빼면 비율이 부풀어 보인다.
+    """
+    if not expenses or not expenses.months:
+        return None
+    today = today or date.today()
+    current = f"{today.year:04d}-{today.month:02d}"
+    first, last = expenses.months[0].ym, expenses.months[-1].ym
+    months = [m for m in book.sorted_months()
+              if first <= m.ym <= last and m.ym < current and m.revenue]
+    revenue = sum(m.revenue for m in months)
+    if not revenue:
+        return None
+    spent = sum(expenses.amount(m.ym) for m in months)
+    return spent / revenue, len(months)
 
 
 def load_expenses(path: str | Path) -> ExpenseBook:
