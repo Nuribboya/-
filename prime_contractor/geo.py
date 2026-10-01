@@ -75,9 +75,29 @@ def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
     return 2 * 6371.0088 * math.asin(math.sqrt(h))
 
 
+#: 좌표표에 없는 시군(진주·안동·나주…)이라도 광역시도가 멀면 먼 곳이다. 그런 곳이
+#: '거리 미상'으로 빠져 거리 제한을 그냥 통과하던 구멍을 막는다. 경기·충청은 시군에
+#: 따라 가깝기도 해서 넣지 않는다 — 거기 시군을 모르면 계속 '미상'으로 남긴다.
+_FAR_PROVINCES: tuple[tuple[tuple[str, ...], str, tuple[float, float]], ...] = (
+    (("경상남도", "경남 "), "경남", (35.2378, 128.6919)),
+    (("경상북도", "경북 "), "경북", (36.5760, 128.5056)),
+    (("전라남도", "전남 "), "전남", (34.8161, 126.4629)),
+    (("전라북도", "전북특별자치도", "전북 "), "전북", (35.8203, 127.1088)),
+    (("강원도", "강원특별자치도", "강원 "), "강원", (37.6970, 127.8880)),
+    (("제주특별자치도", "제주도"), "제주", (33.4996, 126.5312)),
+    (("부산광역시",), "부산", (35.1796, 129.0756)),
+    (("대구광역시",), "대구", (35.8714, 128.6014)),
+    (("울산광역시",), "울산", (35.5384, 129.3114)),
+)
+
+
 def distance_from_home(address_or_region: str) -> tuple[str, float | None]:
     """주소(또는 지역명)로 (시군구, 안성으로부터의 거리 km)를 돌려준다."""
     region = address_or_region if address_or_region in CITY_COORDS else extract_region(address_or_region)
-    if not region:
-        return "", None
-    return region, round(haversine_km(HOME_COORD, CITY_COORDS[region]), 1)
+    if region:
+        return region, round(haversine_km(HOME_COORD, CITY_COORDS[region]), 1)
+    text = address_or_region or ""
+    for hints, name, coord in _FAR_PROVINCES:
+        if any(text.startswith(h) or f" {h}" in f" {text}" for h in hints):
+            return name, round(haversine_km(HOME_COORD, coord), 1)
+    return "", None

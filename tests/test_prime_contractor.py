@@ -2291,3 +2291,34 @@ def test_csv_keeps_only_candidates_above_min_score(tmp_path):
     assert "높은회사" in body
     assert "딱칠십" not in body and "낮은회사" not in body and "제외회사" not in body
     assert "\n1," in body                      # 1등 순위 그대로
+
+
+def test_far_province_without_known_city_still_counts_as_far():
+    """좌표표에 없는 진주·안동이라도 '거리 미상'으로 빠져 거리 제한을 통과하면 안 된다."""
+    from prime_contractor.geo import distance_from_home
+    region, km = distance_from_home("경상남도 진주시 상대동 1")
+    assert region == "경남" and km > 150
+    assert distance_from_home("경북 안동시 풍천면")[1] > 100
+    assert distance_from_home("부산광역시 강서구")[1] > 200
+
+
+def test_unknown_city_in_nearby_provinces_stays_unknown():
+    """충청·경기는 시군에 따라 가까울 수 있어 모르는 시군은 그대로 '미상'으로 둔다."""
+    from prime_contractor.geo import distance_from_home
+    assert distance_from_home("충청북도 괴산군 괴산읍") == ("", None)
+    assert distance_from_home("경기 광주시")[0] == "광주"       # 광주광역시와 헷갈리지 않는다
+
+
+def test_far_province_company_is_excluded_by_distance_limit():
+    from prime_contractor.config import load_config
+    from prime_contractor.pipeline import enrich
+    cfg = load_config(within_km=70.0)
+    near = Candidate(name="가까운전기", address="경기도 평택시 포승읍", kind="contractor")
+    far = Candidate(name="먼전기", address="경상남도 진주시 상대동", kind="contractor")
+    enrich([near, far])
+    for c in (near, far):
+        score_candidate(c, cfg)
+    from dataclasses import replace
+    passed, excluded = split_by_overlap([near, far], replace(cfg, min_awards=0))
+    assert [c.name for c in passed] == ["가까운전기"]
+    assert any("km" in r for r in far.overlap.reasons)
