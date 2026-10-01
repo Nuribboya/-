@@ -2279,3 +2279,15 @@ def test_review_summary_totals_since_start():
     _, total = summary_lines(r, cost)
     assert "2개월 누적 매출 11,000만원" in total
     assert "목표보다" in total
+
+
+def test_csv_keeps_only_candidates_above_min_score(tmp_path):
+    """엑셀엔 70점 '넘는' 곳만 — 70점 딱인 곳은 뺀다. 순위 번호는 화면과 같게 둔다."""
+    from prime_contractor.pipeline import ScreenResult
+    cands = [Candidate(name=n, score=s) for n, s in
+             (("높은회사", 82.0), ("딱칠십", 70.0), ("낮은회사", 55.0))]
+    result = ScreenResult(passed=cands, excluded=[Candidate(name="제외회사")])
+    body = write_csv(result, tmp_path / "out.csv", min_score=70).read_text(encoding="utf-8-sig")
+    assert "높은회사" in body
+    assert "딱칠십" not in body and "낮은회사" not in body and "제외회사" not in body
+    assert "\n1," in body                      # 1등 순위 그대로

@@ -48,6 +48,8 @@ REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손�
                   ("판정", 520))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
+#: 엑셀로 저장할 때 이 점수 '이하'는 뺀다. 다 넣으면 수백 곳이라 연락할 곳을 고르기 어렵다.
+EXPORT_MIN_SCORE = 70
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
 AUTOSAVE_MS = 60_000
 
@@ -227,7 +229,7 @@ class App:
         self.run_button = _Button(buttons, text="  후보 찾기  ", command=self.on_run,
                                    bootstyle="primary")
         self.run_button.pack(side=LEFT)
-        self.save_button = _Button(buttons, text="엑셀로 저장",
+        self.save_button = _Button(buttons, text=f"엑셀로 저장 ({EXPORT_MIN_SCORE}점 넘는 곳만)",
                                     command=self.on_save, state="disabled",
                                     bootstyle="success-outline")
         self.save_button.pack(side=LEFT, padx=6)
@@ -1250,13 +1252,23 @@ class App:
     def on_save(self) -> None:
         if not self.result:
             return
+        kept = sum(1 for c in self.result.passed if c.score > EXPORT_MIN_SCORE)
+        if not kept:
+            messagebox.showinfo(
+                "저장할 곳이 없습니다",
+                f"{EXPORT_MIN_SCORE}점을 넘는 곳이 없습니다 (전체 {len(self.result.passed)}곳).\n"
+                "조건(거리·업종·며칠치)을 넓혀서 다시 찾아보세요.")
+            return
         path = filedialog.asksaveasfilename(
             defaultextension=".csv", initialfile="원청후보.csv",
             filetypes=[("CSV (엑셀)", "*.csv")])
         if not path:
             return
-        write_csv(self.result, path, include_excluded=True)
-        if messagebox.askyesno("저장 완료", f"{path}\n\n폴더를 열까요?"):
+        write_csv(self.result, path, min_score=EXPORT_MIN_SCORE)
+        if messagebox.askyesno(
+                "저장 완료",
+                f"{path}\n\n전체 {len(self.result.passed)}곳 중 {EXPORT_MIN_SCORE}점을 넘는 "
+                f"{kept}곳만 저장했습니다.\n\n폴더를 열까요?"):
             _open_folder(Path(path).parent)
 
 

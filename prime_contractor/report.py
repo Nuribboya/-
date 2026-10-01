@@ -82,9 +82,16 @@ def _axis_detail(fit, key: str) -> str:
     return axis.detail if axis else ""
 
 
-def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = False) -> Path:
+def write_csv(result: ScreenResult, path: str | Path, include_excluded: bool = False,
+              min_score: float | None = None) -> Path:
+    """후보 목록을 엑셀에서 열 수 있는 CSV 로 쓴다.
+
+    min_score 를 주면 그 점수를 **넘는** 곳만 쓴다(같은 점수는 뺀다). 순위 번호는
+    전체 순위를 그대로 둬서, 화면 표와 엑셀의 '#'이 같은 회사를 가리킨다.
+    """
     path = Path(path)
-    rows = [(i, c, "통과") for i, c in enumerate(result.passed, 1)]
+    rows = [(i, c, "통과") for i, c in enumerate(result.passed, 1)
+            if min_score is None or c.score > min_score]
     if include_excluded:
         rows += [(0, c, "제외") for c in result.excluded]
 
