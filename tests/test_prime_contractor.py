@@ -2377,3 +2377,33 @@ def test_xlsx_writer_escapes_text_and_names_columns():
     from prime_contractor.xlsx_writer import _cell, _col_letter
     assert [_col_letter(i) for i in (0, 25, 26, 27)] == ["A", "Z", "AA", "AB"]
     assert "&lt;주&gt; &amp; 전기" in _cell("A1", "<주> & 전기", 0)
+
+
+def test_placeholder_demand_org_is_not_a_candidate():
+    """'각 수요기관'은 나라장터 공동구매 자리표시라 연락할 곳이 아니다 (1,000억짜리 1등으로 떴다)."""
+    awards = [Award(title="배전반 구매", amount=10_000_000_000, demand_org="각 수요기관",
+                    winner_name="(주)실제전기", category="물품")]
+    names = {c.name for c in build_candidates(awards)}
+    assert "각 수요기관" not in names and "(주)실제전기" in names
+
+
+def test_far_org_detected_from_its_name():
+    assert distance_from_home("한국농어촌공사 전남지역본부")[0] == "전남"
+    assert distance_from_home("한국농어촌공사 경북지역본부")[1] > 100
+    assert distance_from_home("강원개발공사")[0] == "강원"
+    assert distance_from_home("강원전기 주식회사") == ("", None)     # 상호는 지역으로 안 본다
+
+
+def test_candidate_far_bigger_than_us_is_capped_below_export_line():
+    """한 달 판넬이 우리 월매출의 몇 배인 곳은 다른 점수가 좋아도 엑셀 기준(70) 아래로."""
+    from prime_contractor.fitness import evaluate
+    awards = [Award(title=f"수배전반 설치공사 {i}", amount=4_000_000_000, category="공사",
+                    demand_org=f"기관{i}") for i in range(6)]
+    big = Candidate(name="큰전기", awards=awards, distance_km=20.0, address="경기도 평택시",
+                    bizno="1", ksic_code="F")
+    plain = evaluate(big, our_monthly_revenue=0, lookback_days=90)
+    capped = evaluate(big, our_monthly_revenue=90_000_000, lookback_days=90)
+    assert plain.total > 70
+    assert capped.total < 60 and capped.grade == "C"
+    assert any("감당" in c for c in capped.cautions)
+    assert capped.monthly_panel_amount == round(capped.est_panel_amount / 3)

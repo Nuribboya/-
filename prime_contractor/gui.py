@@ -41,7 +41,7 @@ from prime_contractor import __version__
 from prime_contractor.build_info import label, should_check_updates
 
 COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
-           ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
+           ("지역", 65), ("안성에서", 70), ("한 달 판넬(어림)", 110), ("점수", 55))
 SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
 REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
@@ -820,6 +820,14 @@ class App:
 
     def _screen(self, options: dict):
         cfg = build_config(options)
+        if not self.book and options.get("sales_path"):
+            # ② 탭에서 [계산하기]를 안 눌렀어도 저장된 매출 장부가 있으면 읽어 둔다.
+            # 우리 월매출을 모르면 '클수록 좋다'로 점수를 매겨, 직원 6명 회사가 감당 못 할
+            # 큰 곳이 1등에 오른다.
+            try:
+                self.book = load_sales(options["sales_path"])
+            except (OSError, ValueError):
+                self.book = None
         if self.book and self.book.average_revenue():
             from dataclasses import replace
             ours = self.book.average_revenue()
@@ -863,11 +871,13 @@ class App:
         self.result = result
         for i, c in enumerate(result.passed, 1):
             dist = f"{c.distance_km:.0f}km" if c.distance_km is not None else "미상"
-            est = getattr(c.fitness, "est_panel_amount", 0)
+            # 조회 기간 전체 합계(수십억)는 '한 달에 우리한테 올 일'로 오해하기 쉬워
+            # 한 달치로 나눠 보인다.
+            month = getattr(c.fitness, "monthly_panel_amount", 0)
             self.tree.insert("", END, values=(
                 i, c.grade or "-", c.name, "원청" if c.kind == "contractor" else "발주처",
                 c.sector or "미분류", c.region or "미상", dist,
-                f"{est / 1e8:.1f}억" if est else "-", f"{c.score:.1f}"),
+                _money(month), f"{c.score:.1f}"),
                 tags=(c.grade,))
         for grade, color in (("A", "#e8f5e9"), ("B", "#f1f8e9")):
             self.tree.tag_configure(grade, background=color)
@@ -1277,6 +1287,13 @@ class App:
                 f"{path}\n\n전체 {len(self.result.passed)}곳 중 {EXPORT_MIN_SCORE}점을 넘는 "
                 f"{kept}곳만 저장했습니다.\n\n폴더를 열까요?"):
             _open_folder(Path(path).parent)
+
+
+def _money(won: int) -> str:
+    """1억 넘으면 '1.2억', 아래면 '3,400만'."""
+    if not won:
+        return "-"
+    return f"{won / 1e8:.1f}억" if won >= 1e8 else f"{won / 1e4:,.0f}만"
 
 
 def _open_folder(folder: Path) -> None:

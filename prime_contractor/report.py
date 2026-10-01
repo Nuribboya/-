@@ -237,7 +237,7 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
     main = Sheet("연락할 곳", [
         Column("순위", 5, CENTER), Column("등급", 5, CENTER), Column("점수", 6, DECIMAL),
         Column("회사 이름", 22, WRAP), Column("지역", 7, CENTER), Column("거리(km)", 7, DECIMAL),
-        Column("예상 판넬 일감(원)", 13, MONEY), Column("왜 이 회사인가", 44, WRAP),
+        Column("한 달 판넬(원, 어림)", 13, MONEY), Column("왜 이 회사인가", 44, WRAP),
         Column("대표자", 9, CENTER), Column("주소", 30, WRAP),
     ])
     extra = Sheet("추가 정보", [
@@ -256,7 +256,7 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
         main.rows.append([
             rank, c.grade, round(c.score, 1), c.name, c.region,
             c.distance_km if c.distance_km is not None else "미상",
-            getattr(fit, "est_panel_amount", 0) or "",
+            getattr(fit, "monthly_panel_amount", 0) or "",
             getattr(fit, "headline", ""), c.ceo, c.address,
         ])
         main.cell_styles[(row, 1)] = GRADE_STYLE.get(c.grade, CENTER)
@@ -281,7 +281,8 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
         ["B등급 (60~74점)", "연락해 볼 만합니다. (파랑) '점수 근거' 시트에서 판넬 일감에 "
                           "배전반·제어반이 직접 적힌 일이 있는지 보세요."],
         ["점수 (100점 만점)", "판넬 일감 30 · 일감 크기 25 · 거리 20 · 꾸준함 15 · 안전 10"],
-        ["예상 판넬 일감", "따낸 공사비 중 판넬 몫을 업계 통념으로 어림한 값입니다. 견적이 아닙니다."],
+        ["한 달 판넬", "조회 기간에 따낸 공사비 중 판넬 몫을 업계 통념으로 어림해 한 달치로 나눈 "
+                     "값입니다. 그 회사 전체 물량이라 우리가 다 받는 게 아니고, 견적도 아닙니다."],
         ["거리 '미상'", "주소를 못 찾은 곳입니다. 연락 전에 위치를 확인하세요."],
         ["인쇄", "시트마다 A4 가로, 한 장 폭에 맞춰 두었습니다. 장마다 첫 줄이 다시 찍힙니다."],
     ], landscape=False)

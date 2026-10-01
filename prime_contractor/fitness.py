@@ -63,6 +63,10 @@ SCALE_CURVE = (
 SWEET_SPOT = (0.10, 0.40)
 #: 한 건의 판넬 몫이 우리 월매출의 몇 배를 넘으면 자재 선투입 경고를 붙이나
 BIG_JOB_MONTHS = 1.5
+#: (그 곳 한 달 판넬 ÷ 우리 월매출, 점수 상한). 직원 6명 회사가 감당할 수 없는 크기의
+#: 곳이 판넬 일감·거리·꾸준함 점수만으로 A등급에 오르던 것을 막는다. 규모 축(25점)
+#: 하나로는 부족했다 — 나머지 75점이 크면 여전히 75점을 넘었다.
+TOO_BIG_CAPS = ((3.0, 59.9), (1.5, 69.9))
 GRADE_ADVICE = {
     "A": "먼저 연락해 보세요",
     "B": "연락해 볼 만합니다",
@@ -91,7 +95,8 @@ class Fitness:
     axes: list[Axis] = field(default_factory=list)
     headline: str = ""
     cautions: list[str] = field(default_factory=list)
-    est_panel_amount: int = 0      # 추정 판넬 물량(원)
+    est_panel_amount: int = 0      # 추정 판넬 물량(원) — 조회 기간 전체
+    monthly_panel_amount: int = 0  # 위를 한 달치로 나눈 값 — 화면·엑셀엔 이걸 보인다
 
     @property
     def advice(self) -> str:
@@ -306,8 +311,17 @@ def evaluate(cand: Candidate, max_distance_km: float = 150.0,
     # 배점을 바꿔도 100점 만점으로 읽히게 정규화한다.
     span = sum(a.weight for a in axes) or 1.0
     total = round(total / span * 100, 1)
-    grade = next(g for cut, g in GRADE_CUTS if total >= cut)
     cautions = _cautions(cand)
+    per_month = monthly_panel(est, lookback_days)
+    if our_monthly_revenue > 0 and cand.awards and per_month:
+        ratio = per_month / our_monthly_revenue
+        for limit, cap in TOO_BIG_CAPS:
+            if ratio > limit and total > cap:
+                total = cap
+                cautions.append(f"한 달 판넬 물량이 우리 월매출의 {ratio:.1f}배 — 지금 인원으로 "
+                                f"감당하기 어려운 크기라 점수를 {cap:.0f}점 아래로 낮췄습니다")
+                break
+    grade = next(g for cut, g in GRADE_CUTS if total >= cut)
     if our_monthly_revenue > 0:
         biggest = largest_job_panel(cand)
         # 한 달 매출보다 조금 큰 건은 공공 공사에선 흔하다. 거기까지 경고하면
@@ -318,4 +332,4 @@ def evaluate(cand: Candidate, max_distance_km: float = 150.0,
                             f"돈이 되는지부터 보세요")
     return Fitness(total=total, grade=grade, axes=axes,
                    headline=_headline(cand, est), cautions=cautions,
-                   est_panel_amount=est)
+                   est_panel_amount=est, monthly_panel_amount=per_month)

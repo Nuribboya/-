@@ -15,6 +15,9 @@ log = logging.getLogger(__name__)
 
 #: 발주기관 후보에서 빼는 이름 (판넬을 직접 사지 않는 기관)
 _ORG_STOPWORDS = ("교육청", "학교", "대학교", "경찰", "소방", "법원", "우체국", "도서관")
+#: 나라장터가 여러 기관 공동 구매에 붙이는 자리표시 이름. 실제 연락할 곳이 아닌데
+#: 공사를 다 모아 '판넬 일감 1,000억'짜리 1등처럼 보였다.
+_ORG_PLACEHOLDERS = ("각 수요기관", "각수요기관", "수요기관", "각 기관", "각기관")
 
 
 @dataclass
@@ -47,7 +50,9 @@ def build_candidates(awards: list[Award], include_demand_orgs: bool = True) -> l
             key = f"biz:{a.winner_bizno}" if a.winner_bizno else f"nm:{normalize_name(a.winner_name)}"
             _bucket(key, Candidate(name=a.winner_name, kind="contractor", bizno=a.winner_bizno,
                                    awards=[a], sources={"나라장터"}))
-        if include_demand_orgs and a.demand_org and not any(s in a.demand_org for s in _ORG_STOPWORDS):
+        if (include_demand_orgs and a.demand_org
+                and a.demand_org.strip() not in _ORG_PLACEHOLDERS
+                and not any(s in a.demand_org for s in _ORG_STOPWORDS)):
             key = f"org:{normalize_name(a.demand_org)}"
             _bucket(key, Candidate(name=a.demand_org, kind="demand_org",
                                    awards=[a], sources={"나라장터(수요기관)"}))

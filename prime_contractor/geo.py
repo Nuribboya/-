@@ -91,6 +91,14 @@ _FAR_PROVINCES: tuple[tuple[tuple[str, ...], str, tuple[float, float]], ...] = (
 )
 
 
+#: 주소 없이 기관 이름만 있을 때: '한국농어촌공사 전남지역본부', '강원개발공사' 처럼
+#: 도 이름 바로 뒤에 본부·지사·공사 같은 말이 붙으면 그 도에 있는 곳이다. 회사 상호
+#: ('강원전기')까지 잡지 않으려고 뒤에 붙는 말을 좁혔다.
+_ORG_PROVINCE_RE = re.compile(
+    r"(경남|경북|전남|전북|강원|제주|부산|대구|울산)"
+    r"(?:지역본부|본부|지사|지부|사업단|사업본부|개발공사|도청|광역시|특별자치)")
+
+
 def distance_from_home(address_or_region: str) -> tuple[str, float | None]:
     """주소(또는 지역명)로 (시군구, 안성으로부터의 거리 km)를 돌려준다."""
     region = address_or_region if address_or_region in CITY_COORDS else extract_region(address_or_region)
@@ -100,4 +108,9 @@ def distance_from_home(address_or_region: str) -> tuple[str, float | None]:
     for hints, name, coord in _FAR_PROVINCES:
         if any(text.startswith(h) or f" {h}" in f" {text}" for h in hints):
             return name, round(haversine_km(HOME_COORD, coord), 1)
+    found = _ORG_PROVINCE_RE.search(text)
+    if found:
+        for _, name, coord in _FAR_PROVINCES:
+            if name == found.group(1):
+                return name, round(haversine_km(HOME_COORD, coord), 1)
     return "", None
