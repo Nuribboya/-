@@ -2180,3 +2180,35 @@ def test_vat_included_breakeven_is_in_ledger_units():
     assert vat.breakeven == round(plain.breakeven * 1.1)
     assert abs(vat.target - plain.target * 1.1) <= 1
     assert vat.profit_at(vat.breakeven) in (-1, 0, 1)
+
+
+def test_empty_revenue_column_is_an_error_not_the_fuel_table(tmp_path):
+    """매출 칸을 비운 장부에서 같은 시트의 주유비 표를 매출로 읽으면 안 된다 (실제로 겪음)."""
+    import pytest
+    from prime_contractor.sales import load_sales
+    cells = {"C2": "2026년 월매출원장리스트", "C3": "매출금액",
+             "G19": "2026년 주유비 리스트", "G20": "총금액",
+             "C19": "2026년 급여대장 리스트", "C20": "지급금액"}
+    for i in range(1, 9):
+        cells[f"B{3 + i}"] = f"{i}월"                  # 매출 금액은 비어 있다
+        cells[f"B{20 + i}"] = f"{i}월"
+        cells[f"C{20 + i}"] = 20_000_000 + i
+        cells[f"F{20 + i}"] = f"{i}월"
+        cells[f"G{20 + i}"] = 600_000 + i
+    path = _make_xlsx(tmp_path, {"월매출장": cells}, name="2026년매출현황.xlsx")
+    with pytest.raises(ValueError, match="매출 칸이 비어"):
+        load_sales(path)
+
+
+def test_sales_book_remembers_which_table_it_read(tmp_path):
+    from prime_contractor.sales import load_sales
+    cells = {"C2": "2026년 월매출원장리스트", "C3": "매출금액",
+             "G2": "2026년 주유비 리스트", "G3": "총금액"}
+    for i in range(1, 4):
+        cells[f"B{3 + i}"] = f"{i}월"
+        cells[f"C{3 + i}"] = 80_000_000 + i
+        cells[f"F{3 + i}"] = f"{i}월"
+        cells[f"G{3 + i}"] = 600_000 + i
+    book = load_sales(_make_xlsx(tmp_path, {"월매출장": cells}))
+    assert book.months[0].revenue == 80_000_001
+    assert "월매출원장" in book.title

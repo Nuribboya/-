@@ -436,6 +436,10 @@ class App:
         latest = book.latest_closed()
         target = latest.target if latest else 0
         parts = [f"목표 월 {target / 1e4:,.0f}만원 — {basis}" if target else "목표 없음"]
+        if book.title:
+            # 엉뚱한 표(주유비 등)를 매출로 읽으면 바로 눈에 띄게, 읽은 표 제목을 보인다.
+            from prime_contractor.sales import _title_name
+            parts.append(f"읽은 표: {_title_name(book.title)}")
         if cost is None:
             parts.append("손익은 '월 고정비'와 '재료·외주비'를 둘 다 적어야 나옵니다")
         elif cost.vat_included:

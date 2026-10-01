@@ -51,6 +51,7 @@ class MonthRecord:
 class SalesBook:
     months: list[MonthRecord] = field(default_factory=list)
     source: str = ""
+    title: str = ""          # 엑셀에서 읽은 표의 제목·머리글 — 엉뚱한 표를 읽었는지 사람이 보게
 
     def sorted_months(self) -> list[MonthRecord]:
         return sorted(self.months, key=lambda m: m.ym)
@@ -130,6 +131,11 @@ _YEAR_IN_TEXT = re.compile(r"(20\d{2})\s*년")
 _AMOUNT_SEARCH_WIDTH = 4
 #: 이 글자가 머리글에 있으면 '우리 매출' 블록으로 본다.
 _REVENUE_HINTS = ("매출", "수입", "판매")
+#: 이 글자가 머리글에 있으면 매출이 아니라 나가는 돈의 표다. 매출 시트 안에 급여·
+#: 주유비 표가 같이 있는 장부가 실제로 있었고, 매출 칸을 비워 두자 주유비를
+#: 매출로 읽었다.
+_NOT_REVENUE_HINTS = ("급여", "주유", "식대", "지급", "결제", "부가세", "부가가치세",
+                      "용역", "지출", "비용", "경비", "마감원장", "연차")
 _TARGET_HINTS = ("목표", "계획")
 
 
@@ -137,7 +143,8 @@ def _from_xlsx(path: Path) -> SalesBook:
     from prime_contractor.xlsx import col_index, read_sheets
 
     sheets = read_sheets(path)
-    best: tuple[int, list[MonthRecord]] = (-1, [])
+    best: tuple[int, list[MonthRecord], str] = (-1, [], "")
+    skipped: list[str] = []
     for name, grid in sheets.items():
         blocks = _month_blocks(grid, col_index)
         if not blocks:
@@ -147,14 +154,26 @@ def _from_xlsx(path: Path) -> SalesBook:
             months = _block_to_months(block, year)
             if not months:
                 continue
-            rank = _block_rank(name, block, len(months))
+            title = _block_title(grid, block, col_index)
+            # 표 머리글이나 시트 이름이 '나가는 돈'(급여·주유비·용역…)이면 매출이 아니다.
+            # 머리글에 '매출'이 있으면 시트 이름과 상관없이 매출로 본다.
+            if not any(h in title for h in _REVENUE_HINTS) and any(
+                    h in title or h in name for h in _NOT_REVENUE_HINTS):
+                skipped.append(_title_name(title) or name)
+                continue
+            rank = _block_rank(name, block, len(months), title)
             if rank > best[0]:
-                best = (rank, months)
+                best = (rank, months, title)
 
     if not best[1]:
-        raise ValueError("엑셀에서 월별 매출을 찾지 못했습니다. "
-                         "'1월' 같은 월 이름과 그 옆 칸에 금액이 있어야 합니다.")
-    return SalesBook(months=best[1], source=str(path))
+        names = list(dict.fromkeys(skipped))
+        more = f" 외 {len(names) - 5}개" if len(names) > 5 else ""
+        found = (f"\n\n매출이 아니라 건너뛴 표: {', '.join(names[:5])}{more}"
+                 if names else "")
+        raise ValueError("엑셀에서 월별 매출을 찾지 못했습니다. '1월' 같은 월 이름과 그 옆 칸에 "
+                         "매출 금액이 있어야 합니다. 매출 칸이 비어 있지 않은지 확인해 주세요."
+                         + found)
+    return SalesBook(months=best[1], source=str(path), title=best[2])
 
 
 #: 같은 열에서 행이 이보다 더 벌어지면 다른 표로 본다 — 표 사이엔 보통
@@ -258,9 +277,28 @@ def _block_to_months(block: dict, year: int) -> list[MonthRecord]:
     return [MonthRecord(ym=ym, revenue=int(a)) for ym, a in entries]
 
 
-def _block_rank(sheet_name: str, block: dict, month_count: int) -> int:
+def _block_title(grid, block: dict, col_index) -> str:
+    """블록 바로 위 몇 줄에서 금액 열(과 그 왼쪽 한 칸)에 적힌 글자 — 표 제목·머리글."""
+    first = min(block["rows"])
+    amount_col = col_index(block["col"])
+    texts = [(r, v.strip()) for (r, c), v in grid.items()
+             if isinstance(v, str) and v.strip() and 0 < first - r <= _YEAR_SEARCH_ROWS
+             and amount_col - 1 <= col_index(c) <= amount_col]
+    # 가까운 줄부터: 머리글('매출금액')이 제목('…리스트')보다 블록에 가깝다.
+    texts.sort(key=lambda t: -t[0])
+    return " / ".join(dict.fromkeys(t for _, t in texts[:3]))
+
+
+def _title_name(title: str) -> str:
+    """머리글 여러 줄 중 표 이름으로 보일 한 줄 — 가장 긴 글자('…리스트', '…마감원장')."""
+    return max(title.split(" / "), key=len) if title else ""
+
+
+def _block_rank(sheet_name: str, block: dict, month_count: int, title: str = "") -> int:
     """어느 블록이 '우리 월매출'인지 고른다. 머리글 글자를 우선으로 본다."""
     score = month_count
+    if any(h in title for h in _REVENUE_HINTS):
+        score += 50
     if any(h in sheet_name for h in _REVENUE_HINTS):
         score += 20
     if "거래처" in sheet_name or "부가" in sheet_name:
