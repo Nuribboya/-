@@ -212,10 +212,17 @@ def render_breakeven(book, model, today=None) -> str:
 
 
 def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None = None) -> Path:
-    """연락할 곳을 보기 좋은 엑셀로 쓴다. 시트 셋: 연락할 곳 · 점수 근거 · 읽는 법.
+    """연락할 곳을 인쇄해서 보기 좋은 엑셀로 쓴다.
 
-    CSV 는 칸이 30개 넘게 늘어서 있고 너비·서식이 없어 엑셀로 보기 힘들었다.
-    첫 시트엔 연락할 때 보는 칸만 앞쪽에 두고, 점수 계산 내역은 둘째 시트로 뺐다.
+    CSV 는 칸이 30개 넘게 늘어서 있고 너비·서식이 없어 보기 힘들었고, 화면용으로
+    넓게 잡은 표는 인쇄하면 한 회사가 A4 서너 장에 나뉘었다. 시트마다 A4 가로 한 장
+    폭에 들어가도록 칸을 나눴다.
+
+      연락할 곳 ... 연락할 때 보는 것만 (순위·등급·점수·회사·지역·거리·일감·이유·대표자·주소)
+      추가 정보 ... 대표 공사·사업자번호·상태·확인하실 점
+      점수 근거 ... 다섯 항목 점수와 이유
+      읽는 법 ..... 등급·점수 뜻, 몇 곳 중 몇 곳을 담았나
+
     min_score 를 주면 그 점수를 넘는 곳만 넣는다. 순위는 화면 표와 같은 번호다.
     """
     from datetime import date
@@ -226,54 +233,59 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
     picked = [(i, c) for i, c in enumerate(result.passed, 1)
               if min_score is None or c.score > min_score]
 
+    # 칸 너비 합을 150 안팎으로 — A4 가로 한 장에 글씨를 줄이지 않고 들어가는 폭.
     main = Sheet("연락할 곳", [
-        Column("순위", 6, CENTER), Column("등급", 6, CENTER), Column("점수", 7, DECIMAL),
-        Column("어떻게 할까", 15), Column("회사 이름", 26), Column("지역", 9, CENTER),
-        Column("안성에서(km)", 10, DECIMAL), Column("예상 판넬 일감(원)", 16, MONEY),
-        Column("따낸 공사(건)", 10, CENTER), Column("왜 이 회사인가", 48, WRAP),
-        Column("대표 공사", 40, WRAP), Column("대표자", 10), Column("주소", 36, WRAP),
-        Column("사업자번호", 13, CENTER), Column("사업자 상태", 11, CENTER),
-        Column("확인하실 점", 44, WRAP),
+        Column("순위", 5, CENTER), Column("등급", 5, CENTER), Column("점수", 6, DECIMAL),
+        Column("회사 이름", 22, WRAP), Column("지역", 7, CENTER), Column("거리(km)", 7, DECIMAL),
+        Column("예상 판넬 일감(원)", 13, MONEY), Column("왜 이 회사인가", 44, WRAP),
+        Column("대표자", 9, CENTER), Column("주소", 30, WRAP),
+    ])
+    extra = Sheet("추가 정보", [
+        Column("순위", 5, CENTER), Column("회사 이름", 22, WRAP), Column("따낸 공사(건)", 8, CENTER),
+        Column("대표 공사", 40, WRAP), Column("사업자번호", 12, CENTER),
+        Column("사업자 상태", 10, CENTER), Column("확인하실 점", 50, WRAP),
     ])
     detail = Sheet("점수 근거", [
-        Column("순위", 6, CENTER), Column("회사 이름", 26), Column("점수", 7, DECIMAL),
-        Column("판넬 일감", 9, DECIMAL), Column("판넬 일감 근거", 40, WRAP),
-        Column("일감 크기", 9, DECIMAL), Column("일감 크기 근거", 36, WRAP),
-        Column("거리", 8, DECIMAL), Column("거리 근거", 22, WRAP),
-        Column("꾸준함", 8, DECIMAL), Column("꾸준함 근거", 26, WRAP),
-        Column("안전", 8, DECIMAL), Column("안전 근거", 36, WRAP),
+        Column("순위", 5, CENTER), Column("회사 이름", 22, WRAP), Column("점수", 6, DECIMAL),
+        Column("판넬 일감 (30)", 30, WRAP), Column("일감 크기 (25)", 26, WRAP),
+        Column("거리 (20)", 16, WRAP), Column("꾸준함 (15)", 18, WRAP),
+        Column("안전 (10)", 24, WRAP),
     ])
     for row, (rank, c) in enumerate(picked):
         fit = c.fitness
         main.rows.append([
-            rank, c.grade, round(c.score, 1), getattr(fit, "advice", ""), c.name, c.region,
+            rank, c.grade, round(c.score, 1), c.name, c.region,
             c.distance_km if c.distance_km is not None else "미상",
-            getattr(fit, "est_panel_amount", 0) or "", c.award_count,
-            getattr(fit, "headline", ""), c.awards[0].title if c.awards else "",
-            c.ceo, c.address, c.bizno, c.business_status or "확인 안 함",
-            "\n".join(getattr(fit, "cautions", [])),
+            getattr(fit, "est_panel_amount", 0) or "",
+            getattr(fit, "headline", ""), c.ceo, c.address,
         ])
         main.cell_styles[(row, 1)] = GRADE_STYLE.get(c.grade, CENTER)
+        extra.rows.append([
+            rank, c.name, c.award_count, c.awards[0].title if c.awards else "",
+            c.bizno, c.business_status or "확인 안 함",
+            "\n".join(getattr(fit, "cautions", [])),
+        ])
         size = _axis(fit, "scale") or _axis(fit, "volume")
         values = [rank, c.name, round(c.score, 1)]
         for axis in (_axis(fit, "product_fit"), size, _axis(fit, "access"),
                      _axis(fit, "repeat"), _axis(fit, "safety")):
-            values += [axis.points, axis.detail] if axis else ["", ""]
+            values.append(f"{axis.points:g}점 — {axis.detail}" if axis else "")
         detail.rows.append(values)
 
     rule = f"{min_score:g}점을 넘는 곳만" if min_score is not None else "전부"
-    guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 90, WRAP)], rows=[
+    guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 80, WRAP)], rows=[
         ["만든 날", date.today().isoformat()],
         ["담은 곳", f"찾은 {len(result.passed)}곳 중 {rule} — {len(picked)}곳"],
-        ["순위", "프로그램 화면 표의 순위 번호와 같습니다."],
-        ["A등급 (75점~)", "먼저 연락해 보세요."],
-        ["B등급 (60~74점)", "연락해 볼 만합니다. '점수 근거' 시트에서 판넬 일감 근거에 "
+        ["순위", "프로그램 화면 표의 순위 번호와 같습니다. 시트끼리도 같은 번호입니다."],
+        ["A등급 (75점~)", "먼저 연락해 보세요. (초록)"],
+        ["B등급 (60~74점)", "연락해 볼 만합니다. (파랑) '점수 근거' 시트에서 판넬 일감에 "
                           "배전반·제어반이 직접 적힌 일이 있는지 보세요."],
         ["점수 (100점 만점)", "판넬 일감 30 · 일감 크기 25 · 거리 20 · 꾸준함 15 · 안전 10"],
         ["예상 판넬 일감", "따낸 공사비 중 판넬 몫을 업계 통념으로 어림한 값입니다. 견적이 아닙니다."],
         ["거리 '미상'", "주소를 못 찾은 곳입니다. 연락 전에 위치를 확인하세요."],
-    ])
-    return write_workbook(path, [main, detail, guide])
+        ["인쇄", "시트마다 A4 가로, 한 장 폭에 맞춰 두었습니다. 장마다 첫 줄이 다시 찍힙니다."],
+    ], landscape=False)
+    return write_workbook(path, [main, extra, detail, guide])
 
 
 def _axis(fit, key: str):

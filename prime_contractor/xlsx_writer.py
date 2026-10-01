@@ -6,6 +6,8 @@ exe 가 커지고 설치 단계가 늘어난다. 필요한 건 '머리글 굵게
 """
 from __future__ import annotations
 
+import math
+import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +32,34 @@ class Sheet:
     rows: list[list[object]] = field(default_factory=list)
     #: 칸마다 서식을 따로 줄 때 {(행 번호 0부터, 열 번호 0부터): 서식}. 없으면 열 서식.
     cell_styles: dict[tuple[int, int], int] = field(default_factory=dict)
+    #: 인쇄: A4 가로, 가로 한 장 폭에 맞춤, 장마다 첫 줄(머리글) 반복.
+    landscape: bool = True
+
+
+#: 한 줄 높이(pt). 글자 10pt 기준.
+LINE_HEIGHT = 14
+
+
+def text_units(text: str) -> float:
+    """엑셀 칸 너비 단위로 본 글자 폭. 한글·한자는 숫자 두 개 폭쯤 된다."""
+    return sum(1.8 if unicodedata.east_asian_width(ch) in "WF" else 1.0 for ch in text)
+
+
+def row_height(values: list[object], columns: list[Column]) -> float | None:
+    """줄바꿈 칸이 몇 줄이 될지 어림해 행 높이를 정한다. 한 줄이면 None(기본 높이).
+
+    엑셀은 줄바꿈 칸의 행 높이를 저장된 파일에서 늘 알아서 맞춰 주지 않는다 —
+    그러면 인쇄할 때 글이 잘린다. 그래서 높이를 직접 적어 둔다.
+    """
+    lines = 1
+    for value, col in zip(values, columns):
+        if col.style != WRAP or not value:
+            continue
+        usable = max(col.width - 1.5, 4)
+        count = sum(max(1, math.ceil(text_units(part) / usable))
+                    for part in str(value).split("\n"))
+        lines = max(lines, count)
+    return None if lines == 1 else lines * LINE_HEIGHT + 4
 
 
 def write_workbook(path: str | Path, sheets: list[Sheet]) -> Path:
@@ -79,11 +109,15 @@ def _sheet(sheet: Sheet) -> str:
             value = values[i] if i < len(values) else ""
             style = sheet.cell_styles.get((r, i), col.style)
             cells.append(_cell(f"{_col_letter(i)}{r + 2}", value, style))
-        rows.append(f'<row r="{r + 2}">' + "".join(cells) + "</row>")
+        height = row_height(values, sheet.columns)
+        attrs = f' ht="{height}" customHeight="1"' if height else ""
+        rows.append(f'<row r="{r + 2}"{attrs}>' + "".join(cells) + "</row>")
     end = len(sheet.rows) + 1
+    orientation = "landscape" if sheet.landscape else "portrait"
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
         # 첫 줄(머리글)을 고정해 내려도 무슨 칸인지 보이게.
         '<sheetViews><sheetView workbookViewId="0">'
         '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
@@ -91,6 +125,12 @@ def _sheet(sheet: Sheet) -> str:
         f'<sheetFormatPr defaultRowHeight="18"/><cols>{cols}</cols>'
         f'<sheetData>{"".join(rows)}</sheetData>'
         f'<autoFilter ref="A1:{last}{end}"/>'
+        # 인쇄: 여백 좁게, A4, 가로 한 장 폭에 맞추고 세로는 필요한 만큼, 쪽 번호.
+        '<printOptions horizontalCentered="1"/>'
+        '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
+        f'<pageSetup paperSize="9" orientation="{orientation}" fitToWidth="1" fitToHeight="0"/>'
+        f'<headerFooter><oddHeader>&amp;L&amp;"맑은 고딕,굵게"{escape(sheet.name)}</oddHeader>'
+        '<oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>'
         '</worksheet>')
 
 
@@ -126,6 +166,9 @@ def _workbook(sheets: list[Sheet]) -> str:
         f'<definedName name="_xlnm._FilterDatabase" localSheetId="{i}" hidden="1">'
         f"'{escape(s.name[:31])}'!$A$1:${_col_letter(len(s.columns) - 1)}${len(s.rows) + 1}"
         "</definedName>"
+        # 인쇄할 때 장마다 첫 줄(머리글)을 다시 찍는다.
+        f'<definedName name="_xlnm.Print_Titles" localSheetId="{i}">'
+        f"'{escape(s.name[:31])}'!$1:$1</definedName>"
         for i, s in enumerate(sheets))
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

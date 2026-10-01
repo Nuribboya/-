@@ -2324,8 +2324,8 @@ def test_far_province_company_is_excluded_by_distance_limit():
     assert any("km" in r for r in far.overlap.reasons)
 
 
-def test_xlsx_export_has_three_readable_sheets(tmp_path):
-    """엑셀은 '연락할 곳 · 점수 근거 · 읽는 법' 세 시트. 70점 넘는 곳만, 순위는 화면 그대로."""
+def test_xlsx_export_sheets_for_printing(tmp_path):
+    """연락할 곳 · 추가 정보 · 점수 근거 · 읽는 법. 70점 넘는 곳만, 순위는 화면 그대로."""
     from prime_contractor.config import load_config
     from prime_contractor.pipeline import run_screen
     from prime_contractor.report import write_xlsx
@@ -2335,16 +2335,42 @@ def test_xlsx_export_has_three_readable_sheets(tmp_path):
     assert above and len(above) < len(result.passed)          # 걸러지는 곳이 실제로 있다
 
     sheets = read_sheets(write_xlsx(result, tmp_path / "out.xlsx", min_score=70))
-    assert list(sheets) == ["연락할 곳", "점수 근거", "읽는 법"]
+    assert list(sheets) == ["연락할 곳", "추가 정보", "점수 근거", "읽는 법"]
     main = sheets["연락할 곳"]
-    assert main[(1, "A")] == "순위" and main[(1, "E")] == "회사 이름"
-    names = [main[(r, "E")] for r in range(2, len(above) + 2)]
+    assert main[(1, "A")] == "순위" and main[(1, "D")] == "회사 이름"
+    names = [main[(r, "D")] for r in range(2, len(above) + 2)]
     assert names == [c.name for _, c in above]
-    assert (len(above) + 2, "E") not in main                  # 70점 이하는 없다
+    assert (len(above) + 2, "D") not in main                  # 70점 이하는 없다
     assert main[(2, "A")] == above[0][0] and main[(2, "B")] == above[0][1].grade
-    assert "판넬" in sheets["점수 근거"][(2, "E")]             # 판넬 일감 근거
+    assert "판넬" in sheets["점수 근거"][(2, "D")]             # 판넬 일감 점수·근거
     guide = sheets["읽는 법"]
     assert any("70점을 넘는 곳만" in str(v) for v in guide.values())
+
+
+def test_xlsx_sheets_fit_one_landscape_page_wide_and_repeat_header(tmp_path):
+    """인쇄용: 칸 너비 합이 A4 가로 한 장 안팎, 가로 방향·폭 맞춤·머리글 반복."""
+    import zipfile
+    from prime_contractor.config import load_config
+    from prime_contractor.pipeline import run_screen
+    from prime_contractor.report import write_xlsx
+    path = write_xlsx(run_screen(load_config(within_km=None), offline=True),
+                      tmp_path / "out.xlsx", min_score=50)
+    with zipfile.ZipFile(path) as zf:
+        sheet1 = zf.read("xl/worksheets/sheet1.xml").decode()
+        workbook = zf.read("xl/workbook.xml").decode()
+    import re
+    widths = [float(w) for w in re.findall(r'width="([\d.]+)"', sheet1)]
+    assert sum(widths) <= 155
+    assert 'orientation="landscape"' in sheet1 and 'fitToWidth="1"' in sheet1
+    assert "_xlnm.Print_Titles" in workbook
+    assert 'customHeight="1"' in sheet1                       # 긴 글 행은 높이를 늘려 둔다
+
+
+def test_row_height_grows_with_wrapped_korean_text():
+    from prime_contractor.xlsx_writer import WRAP, Column, row_height
+    cols = [Column("이유", 20, WRAP)]
+    assert row_height(["짧음"], cols) is None
+    assert row_height(["가" * 40], cols) > row_height(["가" * 15], cols)
 
 
 def test_xlsx_writer_escapes_text_and_names_columns():
