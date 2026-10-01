@@ -15,12 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: 부가세 포함 금액 ÷ 이 값 = 공급가액. 부가세(10%)는 회사 돈이 아니라 나라에 낼 돈이다.
+VAT_FACTOR = 1.1
+
 
 @dataclass
 class CostModel:
     monthly_fixed: int            # 월 고정비 (인건비·임차료·경비·이자)
     variable_ratio: float         # 변동비율 0~1 (재료비·외주비 ÷ 매출)
     monthly_profit: int = 0       # 월 목표이익 (없으면 손익분기가 곧 목표)
+    #: 매출 장부 금액이 부가세 포함이면 True. 손익은 공급가액(÷1.1)으로 계산하되,
+    #: 손익분기·목표는 장부와 같은 '부가세 포함' 단위로 돌려줘서 장부 숫자와
+    #: 바로 견줄 수 있게 한다. 공헌이익률에 1/1.1 을 곱하면 둘 다 한 번에 된다.
+    vat_included: bool = False
 
     def __post_init__(self) -> None:
         if self.monthly_fixed < 0:
@@ -31,8 +38,9 @@ class CostModel:
 
     @property
     def margin_ratio(self) -> float:
-        """공헌이익률 — 매출 1원이 고정비를 갚는 데 쓰이는 몫."""
-        return 1.0 - self.variable_ratio
+        """공헌이익률 — 장부 매출 1원이 고정비를 갚는 데 쓰이는 몫."""
+        ratio = 1.0 - self.variable_ratio
+        return ratio / VAT_FACTOR if self.vat_included else ratio
 
     @property
     def breakeven(self) -> int:

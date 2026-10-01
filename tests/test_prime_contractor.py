@@ -2162,3 +2162,21 @@ def test_sales_tab_has_only_the_sales_ledger_file():
     assert "expense_path" not in source
     assert "fixed_path" not in source
 
+
+
+def test_vat_included_ledger_profit_uses_supply_amount():
+    """장부 매출이 부가세 포함이면 손익은 ÷1.1 한 공급가액으로 계산한다."""
+    from prime_contractor.breakeven import CostModel
+    cost = CostModel(monthly_fixed=24_000_000, variable_ratio=0.2, vat_included=True)
+    assert cost.profit_at(110_000_000) == round(100_000_000 * 0.8 - 24_000_000)
+
+
+def test_vat_included_breakeven_is_in_ledger_units():
+    """손익분기·목표는 장부와 같은 '부가세 포함' 단위로 나와야 장부 숫자와 바로 견준다."""
+    from prime_contractor.breakeven import CostModel
+    plain = CostModel(monthly_fixed=24_000_000, variable_ratio=0.2, monthly_profit=5_000_000)
+    vat = CostModel(monthly_fixed=24_000_000, variable_ratio=0.2, monthly_profit=5_000_000,
+                    vat_included=True)
+    assert vat.breakeven == round(plain.breakeven * 1.1)
+    assert abs(vat.target - plain.target * 1.1) <= 1
+    assert vat.profit_at(vat.breakeven) in (-1, 0, 1)

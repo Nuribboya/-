@@ -285,6 +285,9 @@ class App:
             row=0, column=1, columnspan=5, sticky=W, pady=3)
         ttk.Button(box, text="파일 찾기", command=self.on_pick_sales).grid(
             row=0, column=6, padx=6, sticky=W)
+        self.sales_vat_included = BooleanVar(value=saved.get("sales_vat_included", False))
+        ttk.Checkbutton(box, text="부가세 포함 금액", variable=self.sales_vat_included).grid(
+            row=0, column=7, sticky=W)
 
         self.fixed_cost = StringVar(value=str(saved.get("fixed_cost", "")))
         self.variable_ratio = StringVar(value=str(saved.get("variable_ratio", "")))
@@ -319,7 +322,8 @@ class App:
         self.calc_summary.grid(row=4, column=0, columnspan=8, sticky=W, pady=(8, 0))
         ttk.Label(box, text="목표: 고정비·재료비가 있으면 손익분기(+목표이익) → 없으면 '월 목표' → "
                             "비었으면 최근 평균.\n"
-                            "손익: 매출 × (1 − 재료·외주비 %) − 월 고정비.",
+                            "손익: 매출 × (1 − 재료·외주비 %) − 월 고정비. "
+                            "장부가 부가세 포함이면 체크 — 매출을 1.1로 나눠 계산합니다.",
                   foreground="#666").grid(row=5, column=0, columnspan=8, sticky=W, pady=(6, 0))
 
         self.result_tabs = ttk.Notebook(root)
@@ -434,6 +438,8 @@ class App:
         parts = [f"목표 월 {target / 1e4:,.0f}만원 — {basis}" if target else "목표 없음"]
         if cost is None:
             parts.append("손익은 '월 고정비'와 '재료·외주비'를 둘 다 적어야 나옵니다")
+        elif cost.vat_included:
+            parts.append("매출 장부가 부가세 포함 — 손익은 부가세 빼고, 목표는 장부와 같은 포함 금액")
         self.target_basis = basis if target else ""
         diag = self._current_diagnosis()
         self.calc_summary.configure(text="  ·  ".join(parts))
@@ -465,7 +471,8 @@ class App:
             return None
         try:
             return CostModel(monthly_fixed=fixed, variable_ratio=parse_ratio(ratio_text),
-                             monthly_profit=profit)
+                             monthly_profit=profit,
+                             vat_included=self.sales_vat_included.get())
         except ValueError as exc:
             if not quiet:
                 messagebox.showwarning("숫자를 확인해 주세요", str(exc))
@@ -685,6 +692,7 @@ class App:
             "profile_contact": self.profile_contact.get(),
             "profile_phone": self.profile_phone.get(),
             "sales_path": self.sales_path.get(),
+            "sales_vat_included": self.sales_vat_included.get(),
             "monthly_target": self.monthly_target.get(),
             "fixed_cost": self.fixed_cost.get(),
             "variable_ratio": self.variable_ratio.get(),
