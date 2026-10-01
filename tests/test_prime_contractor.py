@@ -2322,3 +2322,32 @@ def test_far_province_company_is_excluded_by_distance_limit():
     passed, excluded = split_by_overlap([near, far], replace(cfg, min_awards=0))
     assert [c.name for c in passed] == ["가까운전기"]
     assert any("km" in r for r in far.overlap.reasons)
+
+
+def test_xlsx_export_has_three_readable_sheets(tmp_path):
+    """엑셀은 '연락할 곳 · 점수 근거 · 읽는 법' 세 시트. 70점 넘는 곳만, 순위는 화면 그대로."""
+    from prime_contractor.config import load_config
+    from prime_contractor.pipeline import run_screen
+    from prime_contractor.report import write_xlsx
+    from prime_contractor.xlsx import read_sheets
+    result = run_screen(load_config(within_km=None), offline=True)
+    above = [(i, c) for i, c in enumerate(result.passed, 1) if c.score > 70]
+    assert above and len(above) < len(result.passed)          # 걸러지는 곳이 실제로 있다
+
+    sheets = read_sheets(write_xlsx(result, tmp_path / "out.xlsx", min_score=70))
+    assert list(sheets) == ["연락할 곳", "점수 근거", "읽는 법"]
+    main = sheets["연락할 곳"]
+    assert main[(1, "A")] == "순위" and main[(1, "E")] == "회사 이름"
+    names = [main[(r, "E")] for r in range(2, len(above) + 2)]
+    assert names == [c.name for _, c in above]
+    assert (len(above) + 2, "E") not in main                  # 70점 이하는 없다
+    assert main[(2, "A")] == above[0][0] and main[(2, "B")] == above[0][1].grade
+    assert "판넬" in sheets["점수 근거"][(2, "E")]             # 판넬 일감 근거
+    guide = sheets["읽는 법"]
+    assert any("70점을 넘는 곳만" in str(v) for v in guide.values())
+
+
+def test_xlsx_writer_escapes_text_and_names_columns():
+    from prime_contractor.xlsx_writer import _cell, _col_letter
+    assert [_col_letter(i) for i in (0, 25, 26, 27)] == ["A", "Z", "AA", "AB"]
+    assert "&lt;주&gt; &amp; 전기" in _cell("A1", "<주> & 전기", 0)

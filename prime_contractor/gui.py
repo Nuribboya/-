@@ -34,7 +34,7 @@ from prime_contractor.app_settings import (
 from prime_contractor.help_text import HELP_TEXT
 from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
-from prime_contractor.report import write_csv
+from prime_contractor.report import write_xlsx
 from prime_contractor.sales import load_sales, plan_to_close_gap
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
@@ -1259,12 +1259,19 @@ class App:
                 f"{EXPORT_MIN_SCORE}점을 넘는 곳이 없습니다 (전체 {len(self.result.passed)}곳).\n"
                 "조건(거리·업종·며칠치)을 넓혀서 다시 찾아보세요.")
             return
+        from datetime import date
         path = filedialog.asksaveasfilename(
-            defaultextension=".csv", initialfile="원청후보.csv",
-            filetypes=[("CSV (엑셀)", "*.csv")])
+            defaultextension=".xlsx", initialfile=f"원청후보_{date.today():%Y%m%d}.xlsx",
+            filetypes=[("엑셀", "*.xlsx")])
         if not path:
             return
-        write_csv(self.result, path, min_score=EXPORT_MIN_SCORE)
+        try:
+            write_xlsx(self.result, path, min_score=EXPORT_MIN_SCORE)
+        except OSError as exc:
+            # 같은 이름 파일이 엑셀에 열려 있으면 윈도우가 덮어쓰기를 막는다.
+            messagebox.showerror("저장하지 못했습니다",
+                                 f"{exc}\n\n같은 이름의 파일이 엑셀에 열려 있으면 닫고 다시 해주세요.")
+            return
         if messagebox.askyesno(
                 "저장 완료",
                 f"{path}\n\n전체 {len(self.result.passed)}곳 중 {EXPORT_MIN_SCORE}점을 넘는 "
