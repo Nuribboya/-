@@ -44,6 +44,8 @@ COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳"
            ("지역", 65), ("안성에서", 70), ("예상 판넬 일감", 100), ("점수", 55))
 SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
+REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
+                  ("판정", 520))
 PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
                 ("한 달 예상 금액", 120), ("합치면", 120))
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
@@ -329,9 +331,11 @@ class App:
         self.result_tabs = ttk.Notebook(root)
         self.result_tabs.pack(fill=BOTH, expand=True, padx=10, pady=(5, 10))
         monthly = ttk.Frame(self.result_tabs, padding=6)
+        self.review_tab = ttk.Frame(self.result_tabs, padding=6)
         advice = ttk.Frame(self.result_tabs, padding=6)
         self.plan_tab = ttk.Frame(self.result_tabs, padding=6)
         self.result_tabs.add(monthly, text="  달마다 손익  ")
+        self.result_tabs.add(self.review_tab, text="  기준과 비교  ")
         self.result_tabs.add(advice, text="  뭐부터 챙길지  ")
         self.result_tabs.add(self.plan_tab, text="  모자란 만큼 채울 회사  ")
 
@@ -355,6 +359,8 @@ class App:
                                    command=self.on_find_for_gap, state="disabled",
                                    bootstyle="primary")
         self.gap_button.pack(side=RIGHT)
+
+        self._build_review(self.review_tab, saved)
 
         self.diag_text = scrolledtext.ScrolledText(advice, height=8, wrap="word", state="disabled")
         self.diag_text.pack(fill=BOTH, expand=True)
@@ -380,6 +386,54 @@ class App:
                                                        "누르면 여기에 나옵니다.",
                                    foreground="#333", wraplength=980)
         self.plan_note.pack(fill=X, pady=(4, 0))
+
+    def _build_review(self, root, saved: dict) -> None:
+        """'기준과 비교' 탭: 시작 달 이전을 평소(기준)로 잡고, 그 뒤 달마다 판정한다."""
+        from datetime import date
+        today = date.today()
+        top = ttk.Frame(root)
+        top.pack(fill=X)
+        ttk.Label(top, text="이 달부터 점검").pack(side=LEFT)
+        self.review_start = StringVar(
+            value=saved.get("review_start") or f"{today.year:04d}-{today.month:02d}")
+        start = ttk.Entry(top, textvariable=self.review_start, width=9)
+        start.pack(side=LEFT, padx=(4, 4))
+        start.bind("<Return>", lambda _e: self.book and self._render_review())
+        ttk.Label(top, text="(예: 2026-10) — 그 전에 끝난 달들의 평균이 '평소'가 됩니다",
+                  foreground="#666").pack(side=LEFT)
+        self.review_base = ttk.Label(root, text="[계산하기]를 누르면 나옵니다.",
+                                     font=("", 10, "bold"))
+        self.review_base.pack(fill=X, pady=(6, 4))
+        self.review_tree = ttk.Treeview(root, columns=[c for c, _ in REVIEW_COLUMNS],
+                                        show="headings", height=7)
+        for name, width in REVIEW_COLUMNS:
+            self.review_tree.heading(name, text=name)
+            self.review_tree.column(name, width=width, anchor=W)
+        self.review_tree.pack(fill=BOTH, expand=True)
+        self.review_tree.tag_configure("bad", background="#fdecea")
+        self.review_tree.tag_configure("warn", background="#fff4e5")
+        self.review_total = ttk.Label(root, text="", font=("", 10, "bold"), wraplength=980)
+        self.review_total.pack(fill=X, pady=(6, 0))
+
+    def _render_review(self) -> None:
+        from prime_contractor.monthly_review import review, summary_lines
+        start = self.review_start.get().strip()
+        if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])", start):
+            self.review_base.configure(text="'이 달부터 점검'은 2026-10 처럼 적어 주세요.")
+            return
+        result = review(self.book, self.cost_model, start)
+        lines = summary_lines(result, self.cost_model)
+        self.review_base.configure(text=lines[0])
+        self.review_total.configure(text=lines[1])
+        self.review_tree.delete(*self.review_tree.get_children())
+        for c in result.checks:
+            # 진행 중인 달은 매출이 다 안 찍혀 '평소 대비'가 늘 크게 낮게 나온다. 빼 둔다.
+            vs = (f"{c.vs_baseline * 100:+.0f}%" if result.baseline and c.level != "open"
+                  else "-")
+            profit = f"{c.profit / 1e4:+,.0f}만원" if c.profit is not None else "-"
+            self.review_tree.insert("", END, values=(
+                c.ym, f"{c.revenue / 1e4:,.0f}만원", vs, profit, c.verdict),
+                tags=(c.level,) if c.level in ("bad", "warn") else ())
 
     # --- 업데이트 -------------------------------------------------------------
 
@@ -450,6 +504,7 @@ class App:
 
         self._render_sales()
         self._render_diagnosis(diag)
+        self._render_review()
 
     def _month_profit(self, month) -> int | None:
         return self.cost_model.profit_at(month.revenue) if self.cost_model else None
@@ -704,6 +759,7 @@ class App:
             "employees": self.employees.get(),
             "gemini_key": self.gemini_key.get(),
             "months_back": self.months_back.get(),
+            "review_start": self.review_start.get(),
             "goal_target": self.goal_target.get(),
             "goal_current": self.goal_current.get(),
             "goal_months": self.goal_months.get(),

@@ -2212,3 +2212,70 @@ def test_sales_book_remembers_which_table_it_read(tmp_path):
     book = load_sales(_make_xlsx(tmp_path, {"월매출장": cells}))
     assert book.months[0].revenue == 80_000_001
     assert "월매출원장" in book.title
+
+
+# --- 기준과 비교 (10월부터 점검) ------------------------------------------------
+
+def _review_cost():
+    from prime_contractor.breakeven import CostModel
+    return CostModel(monthly_fixed=30_000_000, variable_ratio=0.182, monthly_profit=5_000_000,
+                     vat_included=True)
+
+
+def test_review_baseline_is_the_average_before_the_start_month():
+    from datetime import date
+    from prime_contractor.monthly_review import review
+    book = _book([("2026-07", 100_000_000), ("2026-08", 80_000_000), ("2026-09", 60_000_000),
+                  ("2026-10", 70_000_000)])
+    r = review(book, _review_cost(), "2026-10", today=date(2026, 11, 3))
+    assert (r.baseline.first, r.baseline.last, r.baseline.months) == ("2026-07", "2026-09", 3)
+    assert r.baseline.avg_revenue == 80_000_000
+    assert r.baseline.low == ("2026-09", 60_000_000)
+    assert [c.ym for c in r.checks] == ["2026-10"]
+    assert round(r.checks[0].vs_baseline, 3) == -0.125
+
+
+def test_review_flags_loss_shortfall_and_big_drop():
+    from datetime import date
+    from prime_contractor.monthly_review import review
+    cost = _review_cost()
+    book = _book([("2026-09", 100_000_000), ("2026-10", 30_000_000),
+                  ("2026-11", cost.target - 1_000_000), ("2026-12", 120_000_000)])
+    r = review(book, cost, "2026-10", today=date(2027, 1, 5))
+    loss, short, good = r.checks
+    assert loss.level == "bad" and loss.verdict.startswith("적자")
+    assert "원청 물량 확인" in loss.verdict                       # 평소보다 70% 적음
+    assert short.level == "warn" and "목표" in short.verdict
+    assert good.level == "good" and good.verdict.startswith("목표 달성")
+
+
+def test_review_month_in_progress_shows_what_is_left():
+    from datetime import date
+    from prime_contractor.monthly_review import review
+    cost = _review_cost()
+    book = _book([("2026-09", 80_000_000), ("2026-10", 20_000_000)])
+    r = review(book, cost, "2026-10", today=date(2026, 10, 15))
+    (check,) = r.checks
+    assert check.level == "open"
+    assert "목표까지" in check.verdict and check.profit is None
+
+
+def test_review_summary_without_new_months_says_to_wait():
+    from datetime import date
+    from prime_contractor.monthly_review import review, summary_lines
+    book = _book([("2026-08", 80_000_000), ("2026-09", 60_000_000)])
+    r = review(book, _review_cost(), "2026-10", today=date(2026, 10, 1))
+    first, second = summary_lines(r, _review_cost())
+    assert "2026-08~2026-09" in first and "7,000만원" in first
+    assert "아직 없습니다" in second
+
+
+def test_review_summary_totals_since_start():
+    from datetime import date
+    from prime_contractor.monthly_review import review, summary_lines
+    cost = _review_cost()
+    book = _book([("2026-09", 80_000_000), ("2026-10", 50_000_000), ("2026-11", 60_000_000)])
+    r = review(book, cost, "2026-10", today=date(2026, 12, 2))
+    _, total = summary_lines(r, cost)
+    assert "2개월 누적 매출 11,000만원" in total
+    assert "목표보다" in total
