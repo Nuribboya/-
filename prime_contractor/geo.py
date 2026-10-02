@@ -50,8 +50,13 @@ _PROVINCE_HINTS = {"광주광역시": "광주광역", "전라남도": "광주광
 _CITY_RE = re.compile(r"([가-힣]{2,4})(?:특별시|광역시|특별자치시|특별자치도|시|군)(?![가-힣])")
 
 
-def extract_region(address: str) -> str:
-    """주소 문자열에서 좌표표에 있는 시군구 이름을 뽑는다. 못 찾으면 빈 문자열."""
+def extract_region(address: str, loose: bool = True) -> str:
+    """주소 문자열에서 좌표표에 있는 시군구 이름을 뽑는다. 못 찾으면 빈 문자열.
+
+    loose=False 면 '평택시'·'천안시'처럼 시·군이 붙은 이름만 본다. 회사 상호는
+    '세종전기'·'서울전기공업'·'화성산업'처럼 도시 이름을 그냥 붙인 경우가 많아,
+    글자만 맞춰 보면 부산 회사가 '세종 59km'로 둔갑한다.
+    """
     if not address:
         return ""
     for hint, mapped in _PROVINCE_HINTS.items():
@@ -60,6 +65,8 @@ def extract_region(address: str) -> str:
     for token in _CITY_RE.findall(address):
         if token in CITY_COORDS:
             return token
+    if not loose:
+        return ""
     # '경기도 안성' 처럼 접미사가 빠진 표기도 받아준다.
     for city in CITY_COORDS:
         if city in address:
@@ -99,12 +106,23 @@ _ORG_PROVINCE_RE = re.compile(
     r"(?:지역본부|본부|지사|지부|사업단|사업본부|개발공사|도청|광역시|특별자치)")
 
 
-def distance_from_home(address_or_region: str) -> tuple[str, float | None]:
-    """주소(또는 지역명)로 (시군구, 안성으로부터의 거리 km)를 돌려준다."""
-    region = address_or_region if address_or_region in CITY_COORDS else extract_region(address_or_region)
+def distance_from_home(address_or_region: str,
+                       company_name: bool = False) -> tuple[str, float | None]:
+    """주소(또는 지역명)로 (시군구, 안성으로부터의 거리 km)를 돌려준다.
+
+    company_name=True 는 주소가 없어 회사 상호로 짐작할 때다. 상호 속 도시 이름은
+    위치가 아니라 이름일 뿐인 경우가 많아('세종전기', '현대아산') '평택시'처럼
+    시·군까지 붙은 것만 믿는다. 못 찾으면 거리 '미상'으로 둔다.
+    """
+    if address_or_region in CITY_COORDS:
+        region = address_or_region
+    else:
+        region = extract_region(address_or_region, loose=not company_name)
     if region:
         return region, round(haversine_km(HOME_COORD, CITY_COORDS[region]), 1)
     text = address_or_region or ""
+    if company_name:
+        return "", None
     for hints, name, coord in _FAR_PROVINCES:
         if any(text.startswith(h) or f" {h}" in f" {text}" for h in hints):
             return name, round(haversine_km(HOME_COORD, coord), 1)

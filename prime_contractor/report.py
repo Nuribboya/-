@@ -19,7 +19,7 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
     lines.append("")
 
     cols = [("#", 3), ("등급", 4), ("회사 이름", 26), ("어떤 곳", 7), ("하는 일", 18),
-            ("지역", 8), ("안성에서", 8), ("예상 판넬", 10), ("점수", 5)]
+            ("지역", 8), ("안성에서", 8), ("한 달 판넬", 10), ("점수", 5)]
     if not result.passed and not result.excluded:
         lines.append("한 곳도 못 찾았습니다. 이렇게 해보세요:")
         lines.append("  1) python -m prime_contractor.cli probe   ← 어디서 막혔는지 알려줍니다")
@@ -33,8 +33,8 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
 
     for i, c in enumerate(result.passed[:limit], 1):
         dist = f"{c.distance_km:.0f}km" if c.distance_km is not None else "미상"
-        est = getattr(c.fitness, "est_panel_amount", 0)
-        panel = f"{est / 1e8:.1f}억" if est else "-"
+        month = getattr(c.fitness, "monthly_panel_amount", 0)
+        panel = (f"{month / 1e8:.1f}억" if month >= 1e8 else f"{month / 1e4:,.0f}만") if month else "-"
         row = [str(i), c.grade or "-", _clip(c.name, 26),
                "원청" if c.kind == "contractor" else "발주처",
                _clip(c.sector or "미분류", 18), c.region or "미상", dist, panel, f"{c.score:.1f}"]
@@ -49,7 +49,8 @@ def render_table(result: ScreenResult, limit: int = 20, show_excluded: bool = Tr
         lines.append("  A 먼저 연락 / B 연락해 볼 만함 / C 여유 있을 때 / D 지금은 아님")
         lines.append("'어떤 곳' — 원청: 공사를 따내 판넬을 주문하는 회사 / "
                      "발주처: 공사를 맡기는 관공서")
-        lines.append("'예상 판넬' 은 공사비 중 판넬 몫을 어림잡은 값입니다. 실제 견적과 다릅니다.")
+        lines.append("'한 달 판넬' 은 공사비 중 판넬 몫을 어림잡아 한 달치로 나눈 값입니다. "
+                     "실제 견적과 다릅니다.")
 
     if show_excluded and result.excluded:
         lines.append("")
@@ -72,13 +73,21 @@ CSV_HEADER = [
 ]
 
 
-def _axis_points(fit, key: str):
+def _size_or(fit, key: str):
+    """'일감 크기' 칸은 우리 월매출을 알면 '규모 맞음'(scale) 축이 대신 들어간다."""
     axis = fit.axis(key) if fit else None
+    if axis is None and key == "volume" and fit:
+        axis = fit.axis("scale")
+    return axis
+
+
+def _axis_points(fit, key: str):
+    axis = _size_or(fit, key)
     return axis.points if axis else ""
 
 
 def _axis_detail(fit, key: str) -> str:
-    axis = fit.axis(key) if fit else None
+    axis = _size_or(fit, key)
     return axis.detail if axis else ""
 
 

@@ -176,7 +176,7 @@ def _volume(cand: Candidate, est: int) -> Axis:
     # 10억이면 만점. 로그라 대형 1건이 전부를 먹지 않는다.
     score = min(math.log1p(eok) / math.log(11) * 100, 100)
     return Axis("volume", "일감 크기", score, 25.0,
-                f"공사비 {cand.award_amount / 1e8:.1f}억 중 판넬 몫을 약 {eok:.1f}억으로 봅니다")
+                f"조회 기간 공사비 {cand.award_amount / 1e8:.1f}억 중 판넬 몫을 약 {eok:.1f}억으로 봅니다")
 
 
 def _access(cand: Candidate, max_km: float) -> Axis:
@@ -212,7 +212,9 @@ def _safety(cand: Candidate) -> Axis:
     return Axis("safety", "안전", score, 10.0, f"기존 원청과 {label} · 확인된 회사 정보 {known}/3가지")
 
 
-def _headline(cand: Candidate, est: int) -> str:
+def _headline(cand: Candidate, per_month: int) -> str:
+    """한 줄 요약. 판넬은 한 달치로 적는다 — 조회 기간 합계(수십억)를 적으면 바로 옆
+    '한 달 판넬' 칸과 숫자가 달라 '우리한테 이만큼 온다'로 잘못 읽혔다."""
     bits = []
     if cand.region:
         bits.append(f"{cand.region} {cand.distance_km:.0f}km" if cand.distance_km is not None
@@ -221,8 +223,10 @@ def _headline(cand: Candidate, est: int) -> str:
         bits.append(cand.sector)
     if cand.award_count:
         bits.append(f"{cand.award_count}건 {cand.award_amount / 1e8:.1f}억")
-    if est:
-        bits.append(f"추정 판넬 {est / 1e8:.1f}억")
+    if per_month:
+        amount = (f"{per_month / 1e8:.1f}억" if per_month >= 1e8
+                  else f"{per_month / 1e4:,.0f}만원")
+        bits.append(f"한 달 판넬 약 {amount}")
     return " · ".join(bits) if bits else "판단할 정보가 부족합니다"
 
 
@@ -331,5 +335,5 @@ def evaluate(cand: Candidate, max_distance_km: float = 150.0,
                             f"{biggest / our_monthly_revenue:.1f}배입니다. 자재를 먼저 사 넣을 "
                             f"돈이 되는지부터 보세요")
     return Fitness(total=total, grade=grade, axes=axes,
-                   headline=_headline(cand, est), cautions=cautions,
+                   headline=_headline(cand, per_month), cautions=cautions,
                    est_panel_amount=est, monthly_panel_amount=per_month)

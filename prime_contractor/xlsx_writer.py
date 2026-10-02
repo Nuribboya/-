@@ -7,6 +7,7 @@ exe 가 커지고 설치 단계가 늘어난다. 필요한 건 '머리글 굵게
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
@@ -85,14 +86,21 @@ def _col_letter(index: int) -> str:
     return letters
 
 
+#: XML 에 넣을 수 없는 제어 문자. 나라장터 공고명에 가끔 섞여 오는데, 그대로 쓰면
+#: 엑셀이 '파일이 손상됐습니다'라며 열지 못한다.
+_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
 def _cell(ref: str, value: object, style: int) -> str:
     if value is None or value == "":
         return f'<c r="{ref}" s="{style}"/>'
     if isinstance(value, bool):
         value = "예" if value else "아니오"
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):   # NaN·무한대도 파일을 깬다
+            return f'<c r="{ref}" s="{style}"/>'
         return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
-    text = escape(str(value))
+    text = escape(_ILLEGAL_XML.sub("", str(value)))
     return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
 
 

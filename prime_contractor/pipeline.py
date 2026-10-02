@@ -79,8 +79,12 @@ def enrich(cands: list[Candidate], dart_client=None, offline_info: dict | None =
             c.corp_code = c.corp_code or info.get("corp_code", "")
             c.bizno = c.bizno or info.get("bizr_no", "")
             c.sources.add("DART" if dart_client is not None else "샘플정보")
-        # 주소가 없으면 기관명/상호에서라도 지역을 건진다 ('평택시 상하수도사업소' 등)
-        region, dist = distance_from_home(c.address or c.name)
+        # 주소가 없으면 기관명에서라도 지역을 건진다 ('평택시 상하수도사업소' 등).
+        # 회사 상호는 '세종전기'처럼 도시 이름이 위치와 상관없이 붙어 있어 엄격하게 본다.
+        if c.address:
+            region, dist = distance_from_home(c.address)
+        else:
+            region, dist = distance_from_home(c.name, company_name=c.kind == "contractor")
         c.region, c.distance_km = region, dist
 
     if dart_client is not None and hasattr(dart_client, "save_company_cache"):
@@ -153,7 +157,8 @@ def run_industry_screen(cfg: ScreenConfig, dart_client, limit: int | None = None
     dart_client.save_company_cache()
 
     for c in cands:
-        c.region, c.distance_km = distance_from_home(c.address or c.name)
+        c.region, c.distance_km = (distance_from_home(c.address) if c.address
+                                   else distance_from_home(c.name, company_name=True))
         score_candidate(c, cfg)
 
     # 업종이 전혀 안 잡히는 곳(금융·유통 등)은 후보로 볼 이유가 없다.

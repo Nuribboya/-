@@ -1851,7 +1851,11 @@ class FakePostSession:
 
     def post(self, url, params=None, json=None, headers=None, timeout=None):
         self.calls.append((url, params or {}, json or {}))
-        return self.response
+        self.headers = headers or {}
+        response = self.response
+        if isinstance(response, list):          # 차례로 다른 응답을 돌려준다
+            response = response.pop(0)
+        return response
 
 
 def _gemini_ok(text: str) -> FakePostResponse:
@@ -1870,8 +1874,27 @@ def test_gemini_extracts_text_from_the_response():
     client = GeminiClient("dummy-key", session=session)
     assert client.generate("질문") == "이렇게 해보세요."
     url, params, body = session.calls[0]
-    assert params == {"key": "dummy-key"}
+    # 키는 머리글로 — 주소에 넣으면 연결 오류 문구에 키가 그대로 찍힌다.
+    assert params == {} and "dummy-key" not in url
+    assert session.headers["x-goog-api-key"] == "dummy-key"
     assert body["contents"][0]["parts"][0]["text"] == "질문"
+
+
+def test_gemini_retired_model_falls_back_to_the_latest_alias():
+    from prime_contractor.sources.gemini import FALLBACK_MODEL, GeminiClient
+    session = FakePostSession([FakePostResponse(404), _gemini_ok("됐습니다.")])
+    client = GeminiClient("k", session=session)
+    assert client.generate("질문") == "됐습니다."
+    assert FALLBACK_MODEL in session.calls[1][0]
+
+
+def test_secrets_in_error_text_are_masked():
+    from prime_contractor.textutil import redact_secrets
+    text = ("404 Client Error: Not Found for url: https://apis.data.go.kr/x?ServiceKey=abc%2B%3D"
+            "&type=json · /api/company.json?crtfc_key=0123&corp_code=1 · monkey=banana")
+    masked = redact_secrets(text)
+    assert "abc%2B" not in masked and "0123" not in masked
+    assert "ServiceKey=***" in masked and "corp_code=1" in masked and "monkey=banana" in masked
 
 
 def test_gemini_quota_exceeded_is_a_friendly_error():
@@ -2080,6 +2103,21 @@ def test_proposal_without_awards_or_profile_still_works():
     text = build_proposal(cand, CompanyProfile())
     assert "정보없는회사 담당자님께" in text
     assert "저희 회사" in text          # 회사명을 안 적으면 이 말로 대신한다
+
+
+def test_proposal_leaves_out_our_internal_scoring():
+    """'한 달 판넬 약 1,250만원' 같은 우리끼리 보는 점수 근거가 받는 회사에 가면 안 된다."""
+    from prime_contractor.fitness import evaluate
+    from prime_contractor.proposal import CompanyProfile, build_proposal
+    cand = _cand("대성전기", region="천안", distance_km=26.0,
+                 awards=[Award(title="정수장 배전반 교체공사", demand_org="천안시",
+                               amount=300_000_000, category="공사")])
+    cand.fitness = evaluate(cand)
+    assert "한 달 판넬" in cand.fitness.headline
+    text = build_proposal(cand, CompanyProfile(founded_year="2005년"))
+    assert cand.fitness.headline not in text
+    assert "26km" not in text and "억" not in text
+    assert "설립: 2005년" in text and "년년" not in text
 
 
 # --- ② 탭 [계산하기] 목표 잡는 규칙 --------------------------------------------------
@@ -2407,3 +2445,49 @@ def test_candidate_far_bigger_than_us_is_capped_below_export_line():
     assert capped.total < 60 and capped.grade == "C"
     assert any("감당" in c for c in capped.cautions)
     assert capped.monthly_panel_amount == round(capped.est_panel_amount / 3)
+
+
+# --- 상호 속 도시 이름은 위치가 아니다 ---------------------------------------------
+
+def test_company_name_with_a_city_word_is_not_a_location():
+    """'세종전기'·'서울전기공업'이 세종 59km·서울 68km로 둔갑해 거리 제한을 통과했다."""
+    from prime_contractor.geo import distance_from_home
+    for name in ("세종전기(주)", "서울전기공업", "화성산업(주)", "현대아산", "(주)천안시설"):
+        assert distance_from_home(name, company_name=True) == ("", None), name
+    # 기관 이름은 그대로 지역을 건진다
+    assert distance_from_home("평택시 상하수도사업소")[0] == "평택"
+    assert distance_from_home("용인도시공사")[0] == "용인"
+    assert distance_from_home("한국농어촌공사 전남지역본부")[0] == "전남"
+
+
+def test_enrich_leaves_contractor_without_address_as_unknown_distance():
+    from prime_contractor.pipeline import enrich
+    contractor = _cand("세종전기(주)", kind="contractor")
+    org = _cand("평택시 상하수도사업소", kind="demand_org")
+    enrich([contractor, org])
+    assert contractor.distance_km is None and contractor.region == ""
+    assert org.region == "평택"
+
+
+def test_xlsx_writer_drops_control_characters(tmp_path):
+    import zipfile
+    from prime_contractor.xlsx_writer import TEXT, Column, Sheet, write_workbook
+    path = tmp_path / "x.xlsx"
+    write_workbook(path, [Sheet("시트", [Column("이름", 10, TEXT)],
+                                rows=[["배전반\x0b공사\x01"], [float("nan")]])])
+    import xml.etree.ElementTree as ET
+    with zipfile.ZipFile(path) as zf:
+        body = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    ET.fromstring(body)                     # 깨진 XML 이면 여기서 터진다
+    assert "배전반공사" in body and "nan" not in body
+
+
+def test_headline_shows_monthly_panel_not_the_period_total():
+    from prime_contractor.fitness import evaluate
+    cand = _cand("큰회사", region="평택", distance_km=15.0, awards=[
+        Award(title="정수장 배전반 교체공사", demand_org="평택시", amount=3_000_000_000,
+              category="공사")])
+    fit = evaluate(cand, lookback_days=180)
+    # 30억 × 25% = 7.5억 / 6개월 = 1.25억
+    assert "한 달 판넬 약 1.2억" in fit.headline
+    assert "7.5억" not in fit.headline

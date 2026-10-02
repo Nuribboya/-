@@ -45,18 +45,13 @@ def build_proposal(cand: Candidate, profile: CompanyProfile) -> str:
     else:
         lines.append("자동제어 판넬(배전반·제어반) 공급 협력을 제안드리고자 연락드립니다.")
 
-    fitness = getattr(cand, "fitness", None)
-    detail_lines = []
-    if cand.region:
-        detail_lines.append(f"  · 지역: {cand.region}")
-    if fitness is not None and getattr(fitness, "headline", ""):
-        detail_lines.append(f"  · 저희가 연락드리는 이유: {fitness.headline}")
-    if detail_lines:
-        lines += ["", f"[{cand.name} 관련 참고]", *detail_lines]
-
+    # 적합도 한 줄 요약('평택 15km · 3건 12.0억 · 한 달 판넬 약 1,250만원')은 우리끼리 보는 점수
+    # 근거다. 받는 회사에 그대로 가면 '당신 회사 일감을 이렇게 계산했다'는 글이 되어
+    # 넣지 않는다.
     profile_lines = []
-    if profile.founded_year:
-        profile_lines.append(f"  · 설립: {profile.founded_year}년")
+    founded = profile.founded_year.strip().rstrip("년").strip()
+    if founded:
+        profile_lines.append(f"  · 설립: {founded}년")
     if profile.certifications:
         profile_lines.append(f"  · 보유 인증: {profile.certifications}")
     if profile.track_record:

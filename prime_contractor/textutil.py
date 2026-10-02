@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 
 
@@ -27,3 +28,13 @@ def clip(text: str, width: int) -> str:
             return out + "…"
         out += ch
     return out
+
+
+#: 오류 문구에 섞여 나오는 인증키. requests 오류는 '…?ServiceKey=…' 처럼 주소를 통째로
+#: 보여 줘서, 진행 상황 칸이나 화면 캡처에 키가 그대로 찍혔다.
+_SECRET_PARAM = re.compile(r"(?<![a-z_])((?:service_?key|crtfc_key|api_?key|key)=)[^&\s'\")]+", re.I)
+
+
+def redact_secrets(text: str) -> str:
+    """주소 속 인증키 값을 '***'로 가린다."""
+    return _SECRET_PARAM.sub(r"\1***", str(text))

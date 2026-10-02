@@ -14,6 +14,9 @@ import requests
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 #: 무료 등급에서 넉넉히 쓸 수 있는 가벼운 모델. 이름이 바뀌면 여기만 고치면 된다.
 DEFAULT_MODEL = "gemini-2.0-flash"
+#: 위 모델이 내려가 404 가 나면 이 이름으로 한 번 더 시도한다. '늘 최신 Flash'를
+#: 가리키는 별칭이라 모델 세대가 바뀌어도 살아 있다.
+FALLBACK_MODEL = "gemini-flash-latest"
 
 
 class GeminiError(RuntimeError):
@@ -33,14 +36,19 @@ class GeminiClient:
     def generate(self, prompt: str) -> str:
         url = f"{API_BASE}/{self.model}:generateContent"
         try:
+            # 키는 주소(?key=)가 아니라 머리글로 보낸다. 주소에 넣으면 연결 오류 문구에
+            # 키가 그대로 찍혀 화면에 나온다.
             response = self.session.post(
-                url, params={"key": self.api_key},
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-                headers={"Content-Type": "application/json"},
+                url, json={"contents": [{"parts": [{"text": prompt}]}]},
+                headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
                 timeout=self.timeout)
         except requests.RequestException as exc:
             raise GeminiError(f"인터넷 연결을 확인해 주세요: {exc}") from exc
 
+        if response.status_code == 404 and self.model != FALLBACK_MODEL:
+            # 구글이 옛 모델을 내리면 404 가 난다. 키 문제가 아니니 최신 별칭으로 바꿔 본다.
+            self.model = FALLBACK_MODEL
+            return self.generate(prompt)
         if response.status_code == 429:
             raise GeminiError("오늘 무료 사용량을 다 썼습니다. 내일 다시 눌러 주세요.")
         if response.status_code in (400, 401, 403):

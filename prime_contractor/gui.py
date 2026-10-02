@@ -36,6 +36,7 @@ from prime_contractor.config import load_config
 from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
 from prime_contractor.report import write_xlsx
 from prime_contractor.sales import load_sales, plan_to_close_gap
+from prime_contractor.textutil import redact_secrets
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
 from prime_contractor.build_info import label, should_check_updates
@@ -80,7 +81,8 @@ class QueueLogHandler(logging.Handler):
         self.sink = sink
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.sink.put(self.format(record))
+        # 조회 실패 문구엔 인증키가 든 주소가 통째로 섞여 나온다. 화면에 찍기 전에 가린다.
+        self.sink.put(redact_secrets(self.format(record)))
 
 
 class App:
@@ -630,7 +632,7 @@ class App:
     def _show_ai_insight(self, diag, text: str, error: str) -> None:
         self.ai_button.configure(state="normal")
         if error:
-            self._render_diagnosis(diag, extra=f"[AI 응답 실패] {error}")
+            self._render_diagnosis(diag, extra=f"[AI 응답 실패] {redact_secrets(error)}")
         elif text:
             self._render_diagnosis(diag, extra=f"[AI가 한 번 더 본 의견]\n{text}")
         else:
@@ -813,7 +815,7 @@ class App:
             result = self._screen(options)
             self.root.after(0, self._done, result)
         except Exception as exc:                       # 화면이 통째로 죽는 것만은 막는다
-            self.say(f"오류: {exc}")
+            self.say(f"오류: {redact_secrets(exc)}")
             self.root.after(0, self._failed, exc)
         finally:
             root_log.removeHandler(handler)
@@ -1250,9 +1252,12 @@ class App:
     def _failed(self, exc: Exception) -> None:
         messagebox.showerror(
             "잘 안 됐습니다",
-            f"{exc}\n\n아래 '진행 상황' 칸에 자세한 내용이 적혀 있습니다.\n"
+            f"{redact_secrets(exc)}\n\n아래 '진행 상황' 칸에 자세한 내용이 적혀 있습니다.\n"
             "인증키가 맞는지, 인터넷이 되는지 먼저 확인해 보세요.")
         self.status.configure(text="실패")
+        # [이만큼 채울 회사 찾기]로 시작했다가 실패하면, 다음 평범한 [후보 찾기]가
+        # 엉뚱하게 '모자란 만큼 채울 회사' 탭으로 넘어가지 않게 지운다.
+        self.gap_target = 0
         self._finish()
 
     def _finish(self) -> None:
