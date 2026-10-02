@@ -31,6 +31,8 @@ class ScreenResult:
     notes: list[str] = field(default_factory=list)
     #: 관공서가 판넬·전기기기를 물품으로 직접 산 계약 — 누가 사고 누가 팔았나
     market: list[Award] = field(default_factory=list)
+    #: 근처 대기업·중견 공장(상장사). 공사 이력이 없어 점수로 줄 세우지 않고 따로 둔다.
+    factories: list[Candidate] = field(default_factory=list)
 
     @property
     def stats(self) -> dict[str, int]:
@@ -183,6 +185,25 @@ def panel_market(awards: list[Award]) -> list[Award]:
     picked = [a for a in awards if a.category == SUPPLY_CATEGORY
               and _match_level(a.title) in ("direct", "process")]
     return sorted(picked, key=lambda a: a.opening_dt or "", reverse=True)
+
+
+def steady_of(cand: Candidate, cfg: ScreenConfig) -> float:
+    """후보 업종이 경기를 얼마나 덜 타나 (업종을 모르면 보통 0.6)."""
+    return next((s.steady for s in cfg.sectors if s.name == cand.sector), 0.6)
+
+
+def run_factory_screen(cfg: ScreenConfig, dart_client) -> list[Candidate]:
+    """근처 대기업·중견 공장 목록 — 단가가 세고, 공장 유지보수 일이 꾸준히 나온다.
+
+    나라장터엔 공공 공사만 있어 민간 공장은 안 잡힌다. 상장사를 업종코드·주소로
+    훑어(run_industry_screen) 거리 안에 있는 곳만 남긴다. 공사 이력이 없어 적합도
+    점수가 낮게 나오므로 70점으로 거르지 않고, 경기를 덜 타는 업종 → 가까운 순으로
+    줄 세운다. 연락할 곳은 본사 구매팀보다 그 공장 시설·공무팀이 빠르다.
+    """
+    found = run_industry_screen(cfg, dart_client)
+    near = [c for c in found.passed if c.distance_km is not None]    # 주소 모르면 '근처'가 아니다
+    return sorted(near, key=lambda c: (
+        -steady_of(c, cfg), c.distance_km if c.distance_km is not None else 9999.0))
 
 
 def run_screen(cfg: ScreenConfig, offline: bool = False,

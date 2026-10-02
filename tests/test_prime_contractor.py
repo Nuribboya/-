@@ -2428,3 +2428,63 @@ def test_build_config_switches_to_small_weights():
     cfg = build_config({"prefer_small": True})
     assert cfg.prefer_small and cfg.weights["repeat"] == SMALL_WEIGHTS["repeat"]
     assert not build_config({}).prefer_small
+
+
+# --- 근처 대기업·중견 공장 ---------------------------------------------------------
+
+class _FakeDart:
+    """상장사 목록·기업개황만 흉내 낸다."""
+
+    def __init__(self, companies: dict[str, dict]) -> None:
+        self.companies = companies
+
+    @property
+    def listed_companies(self):
+        return [(info["corp_name"], code, "000000") for code, info in self.companies.items()]
+
+    def company(self, corp_code):
+        return self.companies[corp_code]
+
+    def save_company_cache(self):
+        pass
+
+
+def _factory_dart():
+    return _FakeDart({
+        "1": {"corp_name": "가까운식품(주)", "adres": "경기도 평택시 포승읍", "induty_code": "10799"},
+        "2": {"corp_name": "먼식품(주)", "adres": "경상남도 김해시", "induty_code": "10799"},
+        "3": {"corp_name": "근처자동차부품(주)", "adres": "경기도 안성시 공도읍", "induty_code": "30332"},
+        "4": {"corp_name": "주소없는제약(주)", "adres": "", "induty_code": "21210"},
+        "5": {"corp_name": "더가까운제약(주)", "adres": "경기도 안성시 미양면", "induty_code": "21210"},
+        "6": {"corp_name": "은행(주)", "adres": "서울특별시 중구", "induty_code": "64110"},
+    })
+
+
+def test_factory_screen_keeps_near_ones_steady_sectors_first():
+    from prime_contractor.config import load_config
+    from prime_contractor.pipeline import run_factory_screen
+    cfg = load_config(within_km=70.0)
+    names = [c.name for c in run_factory_screen(cfg, _factory_dart())]
+    assert "먼식품(주)" not in names                  # 거리 밖
+    assert "주소없는제약(주)" not in names            # 주소 모르면 '근처'가 아니다
+    assert "은행(주)" not in names                    # 판넬 수요 업종이 아니다
+    # 경기 덜 타는 업종(제약·식품)이 자동차보다 먼저, 같은 무게면 가까운 순
+    assert names.index("더가까운제약(주)") < names.index("근처자동차부품(주)")
+    assert names.index("가까운식품(주)") < names.index("근처자동차부품(주)")
+
+
+def test_factories_go_to_their_own_excel_sheet_without_the_score_cutoff(tmp_path):
+    from prime_contractor.config import load_config
+    from prime_contractor.pipeline import ScreenResult, run_factory_screen
+    from prime_contractor.report import write_xlsx
+    from prime_contractor.xlsx import read_sheets
+    result = ScreenResult(factories=run_factory_screen(load_config(within_km=70.0),
+                                                       _factory_dart()))
+    assert all(c.score <= 70 for c in result.factories)     # 점수로 거르면 다 빠질 곳들
+    sheets = read_sheets(write_xlsx(result, tmp_path / "f.xlsx", min_score=70))
+    assert "근처 공장" in sheets
+    rows = sheets["근처 공장"]
+    assert rows[(1, "B")] == "회사 이름"
+    assert {rows[(r, "B")] for r in range(2, len(result.factories) + 2)} == {
+        c.name for c in result.factories}
+    assert rows[(2, "D")] in ("덜 탐", "보통", "많이 탐")
