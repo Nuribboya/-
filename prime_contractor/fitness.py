@@ -67,6 +67,24 @@ BIG_JOB_MONTHS = 1.5
 #: 곳이 판넬 일감·거리·꾸준함 점수만으로 A등급에 오르던 것을 막는다. 규모 축(25점)
 #: 하나로는 부족했다 — 나머지 75점이 크면 여전히 75점을 넘었다.
 TOO_BIG_CAPS = ((3.0, 59.9), (1.5, 69.9))
+
+# --- 작고 꾸준한 곳 위주 --------------------------------------------------------
+#
+# 매출이 줄었을 때는 큰 한 방보다 작아도 자주 나오는 일이 낫다. 자재 선투입이 적고
+# 돈이 빨리 돌고, KC 물량이 빈 틈에 끼워 넣을 수 있고, 또 한 곳에 매이지 않는다.
+# 그래서 '가장 좋은 크기'를 우리 월매출의 3~20% 로 낮추고, 그보다 크면 더 일찍
+# 점수 상한을 건다.
+SMALL_SCALE_CURVE = (
+    (0.00, 0), (0.01, 40), (0.03, 100), (0.20, 100),
+    (0.40, 50), (0.80, 15), (1.50, 10),
+)
+SMALL_SWEET_SPOT = (0.03, 0.20)
+SMALL_TOO_BIG_CAPS = ((1.0, 59.9), (0.5, 69.9))
+#: 이 모드의 배점. 일감 크기를 조금 덜 보고 꾸준함을 더 본다 (합 100).
+SMALL_WEIGHTS = {"product_fit": 25.0, "volume": 20.0, "scale": 20.0,
+                 "access": 20.0, "repeat": 25.0, "safety": 10.0}
+#: '꾸준함' 점수 중 업종이 경기를 덜 타는지(steady)가 차지하는 몫.
+STEADY_SHARE = 0.3
 GRADE_ADVICE = {
     "A": "먼저 연락해 보세요",
     "B": "연락해 볼 만합니다",
@@ -188,8 +206,26 @@ def _access(cand: Candidate, max_km: float) -> Axis:
     return Axis("access", "거리", score, 20.0, f"{cand.region} {cand.distance_km:.0f}km")
 
 
-def _repeat(cand: Candidate) -> Axis:
-    """한 번 뚫으면 계속 나올 곳인가. 건수와 '거래처가 여럿인지'를 본다."""
+def _repeat(cand: Candidate, steady: float | None = None) -> Axis:
+    """한 번 뚫으면 계속 나올 곳인가. 건수와 '거래처가 여럿인지'를 본다.
+
+    steady(업종이 경기를 덜 타는 정도, 0~1)를 주면 그 몫을 섞는다 — 지금 여러 번
+    따냈어도 반도체처럼 경기가 꺾이면 끊기는 업종이면 덜 꾸준하다.
+    """
+    axis = _repeat_record(cand)
+    if steady is None or not cand.sector:
+        return axis
+    score = axis.score * (1 - STEADY_SHARE) + steady * 100 * STEADY_SHARE
+    if steady >= 0.8:
+        note = f"{cand.sector}: 경기를 덜 타는 업종"
+    elif steady <= 0.4:
+        note = f"{cand.sector}: 경기를 많이 타는 업종"
+    else:
+        note = f"{cand.sector}: 경기 영향 보통"
+    return Axis(axis.key, axis.label, score, axis.weight, f"{axis.detail} · {note}")
+
+
+def _repeat_record(cand: Candidate) -> Axis:
     count = cand.award_count
     if count == 0:
         return Axis("repeat", "꾸준함", 0.0, 15.0, "수주 기록이 없습니다")
@@ -272,7 +308,8 @@ def largest_job_panel(cand: Candidate) -> int:
     return best
 
 
-def _scale(cand: Candidate, est: int, our_monthly: int, lookback_days: int) -> Axis:
+def _scale(cand: Candidate, est: int, our_monthly: int, lookback_days: int,
+           small: bool = False) -> Axis:
     per_month = monthly_panel(est, lookback_days)
     if not cand.awards:
         return Axis("scale", "규모 맞음", 50.0, 25.0,
@@ -281,13 +318,14 @@ def _scale(cand: Candidate, est: int, our_monthly: int, lookback_days: int) -> A
         return Axis("scale", "규모 맞음", 0.0, 25.0, "판넬 들어갈 일이 안 보여 크기를 잴 수 없습니다")
 
     ratio = per_month / our_monthly
-    score = _curve(ratio)
+    score = _curve(ratio, SMALL_SCALE_CURVE if small else SCALE_CURVE)
     amount = f"한 달 판넬 약 {per_month / 1e4:,.0f}만원 = 우리 월매출의 {ratio * 100:.0f}%"
-    low, high = SWEET_SPOT
+    low, high = SMALL_SWEET_SPOT if small else SWEET_SPOT
     if ratio < low:
         why = "작아서 영업 들인 만큼 남기 어렵습니다"
     elif ratio <= high:
-        why = "무리 없이 받으면서 의존도도 낮추기 좋은 크기입니다"
+        why = ("작아도 자주 받기 좋은 크기 — 빈 틈에 끼워 넣기 쉽고 돈이 빨리 돕니다" if small
+               else "무리 없이 받으면서 의존도도 낮추기 좋은 크기입니다")
     elif ratio <= 1.0:
         why = "지금 인력·자금으로는 빠듯한 크기입니다"
     else:
@@ -297,17 +335,22 @@ def _scale(cand: Candidate, est: int, our_monthly: int, lookback_days: int) -> A
 
 def evaluate(cand: Candidate, max_distance_km: float = 150.0,
              weights: dict[str, float] | None = None,
-             our_monthly_revenue: int = 0, lookback_days: int = 180) -> Fitness:
+             our_monthly_revenue: int = 0, lookback_days: int = 180,
+             prefer_small: bool = False, sector_steady: float | None = None) -> Fitness:
     """후보 하나의 적합도를 낸다.
 
     우리 월매출을 알면 '일감 크기'(클수록 좋다) 자리에 '규모 맞음'(우리 크기에
     맞나)을 쓴다. 둘을 같이 넣으면 여전히 큰 곳이 유리해진다.
+
+    prefer_small 이면 '작고 꾸준한 곳 위주': 더 작은 크기를 좋게 보고, 큰 곳엔 더
+    일찍 상한을 걸고, 꾸준함에 업종의 경기 민감도(sector_steady)를 섞는다. 배점은
+    weights 로 따로 넘긴다(SMALL_WEIGHTS).
     """
     est = estimate_panel_amount(cand)
-    size_axis = (_scale(cand, est, our_monthly_revenue, lookback_days)
+    size_axis = (_scale(cand, est, our_monthly_revenue, lookback_days, small=prefer_small)
                  if our_monthly_revenue > 0 else _volume(cand, est))
     axes = [_product_fit(cand), size_axis, _access(cand, max_distance_km),
-            _repeat(cand), _safety(cand)]
+            _repeat(cand, sector_steady if prefer_small else None), _safety(cand)]
     if weights:
         axes = [Axis(a.key, a.label, a.score, weights.get(a.key, a.weight), a.detail) for a in axes]
 
@@ -319,11 +362,13 @@ def evaluate(cand: Candidate, max_distance_km: float = 150.0,
     per_month = monthly_panel(est, lookback_days)
     if our_monthly_revenue > 0 and cand.awards and per_month:
         ratio = per_month / our_monthly_revenue
-        for limit, cap in TOO_BIG_CAPS:
+        for limit, cap in (SMALL_TOO_BIG_CAPS if prefer_small else TOO_BIG_CAPS):
             if ratio > limit and total > cap:
                 total = cap
-                cautions.append(f"한 달 판넬 물량이 우리 월매출의 {ratio:.1f}배 — 지금 인원으로 "
-                                f"감당하기 어려운 크기라 점수를 {cap:.0f}점 아래로 낮췄습니다")
+                too_big = ("'작고 꾸준한 곳 위주'로 보기엔 큰 곳이라" if prefer_small
+                           else "지금 인원으로 감당하기 어려운 크기라")
+                cautions.append(f"한 달 판넬 물량이 우리 월매출의 {ratio:.1f}배 — {too_big} "
+                                f"점수를 {cap:.0f}점 아래로 낮췄습니다")
                 break
     grade = next(g for cut, g in GRADE_CUTS if total >= cut)
     if our_monthly_revenue > 0:

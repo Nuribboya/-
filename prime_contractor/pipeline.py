@@ -18,6 +18,9 @@ _ORG_STOPWORDS = ("교육청", "학교", "대학교", "경찰", "소방", "법�
 #: 나라장터가 여러 기관 공동 구매에 붙이는 자리표시 이름. 실제 연락할 곳이 아닌데
 #: 공사를 다 모아 '판넬 일감 1,000억'짜리 1등처럼 보였다.
 _ORG_PLACEHOLDERS = ("각 수요기관", "각수요기관", "수요기관", "각 기관", "각기관")
+#: 이 업무구분으로 낙찰받은 회사는 관공서에 물건(배전반 등)을 '파는' 쪽이라 우리한테
+#: 판넬을 줄 원청이 아니라 경쟁사다. 후보에서 빼고 '관공서 판넬 시장'에 따로 담는다.
+SUPPLY_CATEGORY = "물품"
 
 
 @dataclass
@@ -26,6 +29,8 @@ class ScreenResult:
     excluded: list[Candidate] = field(default_factory=list)
     awards: list[Award] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: 관공서가 판넬·전기기기를 물품으로 직접 산 계약 — 누가 사고 누가 팔았나
+    market: list[Award] = field(default_factory=list)
 
     @property
     def stats(self) -> dict[str, int]:
@@ -36,7 +41,11 @@ class ScreenResult:
 
 
 def build_candidates(awards: list[Award], include_demand_orgs: bool = True) -> list[Candidate]:
-    """낙찰 이력을 업체/기관 단위로 묶는다. 사업자번호 우선, 없으면 정규화 상호."""
+    """낙찰 이력을 업체/기관 단위로 묶는다. 사업자번호 우선, 없으면 정규화 상호.
+
+    물품 낙찰자는 관공서에 배전반을 파는 판넬 업체(경쟁사)라 원청 후보로 만들지
+    않는다. 물품을 산 기관 쪽(수요기관)은 판넬을 직접 사는 곳이라 그대로 둔다.
+    """
     by_key: dict[str, Candidate] = {}
 
     def _bucket(key: str, cand: Candidate) -> None:
@@ -46,7 +55,7 @@ def build_candidates(awards: list[Award], include_demand_orgs: bool = True) -> l
             by_key[key] = cand
 
     for a in awards:
-        if a.winner_name:
+        if a.winner_name and a.category != SUPPLY_CATEGORY:
             key = f"biz:{a.winner_bizno}" if a.winner_bizno else f"nm:{normalize_name(a.winner_name)}"
             _bucket(key, Candidate(name=a.winner_name, kind="contractor", bizno=a.winner_bizno,
                                    awards=[a], sources={"나라장터"}))
@@ -168,6 +177,14 @@ def run_industry_screen(cfg: ScreenConfig, dart_client, limit: int | None = None
     return result
 
 
+def panel_market(awards: list[Award]) -> list[Award]:
+    """관공서가 판넬·전기기기를 물품으로 산 계약만, 최근 것부터."""
+    from prime_contractor.fitness import _match_level
+    picked = [a for a in awards if a.category == SUPPLY_CATEGORY
+              and _match_level(a.title) in ("direct", "process")]
+    return sorted(picked, key=lambda a: a.opening_dt or "", reverse=True)
+
+
 def run_screen(cfg: ScreenConfig, offline: bool = False,
                g2b_client=None, dart_client=None, nts_client=None) -> ScreenResult:
     """전체 파이프라인 1회 실행."""
@@ -193,7 +210,14 @@ def run_screen(cfg: ScreenConfig, offline: bool = False,
             )
 
     cands = build_candidates(result.awards, include_demand_orgs=cfg.include_demand_orgs)
-
+    result.market = panel_market(result.awards)
+    suppliers = {a.winner_name for a in result.awards
+                 if a.category == SUPPLY_CATEGORY and a.winner_name}
+    if suppliers:
+        result.notes.append(
+            f"물품으로 관공서에 납품한 {len(suppliers)}곳은 판넬을 '파는' 쪽(경쟁사일 수 있음)이라 "
+            f"후보에서 뺐습니다. 관공서 판넬 구매 {len(result.market)}건은 "
+            "[관공서 판넬 시장]에서 볼 수 있습니다.")
 
     result.notes += enrich(cands, dart_client=dart_client,
                            offline_info=SAMPLE_COMPANY_INFO if offline else None)

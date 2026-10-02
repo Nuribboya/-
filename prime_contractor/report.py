@@ -230,6 +230,7 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
       연락할 곳 ... 연락할 때 보는 것만 (순위·등급·점수·회사·지역·거리·일감·이유·대표자·주소)
       추가 정보 ... 대표 공사·사업자번호·상태·확인하실 점
       점수 근거 ... 다섯 항목 점수와 이유
+      관공서 판넬 시장 ... 관공서가 판넬을 물품으로 산 계약(있을 때만)
       읽는 법 ..... 등급·점수 뜻, 몇 곳 중 몇 곳을 담았나
 
     min_score 를 주면 그 점수를 넘는 곳만 넣는다. 순위는 화면 표와 같은 번호다.
@@ -281,6 +282,13 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
             values.append(f"{axis.points:g}점 — {axis.detail}" if axis else "")
         detail.rows.append(values)
 
+    market = Sheet("관공서 판넬 시장", [
+        Column("날짜", 11, CENTER), Column("사는 기관", 24, WRAP),
+        Column("무엇을 샀나 (공고명)", 56, WRAP), Column("납품한 업체", 22, WRAP),
+        Column("금액(원)", 14, MONEY),
+    ], rows=[[(a.opening_dt or "")[:10], a.demand_org, a.title, a.winner_name, a.amount]
+             for a in getattr(result, "market", [])])
+
     rule = f"{min_score:g}점을 넘는 곳만" if min_score is not None else "전부"
     guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 80, WRAP)], rows=[
         ["만든 날", date.today().isoformat()],
@@ -293,9 +301,13 @@ def write_xlsx(result: ScreenResult, path: str | Path, min_score: float | None =
         ["한 달 판넬", "조회 기간에 따낸 공사비 중 판넬 몫을 업계 통념으로 어림해 한 달치로 나눈 "
                      "값입니다. 그 회사 전체 물량이라 우리가 다 받는 게 아니고, 견적도 아닙니다."],
         ["거리 '미상'", "주소를 못 찾은 곳입니다. 연락 전에 위치를 확인하세요."],
+        ["관공서 판넬 시장", "관공서가 판넬을 물품으로 직접 산 계약입니다. 납품한 업체는 판넬을 "
+                         "'파는' 쪽(경쟁사)이라 연락할 곳 목록에서 뺐습니다. 조달청 등록·"
+                         "직접생산확인을 받으면 이 시장에 직접 팔 수 있습니다."],
         ["인쇄", "시트마다 A4 가로, 한 장 폭에 맞춰 두었습니다. 장마다 첫 줄이 다시 찍힙니다."],
     ], landscape=False)
-    return write_workbook(path, [main, extra, detail, guide])
+    sheets = [main, extra, detail] + ([market] if market.rows else []) + [guide]
+    return write_workbook(path, sheets)
 
 
 def _axis(fit, key: str):

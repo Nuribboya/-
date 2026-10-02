@@ -2363,7 +2363,7 @@ def test_far_province_company_is_excluded_by_distance_limit():
 
 
 def test_xlsx_export_sheets_for_printing(tmp_path):
-    """연락할 곳 · 추가 정보 · 점수 근거 · 읽는 법. 70점 넘는 곳만, 순위는 화면 그대로."""
+    """연락할 곳 · 추가 정보 · 점수 근거 · 관공서 판넬 시장 · 읽는 법. 70점 넘는 곳만."""
     from prime_contractor.config import load_config
     from prime_contractor.pipeline import run_screen
     from prime_contractor.report import write_xlsx
@@ -2373,7 +2373,9 @@ def test_xlsx_export_sheets_for_printing(tmp_path):
     assert above and len(above) < len(result.passed)          # 걸러지는 곳이 실제로 있다
 
     sheets = read_sheets(write_xlsx(result, tmp_path / "out.xlsx", min_score=70))
-    assert list(sheets) == ["연락할 곳", "추가 정보", "점수 근거", "읽는 법"]
+    assert list(sheets) == ["연락할 곳", "추가 정보", "점수 근거", "관공서 판넬 시장", "읽는 법"]
+    market = sheets["관공서 판넬 시장"]
+    assert market[(1, "B")] == "사는 기관" and (2, "D") in market      # 물품 낙찰 = 판 업체
     main = sheets["연락할 곳"]
     assert main[(1, "A")] == "순위" and main[(1, "D")] == "회사 이름"
     names = [main[(r, "D")] for r in range(2, len(above) + 2)]
@@ -2419,8 +2421,8 @@ def test_xlsx_writer_escapes_text_and_names_columns():
 
 def test_placeholder_demand_org_is_not_a_candidate():
     """'각 수요기관'은 나라장터 공동구매 자리표시라 연락할 곳이 아니다 (1,000억짜리 1등으로 떴다)."""
-    awards = [Award(title="배전반 구매", amount=10_000_000_000, demand_org="각 수요기관",
-                    winner_name="(주)실제전기", category="물품")]
+    awards = [Award(title="배전반 설치공사", amount=10_000_000_000, demand_org="각 수요기관",
+                    winner_name="(주)실제전기", category="공사")]
     names = {c.name for c in build_candidates(awards)}
     assert "각 수요기관" not in names and "(주)실제전기" in names
 
@@ -2491,3 +2493,73 @@ def test_headline_shows_monthly_panel_not_the_period_total():
     # 30억 × 25% = 7.5억 / 6개월 = 1.25억
     assert "한 달 판넬 약 1.2억" in fit.headline
     assert "7.5억" not in fit.headline
+
+
+# --- 물품 낙찰자는 경쟁사 / 관공서 판넬 시장 -------------------------------------
+
+def test_goods_winner_is_a_competitor_not_a_candidate():
+    """물품으로 배전반을 납품한 회사는 판넬을 '파는' 쪽이라 원청 후보가 아니다."""
+    awards = [
+        Award(title="정수장 배전반 구매", amount=80_000_000, demand_org="평택시",
+              winner_name="(주)판넬제조", category="물품", opening_dt="2026-09-10"),
+        Award(title="정수장 전기공사", amount=500_000_000, demand_org="평택시",
+              winner_name="(주)공사전기", category="공사"),
+    ]
+    names = {c.name for c in build_candidates(awards)}
+    assert "(주)판넬제조" not in names
+    assert "(주)공사전기" in names and "평택시" in names      # 사는 기관은 그대로
+
+
+def test_panel_market_lists_goods_purchases_newest_first():
+    from prime_contractor.pipeline import panel_market
+    awards = [
+        Award(title="분전반 구매", amount=10_000_000, demand_org="A시", winner_name="갑",
+              category="물품", opening_dt="2026-08-01"),
+        Award(title="배전반 구매", amount=20_000_000, demand_org="B시", winner_name="을",
+              category="물품", opening_dt="2026-09-01"),
+        Award(title="사무용 의자", amount=5_000_000, demand_org="C시", winner_name="병",
+              category="물품", opening_dt="2026-09-02"),
+        Award(title="배전반 설치공사", amount=90_000_000, demand_org="D시", winner_name="정",
+              category="공사", opening_dt="2026-09-03"),
+    ]
+    assert [a.winner_name for a in panel_market(awards)] == ["을", "갑"]
+
+
+def test_small_mode_prefers_a_smaller_steady_company():
+    """'작고 꾸준한 곳 위주'면 우리 월매출의 5% 짜리 정수장 업체가 60% 짜리보다 앞선다."""
+    from prime_contractor.fitness import SMALL_WEIGHTS, evaluate
+
+    def company(name, amount, title):
+        return _cand(name, region="평택", distance_km=15.0, sector="상하수도·수처리",
+                     bizno="1", address="경기도 평택시", ksic_code="42",
+                     awards=[Award(title=title, demand_org=f"{name}발주{i}", amount=amount,
+                                   category="공사") for i in range(3)])
+
+    ours = 100_000_000
+    # 3건 × 공사비 × 판넬 몫 25% ÷ 6개월
+    small = company("작은곳", 40_000_000, "정수장 제어반 교체")     # 한 달 판넬 500만 = 5%
+    big = company("큰곳", 480_000_000, "정수장 제어반 교체")        # 한 달 판넬 6,000만 = 60%
+    normal = [evaluate(c, our_monthly_revenue=ours, lookback_days=180) for c in (small, big)]
+    steady = [evaluate(c, our_monthly_revenue=ours, lookback_days=180, prefer_small=True,
+                       sector_steady=1.0, weights=SMALL_WEIGHTS) for c in (small, big)]
+    assert steady[0].total > steady[1].total
+    assert steady[1].total < 70                    # 월매출 절반이 넘으면 엑셀에서 빠진다
+    assert normal[1].total >= 70                   # 평소 기준으론 큰 곳도 괜찮았다
+    assert "경기를 덜 타는 업종" in steady[0].axis("repeat").detail
+
+
+def test_small_mode_marks_cyclical_sectors_less_steady():
+    from prime_contractor.fitness import _repeat
+    cand = _cand("반도체설비", sector="반도체·디스플레이", awards=[
+        Award(title="클린룸 제어반", demand_org=f"기관{i}", amount=10_000_000) for i in range(3)])
+    plain, cyclical = _repeat(cand), _repeat(cand, steady=0.2)
+    assert cyclical.score < plain.score
+    assert "경기를 많이 타는 업종" in cyclical.detail
+
+
+def test_build_config_switches_to_small_weights():
+    from prime_contractor.app_settings import build_config
+    from prime_contractor.fitness import SMALL_WEIGHTS
+    cfg = build_config({"prefer_small": True})
+    assert cfg.prefer_small and cfg.weights["repeat"] == SMALL_WEIGHTS["repeat"]
+    assert not build_config({}).prefer_small

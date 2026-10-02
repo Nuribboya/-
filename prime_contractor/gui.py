@@ -175,6 +175,8 @@ class App:
             value=remembered("overlap", OVERLAP_CHOICES, list(OVERLAP_CHOICES)[0]))
         self.sector = StringVar(value=saved.get("sector", SECTOR_ALL))
         self.include_orgs = BooleanVar(value=saved.get("include_demand_orgs", True))
+        # 매출이 줄었을 때는 큰 한 방보다 작아도 자주 나오는 일이 낫다 — 기본으로 켠다.
+        self.prefer_small = BooleanVar(value=saved.get("prefer_small", True))
         self.fresh = BooleanVar(value=False)
 
         ttk.Label(box, text="어디서 찾을까요").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
@@ -214,8 +216,10 @@ class App:
 
         ttk.Checkbutton(box, text="관공서·공공기관도 같이 보기",
                         variable=self.include_orgs).grid(row=5, column=3, sticky=W)
+        ttk.Checkbutton(box, text="작고 꾸준한 곳 위주 (우리 월매출의 3~20% 크기 · 경기 덜 타는 업종)",
+                        variable=self.prefer_small).grid(row=6, column=1, columnspan=3, sticky=W)
         ttk.Checkbutton(box, text="저장해 둔 결과 무시하고 전부 새로 받기 (느림)",
-                        variable=self.fresh).grid(row=6, column=1, columnspan=3, sticky=W)
+                        variable=self.fresh).grid(row=7, column=1, columnspan=3, sticky=W)
 
         # 제안서에만 쓰는 우리 회사 정보. 화면에 늘 펼쳐 둘 필요가 없어서
         # [제안서 만들기]를 누를 때 뜨는 작은 창에서 받는다(값은 자동저장된다).
@@ -243,6 +247,9 @@ class App:
                                        command=self.on_make_proposal,
                                        bootstyle="info-outline")
         self.proposal_button.pack(side=LEFT, padx=6)
+        self.market_button = ttk.Button(buttons, text="관공서 판넬 시장", state="disabled",
+                                        command=self.on_show_market)
+        self.market_button.pack(side=LEFT)
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -748,6 +755,7 @@ class App:
             "overlap": self.overlap.get(),
             "sector": self.sector.get(),
             "include_demand_orgs": self.include_orgs.get(),
+            "prefer_small": self.prefer_small.get(),
             "profile_name": self.profile_name.get(),
             "profile_founded": self.profile_founded.get(),
             "profile_certs": self.profile_certs.get(),
@@ -834,8 +842,13 @@ class App:
             from dataclasses import replace
             ours = self.book.average_revenue()
             cfg = replace(cfg, our_monthly_revenue=ours)
-            self.say(f"우리 월매출 {ours / 1e4:,.0f}만원 기준으로, 너무 작거나 너무 큰 곳은 "
-                     f"점수를 낮춥니다.")
+            if cfg.prefer_small:
+                self.say(f"작고 꾸준한 곳 위주: 한 달 판넬이 우리 월매출({ours / 1e4:,.0f}만원)의 "
+                         f"3~20%({ours * 0.03 / 1e4:,.0f}~{ours * 0.2 / 1e4:,.0f}만원)인 곳을 "
+                         "가장 좋게 보고, 경기를 덜 타는 업종에 점수를 더 줍니다.")
+            else:
+                self.say(f"우리 월매출 {ours / 1e4:,.0f}만원 기준으로, 너무 작거나 너무 큰 곳은 "
+                         f"점수를 낮춥니다.")
         else:
             self.say("② 탭에서 매출 장부를 불러오면 '우리 크기에 맞는 곳'으로 점수를 매깁니다.")
         mode = options["mode"]
@@ -899,6 +912,7 @@ class App:
             self._fill_plan(result)
         self.status.configure(text=f"{len(result.passed)}곳 찾음")
         self.save_button.configure(state="normal" if result.passed else "disabled")
+        self.market_button.configure(state="normal" if result.market else "disabled")
         if not result.passed:
             messagebox.showinfo("찾은 곳이 없습니다",
                                 "조건에 맞는 회사가 없습니다.\n\n"
@@ -1126,6 +1140,42 @@ class App:
         messagebox.showinfo("만들었습니다",
                             f"{len(made)}개 파일을 저장했습니다 — 보내기 전에 한 번 읽어보세요.\n\n{folder}")
 
+    def on_show_market(self) -> None:
+        """관공서가 판넬을 물품으로 직접 산 계약 — 조달 등록하면 우리가 팔 수 있는 시장."""
+        from tkinter import Toplevel
+        market = self.result.market if self.result else []
+        if not market:
+            messagebox.showinfo("관공서 판넬 시장", "이번 조회 기간에 관공서가 판넬을 물품으로 산 기록이 "
+                                               "없습니다.")
+            return
+        win = Toplevel(self.root)
+        win.title("관공서 판넬 시장 — 관공서가 판넬을 직접 산 계약")
+        win.geometry("980x560")
+        body = ttk.Frame(win, padding=10)
+        body.pack(fill=BOTH, expand=True)
+        ttk.Label(body, text=_market_summary(market), justify=LEFT, wraplength=940).pack(
+            fill=X, pady=(0, 8))
+        cols = (("날짜", 90), ("사는 기관", 200), ("무엇을 샀나 (공고명)", 380),
+                ("납품한 업체", 170), ("금액", 100))
+        frame = ttk.Frame(body)
+        frame.pack(fill=BOTH, expand=True)
+        tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
+        for name, width in cols:
+            tree.heading(name, text=name)
+            tree.column(name, width=width, anchor=W)
+        bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=bar.set)
+        tree.pack(side=LEFT, fill=BOTH, expand=True)
+        bar.pack(side=RIGHT, fill=Y)
+        for a in market:
+            tree.insert("", END, values=((a.opening_dt or "")[:10], a.demand_org, a.title,
+                                         a.winner_name, _money(a.amount)))
+        ttk.Label(body, foreground="#666", justify=LEFT, wraplength=940, text=(
+            "관공서는 판넬을 '직접생산확인증명서'가 있는 중소기업한테서만 삽니다. 우리가 조달청에 "
+            "등록하고 확인증을 받으면 이 계약들에 직접 들어갈 수 있습니다. 납품한 업체는 그 시장의 "
+            "경쟁사이고, 금액은 단가를 가늠하는 데 쓰세요. 엑셀로 저장하면 같은 목록이 "
+            "'관공서 판넬 시장' 시트에 들어갑니다.")).pack(fill=X, pady=(8, 0))
+
     def _ask_profile(self, count: int) -> bool:
         """제안서에 넣을 우리 회사 정보를 작은 창에서 확인받는다. [만들기]를 누르면 True."""
         from tkinter import Toplevel
@@ -1272,7 +1322,9 @@ class App:
             messagebox.showinfo(
                 "저장할 곳이 없습니다",
                 f"{EXPORT_MIN_SCORE}점을 넘는 곳이 없습니다 (전체 {len(self.result.passed)}곳).\n"
-                "조건(거리·업종·며칠치)을 넓혀서 다시 찾아보세요.")
+                "조건(거리·업종·며칠치)을 넓혀서 다시 찾아보세요."
+                + ("\n'작고 꾸준한 곳 위주'를 끄면 큰 곳도 점수가 올라갑니다."
+                   if self.prefer_small.get() else ""))
             return
         from datetime import date
         path = filedialog.asksaveasfilename(
@@ -1292,6 +1344,20 @@ class App:
                 f"{path}\n\n전체 {len(self.result.passed)}곳 중 {EXPORT_MIN_SCORE}점을 넘는 "
                 f"{kept}곳만 저장했습니다.\n\n폴더를 열까요?"):
             _open_folder(Path(path).parent)
+
+
+def _market_summary(market) -> str:
+    """관공서 판넬 구매 기록 요약: 몇 건·얼마, 많이 산 기관, 많이 판 업체."""
+    from collections import Counter
+    total = sum(a.amount for a in market)
+    buyers = Counter(a.demand_org for a in market if a.demand_org).most_common(5)
+    sellers = Counter(a.winner_name for a in market if a.winner_name).most_common(5)
+    lines = [f"관공서가 판넬·전기기기를 물품으로 산 계약 {len(market)}건, 합계 {_money(total)}원"]
+    if buyers:
+        lines.append("많이 산 기관: " + ", ".join(f"{n}({c}건)" for n, c in buyers))
+    if sellers:
+        lines.append("많이 판 업체(경쟁사): " + ", ".join(f"{n}({c}건)" for n, c in sellers))
+    return "\n".join(lines)
 
 
 def _money(won: int) -> str:

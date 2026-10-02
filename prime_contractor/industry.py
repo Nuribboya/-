@@ -54,6 +54,10 @@ class TargetSector:
     ksic_strength: float = 0.6
     weight: float = 1.0
     note: str = ""
+    #: 경기를 얼마나 덜 타나 (0~1). 정수장·식품처럼 불황에도 돌려야 하는 곳은 높고,
+    #: 반도체·자동차처럼 경기가 꺾이면 투자부터 끊는 곳은 낮다. '작고 꾸준한 곳 위주'
+    #: 로 찾을 때 '꾸준함' 점수에 섞는다.
+    steady: float = 0.6
 
 
 def _hit(text: str, words: tuple[str, ...]) -> list[str]:

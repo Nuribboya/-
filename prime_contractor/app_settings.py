@@ -92,6 +92,11 @@ def build_config(options: dict, base: ScreenConfig | None = None) -> ScreenConfi
     if "include_demand_orgs" in options:
         patch["include_demand_orgs"] = bool(options["include_demand_orgs"])
 
+    if options.get("prefer_small"):
+        from prime_contractor.fitness import SMALL_WEIGHTS
+        patch["prefer_small"] = True
+        patch["weights"] = {**cfg.weights, **SMALL_WEIGHTS}
+
     for key, field in (("g2b_key", "g2b_service_key"), ("dart_key", "dart_api_key"),
                        ("nts_key", "nts_service_key")):
         value = (options.get(key) or "").strip()
