@@ -425,7 +425,7 @@ def test_empty_result_table_explains_what_to_check():
 def test_saved_settings_from_an_older_wording_fall_back_to_defaults():
     """문구를 바꾸면 예전에 저장해 둔 선택지가 목록에 없다. 그때 빈 칸이 되면 안 된다."""
     from prime_contractor.app_settings import (
-        DISTANCE_CHOICES, MODES, OVERLAP_CHOICES, build_config)
+        DISTANCE_CHOICES, OVERLAP_CHOICES, build_config)
     cfg = build_config({"distance": "70km 이내",          # 옛 문구
                         "overlap": "KC 계열사만 제외 (반도체 포함)",
                         "mode": "공공 낙찰 (나라장터)"})
@@ -435,7 +435,6 @@ def test_saved_settings_from_an_older_wording_fall_back_to_defaults():
     # 새 문구는 모두 고를 수 있는 값이어야 한다
     assert all(v in DISTANCE_CHOICES.values() for v in [50.0, 70.0, None])
     assert set(OVERLAP_CHOICES.values()) == {0, 1, 2}
-    assert len(MODES) == 3
 
 
 def test_help_text_covers_what_a_beginner_asks_first():
@@ -581,7 +580,7 @@ def test_nationwide_choice_clears_the_distance_limit():
 def test_settings_round_trip(tmp_path, monkeypatch):
     from prime_contractor import app_settings
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    saved = {"mode": app_settings.MODE_PUBLIC, "days": 90, "g2b_key": "zzz"}
+    saved = {"days": 90, "g2b_key": "zzz"}
     path = app_settings.save_settings(saved)
     assert path.exists()
     assert app_settings.load_settings() == saved
@@ -1828,65 +1827,7 @@ def test_diagnosis_priorities_are_sorted_by_severity():
     assert severities[0] == "high"
 
 
-# --- Gemini 클라이언트 -----------------------------------------------------------
-
-class FakePostResponse:
-    def __init__(self, status_code: int, payload: dict | None = None) -> None:
-        self.status_code = status_code
-        self._payload = payload or {}
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            import requests
-            raise requests.HTTPError(f"HTTP {self.status_code}")
-
-    def json(self) -> dict:
-        return self._payload
-
-
-class FakePostSession:
-    def __init__(self, response: FakePostResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[str, dict, dict]] = []
-
-    def post(self, url, params=None, json=None, headers=None, timeout=None):
-        self.calls.append((url, params or {}, json or {}))
-        self.headers = headers or {}
-        response = self.response
-        if isinstance(response, list):          # 차례로 다른 응답을 돌려준다
-            response = response.pop(0)
-        return response
-
-
-def _gemini_ok(text: str) -> FakePostResponse:
-    return FakePostResponse(200, {"candidates": [{"content": {"parts": [{"text": text}]}}]})
-
-
-def test_gemini_requires_a_key():
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-    with pytest.raises(GeminiError):
-        GeminiClient("")
-
-
-def test_gemini_extracts_text_from_the_response():
-    from prime_contractor.sources.gemini import GeminiClient
-    session = FakePostSession(_gemini_ok("이렇게 해보세요."))
-    client = GeminiClient("dummy-key", session=session)
-    assert client.generate("질문") == "이렇게 해보세요."
-    url, params, body = session.calls[0]
-    # 키는 머리글로 — 주소에 넣으면 연결 오류 문구에 키가 그대로 찍힌다.
-    assert params == {} and "dummy-key" not in url
-    assert session.headers["x-goog-api-key"] == "dummy-key"
-    assert body["contents"][0]["parts"][0]["text"] == "질문"
-
-
-def test_gemini_retired_model_falls_back_to_the_latest_alias():
-    from prime_contractor.sources.gemini import FALLBACK_MODEL, GeminiClient
-    session = FakePostSession([FakePostResponse(404), _gemini_ok("됐습니다.")])
-    client = GeminiClient("k", session=session)
-    assert client.generate("질문") == "됐습니다."
-    assert FALLBACK_MODEL in session.calls[1][0]
-
+# --- 오류 문구 속 인증키 가리기 ----------------------------------------------------
 
 def test_secrets_in_error_text_are_masked():
     from prime_contractor.textutil import redact_secrets
@@ -1895,82 +1836,6 @@ def test_secrets_in_error_text_are_masked():
     masked = redact_secrets(text)
     assert "abc%2B" not in masked and "0123" not in masked
     assert "ServiceKey=***" in masked and "corp_code=1" in masked and "monkey=banana" in masked
-
-
-def test_gemini_quota_exceeded_is_a_friendly_error():
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-    client = GeminiClient("k", session=FakePostSession(FakePostResponse(429)))
-    with pytest.raises(GeminiError, match="사용량"):
-        client.generate("질문")
-
-
-def test_gemini_bad_key_is_a_friendly_error():
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-    client = GeminiClient("k", session=FakePostSession(FakePostResponse(403)))
-    with pytest.raises(GeminiError, match="키"):
-        client.generate("질문")
-
-
-def test_gemini_network_failure_is_a_friendly_error():
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-
-    class Boom:
-        def post(self, *a, **kw):
-            raise __import__("requests").RequestException("연결 안 됨")
-
-    client = GeminiClient("k", session=Boom())
-    with pytest.raises(GeminiError, match="인터넷"):
-        client.generate("질문")
-
-
-def test_gemini_empty_response_is_an_error():
-    from prime_contractor.sources.gemini import GeminiClient, GeminiError
-    session = FakePostSession(_gemini_ok(""))
-    client = GeminiClient("k", session=session)
-    with pytest.raises(GeminiError):
-        client.generate("질문")
-
-
-# --- AI 한 번 더 물어보기 ---------------------------------------------------------
-
-class _FakeGeminiClient:
-    def __init__(self, text: str = "", error: str = "") -> None:
-        self.text = text
-        self.error = error
-        self.prompts: list[str] = []
-
-    def generate(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        if self.error:
-            from prime_contractor.sources.gemini import GeminiError
-            raise GeminiError(self.error)
-        return self.text
-
-
-def test_ai_insight_without_a_key_fails_without_calling_out():
-    from prime_contractor.ai_insight import ask
-    from prime_contractor.diagnosis import Diagnosis
-    text, error = ask(_book([("2026-07", 100_000_000)]), Diagnosis(), api_key="")
-    assert text == "" and error
-
-
-def test_ai_insight_returns_the_model_text():
-    from prime_contractor.ai_insight import ask
-    from prime_contractor.diagnosis import analyze
-    book = _book([("2026-07", 80_000_000), ("2026-08", 90_000_000)])
-    diag = analyze(book, employees=6)
-    fake = _FakeGeminiClient(text="특이한 점은 없어 보입니다.")
-    text, error = ask(book, diag, api_key="ignored", client=fake)
-    assert text == "특이한 점은 없어 보입니다." and error == ""
-    assert "2026-08" in fake.prompts[0]           # 실제 장부 숫자가 프롬프트에 들어갔는지
-
-
-def test_ai_insight_surfaces_the_error_without_raising():
-    from prime_contractor.ai_insight import ask
-    from prime_contractor.diagnosis import Diagnosis
-    fake = _FakeGeminiClient(error="오늘 무료 사용량을 다 썼습니다.")
-    text, error = ask(_book([("2026-07", 100_000_000)]), Diagnosis(), api_key="ignored", client=fake)
-    assert text == "" and "사용량" in error
 
 
 # --- 표 블록 읽기 (블록마다 연도·같은 열에 쌓인 표·날짜 라벨) ---------------------

@@ -14,12 +14,6 @@ from prime_contractor.config import ScreenConfig, load_config
 
 APP_NAME = "PrimeFinder"
 
-#: 화면에서 고를 수 있는 탐색 방식
-MODE_PUBLIC = "관공서 공사에서 찾기"
-MODE_INDUSTRY = "기업 목록에서 찾기"
-MODE_SAMPLE = "연습용 가짜 자료로 해보기"
-MODES = (MODE_PUBLIC, MODE_INDUSTRY, MODE_SAMPLE)
-
 #: 거리 선택지 (표시 문구 → km, None 이면 제한 없음)
 DISTANCE_CHOICES: dict[str, float | None] = {
     "50km — 가까운 곳만": 50.0,

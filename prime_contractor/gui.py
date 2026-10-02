@@ -27,15 +27,14 @@ except ImportError:                     # 소스에서 바로 실행할 때 설�
     _HAS_BOOTSTRAP = False
 
 from prime_contractor.app_settings import (
-    DISTANCE_CHOICES, MODE_INDUSTRY, MODE_PUBLIC, MODE_SAMPLE, MODES,
-    OVERLAP_CHOICES, SECTOR_ALL, apply_target, build_config, load_settings, save_settings,
+    DISTANCE_CHOICES, OVERLAP_CHOICES, SECTOR_ALL, apply_target, build_config, load_settings, save_settings,
     sector_names,
 )
 from prime_contractor.help_text import HELP_TEXT
 from prime_contractor.config import load_config
-from prime_contractor.pipeline import filter_sector, run_industry_screen, run_screen
+from prime_contractor.pipeline import filter_sector, run_screen
 from prime_contractor.report import write_xlsx
-from prime_contractor.sales import load_sales, plan_to_close_gap
+from prime_contractor.sales import load_sales
 from prime_contractor.textutil import redact_secrets
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
@@ -47,8 +46,6 @@ SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
 REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
                   ("판정", 520))
-PLAN_COLUMNS = (("#", 35), ("등급", 45), ("회사 이름", 235), ("지역", 70),
-                ("한 달 예상 금액", 120), ("합치면", 120))
 #: 엑셀로 저장할 때 이 점수 '이하'는 뺀다. 다 넣으면 수백 곳이라 연락할 곳을 고르기 어렵다.
 EXPORT_MIN_SCORE = 70
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
@@ -98,8 +95,6 @@ class App:
         root.minsize(920, 620)
 
         self.book = None            # 불러온 매출 기록
-        self.plan = None            # 부족분 채우기 계획
-        self.gap_target = 0         # 이번 실행이 메워야 할 금액 (0 이면 일반 탐색)
 
         # 새 버전 알림 띠. 평소에는 숨어 있다가 업데이트가 있을 때만 나타난다.
         self.update_bar = ttk.Frame(root, padding=(10, 6))
@@ -164,7 +159,6 @@ class App:
             value = saved.get(key)
             return value if value in choices else fallback
 
-        self.mode = StringVar(value=remembered("mode", MODES, MODE_PUBLIC))
         self.g2b_key = StringVar(value=saved.get("g2b_key", ""))
         self.dart_key = StringVar(value=saved.get("dart_key", ""))
         self.nts_key = StringVar(value=saved.get("nts_key", ""))
@@ -179,12 +173,10 @@ class App:
         self.prefer_small = BooleanVar(value=saved.get("prefer_small", True))
         self.fresh = BooleanVar(value=False)
 
-        ttk.Label(box, text="어디서 찾을까요").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Combobox(box, textvariable=self.mode, values=list(MODES),
-                     state="readonly", width=28).grid(row=0, column=1, sticky=W, pady=4)
-
-        ttk.Label(box, text="최근 며칠치").grid(row=0, column=2, sticky=W, padx=(20, 8))
-        ttk.Entry(box, textvariable=self.days, width=10).grid(row=0, column=3, sticky=W)
+        # '어디서 찾을까요'(상장사 목록 훑기·연습용 가짜 자료)는 뺐다. 상장사는 대기업이라
+        # '작고 꾸준한 곳'과 반대고, 연습용은 인증키를 받은 뒤로 쓸 일이 없다.
+        ttk.Label(box, text="최근 며칠치").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.days, width=10).grid(row=0, column=1, sticky=W, pady=4)
 
         ttk.Label(box, text="나라장터 인증키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Entry(box, textvariable=self.g2b_key, width=46, show="•").grid(
@@ -239,7 +231,6 @@ class App:
                                     command=self.on_save, state="disabled",
                                     bootstyle="success-outline")
         self.save_button.pack(side=LEFT, padx=6)
-        ttk.Button(buttons, text="입력 내용 저장", command=self.on_remember).pack(side=LEFT)
         _Button(buttons, text="고른 회사를 영업 목록에 넣기",
                 command=self.on_add_to_leads,
                 bootstyle="info-outline").pack(side=LEFT, padx=6)
@@ -305,7 +296,6 @@ class App:
         self.fixed_cost = StringVar(value=str(saved.get("fixed_cost", "")))
         self.variable_ratio = StringVar(value=str(saved.get("variable_ratio", "")))
         self.employees = StringVar(value=str(saved.get("employees", "")))
-        self.monthly_target = StringVar(value=str(saved.get("monthly_target", "")))
         self.target_profit = StringVar(value=str(saved.get("target_profit", "")))
 
         def field(row: int, col: int, label: str, var, width: int, unit: str) -> None:
@@ -319,22 +309,18 @@ class App:
         field(1, 0, "월 고정비", self.fixed_cost, 13, "원 (인건비·임차료 등)")
         field(1, 2, "재료·외주비", self.variable_ratio, 5, "%")
         field(1, 4, "직원 수", self.employees, 5, "명")
-        field(2, 0, "월 목표", self.monthly_target, 13, "원")
-        field(2, 2, "목표이익", self.target_profit, 13, "원 (적금 등)")
+        field(2, 0, "목표이익", self.target_profit, 13, "원 (적금 등)")
 
         buttons = ttk.Frame(box)
         buttons.grid(row=3, column=0, columnspan=8, sticky=W, pady=(12, 0))
         _Button(buttons, text="  계산하기  ", command=self.on_calculate,
                 bootstyle="primary").pack(side=LEFT)
-        ttk.Button(buttons, text="재무제표로 고정비 채우기",
-                   command=self.on_fill_from_financials).pack(side=LEFT, padx=6)
         # 결과 한 줄은 길어질 수 있다. 버튼 줄에 붙이면 그 폭만큼 위쪽 칸들이 밀려
         # 화면 밖으로 잘린다. 그래서 따로 한 줄, 넘치면 줄바꿈.
         self.calc_summary = ttk.Label(box, text="매출 장부를 고르고 [계산하기]를 누르세요.",
                                       font=("", 10, "bold"), wraplength=900, justify=LEFT)
         self.calc_summary.grid(row=4, column=0, columnspan=8, sticky=W, pady=(8, 0))
-        ttk.Label(box, text="목표: 고정비·재료비가 있으면 손익분기(+목표이익) → 없으면 '월 목표' → "
-                            "비었으면 최근 평균.\n"
+        ttk.Label(box, text="목표: 고정비·재료비가 있으면 손익분기(+목표이익), 없으면 최근 평균.\n"
                             "손익: 매출 × (1 − 재료·외주비 %) − 월 고정비. "
                             "장부가 부가세 포함이면 체크 — 매출을 1.1로 나눠 계산합니다.",
                   foreground="#666").grid(row=5, column=0, columnspan=8, sticky=W, pady=(6, 0))
@@ -344,11 +330,9 @@ class App:
         monthly = ttk.Frame(self.result_tabs, padding=6)
         self.review_tab = ttk.Frame(self.result_tabs, padding=6)
         advice = ttk.Frame(self.result_tabs, padding=6)
-        self.plan_tab = ttk.Frame(self.result_tabs, padding=6)
         self.result_tabs.add(monthly, text="  달마다 손익  ")
         self.result_tabs.add(self.review_tab, text="  기준과 비교  ")
         self.result_tabs.add(advice, text="  뭐부터 챙길지  ")
-        self.result_tabs.add(self.plan_tab, text="  모자란 만큼 채울 회사  ")
 
         self.sales_tree = ttk.Treeview(monthly, columns=[c for c, _ in SALES_COLUMNS],
                                        show="headings", height=9)
@@ -366,37 +350,11 @@ class App:
                               state="readonly", width=4)
         months.pack(side=LEFT)
         months.bind("<<ComboboxSelected>>", lambda _e: self.book and self._refresh_gap())
-        self.gap_button = _Button(act, text="  이만큼 채울 회사 찾기  ",
-                                   command=self.on_find_for_gap, state="disabled",
-                                   bootstyle="primary")
-        self.gap_button.pack(side=RIGHT)
 
         self._build_review(self.review_tab, saved)
 
         self.diag_text = scrolledtext.ScrolledText(advice, height=8, wrap="word", state="disabled")
         self.diag_text.pack(fill=BOTH, expand=True)
-        ai_row = ttk.Frame(advice)
-        ai_row.pack(fill=X, pady=(6, 0))
-        ttk.Label(ai_row, text="Gemini API 키 (선택)").pack(side=LEFT)
-        self.gemini_key = StringVar(value=saved.get("gemini_key", ""))
-        ttk.Entry(ai_row, textvariable=self.gemini_key, width=30, show="*").pack(
-            side=LEFT, padx=(4, 8))
-        self.ai_button = _Button(ai_row, text="AI에게 한 번 더 물어보기",
-                                 command=self.on_ai_insight, bootstyle="info-outline")
-        self.ai_button.pack(side=LEFT)
-        ttk.Label(ai_row, text="무료 키: aistudio.google.com/apikey",
-                  foreground="#666").pack(side=LEFT, padx=(8, 0))
-
-        self.plan_tree = ttk.Treeview(self.plan_tab, columns=[c for c, _ in PLAN_COLUMNS],
-                                      show="headings", height=9)
-        for name, width in PLAN_COLUMNS:
-            self.plan_tree.heading(name, text=name)
-            self.plan_tree.column(name, width=width, anchor=W)
-        self.plan_tree.pack(fill=BOTH, expand=True)
-        self.plan_note = ttk.Label(self.plan_tab, text="'달마다 손익' 탭에서 [이만큼 채울 회사 찾기]를 "
-                                                       "누르면 여기에 나옵니다.",
-                                   foreground="#333", wraplength=980)
-        self.plan_note.pack(fill=X, pady=(4, 0))
 
     def _build_review(self, root, saved: dict) -> None:
         """'기준과 비교' 탭: 시작 달 이전을 평소(기준)로 잡고, 그 뒤 달마다 판정한다."""
@@ -494,8 +452,7 @@ class App:
         if cost is None and (self.fixed_cost.get().strip() or self.variable_ratio.get().strip()):
             self._read_cost_model()          # 반쯤만 채운 칸은 왜 안 쓰는지 알려 준다
 
-        typed = int(re.sub(r"[^\d]", "", self.monthly_target.get() or "") or 0)
-        basis = apply_target(book, cost, typed)
+        basis = apply_target(book, cost, 0)
 
         self.book, self.cost_model = book, cost
         latest = book.latest_closed()
@@ -548,47 +505,12 @@ class App:
                 messagebox.showwarning("숫자를 확인해 주세요", str(exc))
             return None
 
-    def on_fill_from_financials(self) -> None:
-        """손익계산서 숫자 세 개로 고정비와 비율을 채운다."""
-        from tkinter import simpledialog
-        from prime_contractor.breakeven import from_financials
-
-        asks = [("연 매출액", "손익계산서의 '매출액' (원)"),
-                ("매출원가", "손익계산서의 '매출원가' (원)"),
-                ("판매비와관리비", "손익계산서의 '판매비와관리비' (원)")]
-        values = []
-        for title, prompt in asks:
-            text = simpledialog.askstring(title, prompt + "\n숫자만 적어주세요.", parent=self.root)
-            if text is None:
-                return
-            number = int(re.sub(r"[^\d]", "", text) or 0)
-            if number <= 0 and title == "연 매출액":
-                messagebox.showwarning("확인", "연 매출액은 0보다 커야 합니다.")
-                return
-            values.append(number)
-        try:
-            model = from_financials(*values)
-        except ValueError as exc:
-            messagebox.showwarning("숫자를 확인해 주세요", str(exc))
-            return
-        self.fixed_cost.set(str(model.monthly_fixed))
-        self.variable_ratio.set(f"{model.variable_ratio * 100:.0f}")
-        messagebox.showinfo(
-            "채웠습니다",
-            f"월 고정비 약 {model.monthly_fixed / 1e4:,.0f}만원, "
-            f"재료·외주비 약 {model.variable_ratio * 100:.0f}% 로 잡았습니다.\n\n"
-            "⚠ 제조업은 매출원가 안에 공장 인건비 같은 고정비가 섞여 있어서,\n"
-            "이 계산은 손익분기를 실제보다 낮게 — 즉 더 안전해 보이게 — 잡습니다.\n"
-            "공장 인건비·감가상각을 아시면 '월 고정비'에 더하고,\n"
-            "'재료·외주비' 비율은 그만큼 낮춰서 고쳐 주세요.\n\n"
-            "[계산하기]를 누르면 반영됩니다.")
-
     def _current_diagnosis(self):
         from prime_contractor.diagnosis import analyze
         employees = int(re.sub(r"[^\d]", "", self.employees.get() or "0") or 0)
         return analyze(self.book, employees, self.cost_model)
 
-    def _render_diagnosis(self, diag, extra: str = "") -> None:
+    def _render_diagnosis(self, diag) -> None:
         lines: list[str] = []
         if diag.note:
             lines.append(diag.note)
@@ -602,9 +524,6 @@ class App:
             lines.append("[뭐부터 챙길지]")
             for i, p in enumerate(diag.priorities, 1):
                 lines.append(f"{i}. {p.text} — {p.reason}")
-        if extra:
-            lines.append("")
-            lines.append(extra)
         self._render_diagnosis_text(
             "\n".join(lines) if lines else "장부에서 끝난 달을 찾지 못했습니다.")
 
@@ -613,37 +532,6 @@ class App:
         self.diag_text.delete("1.0", END)
         self.diag_text.insert(END, text)
         self.diag_text.configure(state="disabled")
-
-    def on_ai_insight(self) -> None:
-        if not self.book:
-            messagebox.showwarning("파일 먼저", "매출 파일을 먼저 불러오세요.")
-            return
-        key = self.gemini_key.get().strip()
-        if not key:
-            messagebox.showwarning(
-                "API 키가 필요합니다",
-                "Gemini API 키가 있어야 합니다.\n\n"
-                "aistudio.google.com/apikey 에서 무료로 발급받아 위 칸에 붙여넣고 "
-                "다시 눌러 주세요.")
-            return
-        diag = self._current_diagnosis()
-        self.ai_button.configure(state="disabled")
-        self.say("AI에게 물어보는 중... (인터넷 연결이 필요합니다)")
-        threading.Thread(target=self._run_ai_insight, args=(diag, key), daemon=True).start()
-
-    def _run_ai_insight(self, diag, key: str) -> None:
-        from prime_contractor.ai_insight import ask
-        text, error = ask(self.book, diag, key, self.cost_model)
-        self.root.after(0, self._show_ai_insight, diag, text, error)
-
-    def _show_ai_insight(self, diag, text: str, error: str) -> None:
-        self.ai_button.configure(state="normal")
-        if error:
-            self._render_diagnosis(diag, extra=f"[AI 응답 실패] {redact_secrets(error)}")
-        elif text:
-            self._render_diagnosis(diag, extra=f"[AI가 한 번 더 본 의견]\n{text}")
-        else:
-            self._render_diagnosis(diag)
 
     def _render_sales(self) -> None:
         from datetime import date
@@ -685,15 +573,12 @@ class App:
         record = self.book.latest_closed() if self.book else None
         if record is None:
             self.gap_label.configure(text="끝난 달이 없습니다. 장부를 확인해 주세요.")
-            self.gap_button.configure(state="disabled")
             return
         if not self.book.has_targets:
-            self.gap_label.configure(text="목표가 없습니다. '월 목표'를 적고 [계산하기]를 누르세요.")
-            self.gap_button.configure(state="disabled")
+            self.gap_label.configure(text="목표가 없습니다. 고정비·재료비를 적고 [계산하기]를 누르세요.")
             return
         months_back = int(self.months_back.get() or 1)
         gap = self.book.recent_gap(months_back) if months_back > 1 else record.gap
-        self.gap_target_preview = gap
         if gap:
             loss = ""
             profit = self._month_profit(record)
@@ -711,20 +596,9 @@ class App:
                 rate = f"{record.rate * 100:.0f}%" if record.rate is not None else "-"
                 text = f"{record.ym}  {gap / 1e4:,.0f}만원 모자람  (목표의 {rate})"
             self.gap_label.configure(text=text + loss)
-            self.gap_button.configure(state="normal")
         else:
             span = f"최근 {months_back}개월" if months_back > 1 else record.ym
             self.gap_label.configure(text=f"{span} 목표 달성 — 부족분 없음")
-            self.gap_button.configure(state="disabled")
-
-    def on_find_for_gap(self) -> None:
-        self._refresh_gap()
-        gap = getattr(self, "gap_target_preview", 0)
-        if not gap:
-            return
-        self.gap_target = gap
-        self.tabs.select(self.find_tab)   # 진행 상황이 보이도록 탐색 탭으로
-        self.on_run()
 
     # --- 동작 ---------------------------------------------------------------
 
@@ -746,7 +620,6 @@ class App:
 
     def current_options(self) -> dict:
         return {
-            "mode": self.mode.get(),
             "g2b_key": self.g2b_key.get(),
             "dart_key": self.dart_key.get(),
             "nts_key": self.nts_key.get(),
@@ -764,12 +637,10 @@ class App:
             "profile_phone": self.profile_phone.get(),
             "sales_path": self.sales_path.get(),
             "sales_vat_included": self.sales_vat_included.get(),
-            "monthly_target": self.monthly_target.get(),
             "fixed_cost": self.fixed_cost.get(),
             "variable_ratio": self.variable_ratio.get(),
             "target_profit": self.target_profit.get(),
             "employees": self.employees.get(),
-            "gemini_key": self.gemini_key.get(),
             "months_back": self.months_back.get(),
             "review_start": self.review_start.get(),
             "goal_target": self.goal_target.get(),
@@ -779,31 +650,15 @@ class App:
             "goal_cash": self.goal_cash.get(),
         }
 
-    def on_remember(self) -> None:
-        path = save_settings(self.current_options())
-        messagebox.showinfo("저장했습니다",
-                            f"다음에 앱을 켤 때 자동으로 채워집니다.\n\n{path}\n\n"
-                            "인증키가 그대로 적혀 저장되니, 여러 사람이 쓰는 PC 에서는\n"
-                            "이 버튼을 누르지 마세요.")
-
     def on_run(self) -> None:
         if self.running:
             return
         options = self.current_options()
-        mode = options["mode"]
-        if mode == MODE_PUBLIC and not options["g2b_key"].strip():
+        if not options["g2b_key"].strip():
             messagebox.showwarning(
                 "인증키가 필요합니다",
                 "'나라장터 인증키' 칸을 채워주세요.\n\n"
-                "키가 아직 없으시면 '어디서 찾을까요' 를\n"
-                f"'{MODE_SAMPLE}' 로 바꾸면 그냥 해보실 수 있습니다.\n\n"
                 "키 받는 곳은 도움말 탭에 적어두었습니다.")
-            return
-        if mode == MODE_INDUSTRY and not options["dart_key"].strip():
-            messagebox.showwarning(
-                "인증키가 필요합니다",
-                f"'{MODE_INDUSTRY}' 에는 '기업정보 인증키' 가 필요합니다.\n"
-                "받는 곳은 도움말 탭에 적어두었습니다.")
             return
 
         self.running = True
@@ -851,36 +706,29 @@ class App:
                          f"점수를 낮춥니다.")
         else:
             self.say("② 탭에서 매출 장부를 불러오면 '우리 크기에 맞는 곳'으로 점수를 매깁니다.")
-        mode = options["mode"]
-
-        if mode == MODE_SAMPLE:
-            self.say("연습용 가짜 자료로 돌립니다. 여기 나오는 회사는 실제로 없는 곳입니다.")
-            result = run_screen(cfg, offline=True)
-        elif mode == MODE_INDUSTRY:
-            from prime_contractor.sources.dart import DartClient
-            self.say("상장 회사 목록을 하나씩 확인합니다. 처음에는 몇 분 걸립니다…")
-            result = run_industry_screen(cfg, DartClient(cfg.dart_api_key))
-        else:
-            from prime_contractor.sources.g2b import G2BClient
-            self.say(f"나라장터에서 최근 {cfg.lookback_days}일치 공사를 찾아봅니다…")
-            dart = nts = None
-            if cfg.dart_api_key:
-                from prime_contractor.sources.dart import DartClient
-                dart = DartClient(cfg.dart_api_key)
-            if cfg.nts_service_key:
-                from prime_contractor.sources.nts import NtsClient
-                nts = NtsClient(cfg.nts_service_key)
-                self.say("폐업한 회사는 국세청에 확인해서 빼겠습니다.")
-            from prime_contractor.sources.g2b import default_cache_dir
-            g2b = G2BClient(cfg.g2b_service_key, cache_dir=default_cache_dir())
-            if self.fresh.get() and g2b.cache:
-                self.say(f"저장해 둔 조회 결과 {g2b.cache.clear()}건을 지우고 새로 받습니다.")
-            result = run_screen(cfg, g2b_client=g2b, dart_client=dart, nts_client=nts)
+        result = self._fetch(cfg)
 
         sector = options.get("sector")
         if sector and sector != SECTOR_ALL:
             filter_sector(result, sector)
         return result
+
+    def _fetch(self, cfg):
+        """나라장터에서 받아 후보를 만든다. 시험할 때는 이것만 바꿔 끼우면 된다."""
+        from prime_contractor.sources.g2b import G2BClient, default_cache_dir
+        self.say(f"나라장터에서 최근 {cfg.lookback_days}일치 공사를 찾아봅니다…")
+        dart = nts = None
+        if cfg.dart_api_key:
+            from prime_contractor.sources.dart import DartClient
+            dart = DartClient(cfg.dart_api_key)
+        if cfg.nts_service_key:
+            from prime_contractor.sources.nts import NtsClient
+            nts = NtsClient(cfg.nts_service_key)
+            self.say("폐업한 회사는 국세청에 확인해서 빼겠습니다.")
+        g2b = G2BClient(cfg.g2b_service_key, cache_dir=default_cache_dir())
+        if self.fresh.get() and g2b.cache:
+            self.say(f"저장해 둔 조회 결과 {g2b.cache.clear()}건을 지우고 새로 받습니다.")
+        return run_screen(cfg, g2b_client=g2b, dart_client=dart, nts_client=nts)
 
     def _done(self, result) -> None:
         self.result = result
@@ -908,8 +756,6 @@ class App:
         self.say("찾은 회사: " + (summary or "없음"))
         self.say("A등급부터 연락해 보세요. B등급까지는 연락할 만합니다.")
         self.say("회사 이름을 두 번 클릭하면 왜 그 점수인지 자세히 나옵니다.")
-        if self.gap_target:
-            self._fill_plan(result)
         self.status.configure(text=f"{len(result.passed)}곳 찾음")
         self.save_button.configure(state="normal" if result.passed else "disabled")
         self.market_button.configure(state="normal" if result.market else "disabled")
@@ -1276,38 +1122,12 @@ class App:
                 for a in cand.awards[:8])
         messagebox.showinfo(cand.name, text)
 
-    def _fill_plan(self, result) -> None:
-        """부족분을 채울 후보를 골라 매출 탭에 띄운다."""
-        cfg = build_config(self.current_options())
-        plan = plan_to_close_gap(self.gap_target, result.passed,
-                                 lookback_days=cfg.lookback_days)
-        self.plan = plan
-        self.plan_tree.delete(*self.plan_tree.get_children())
-        for i, row in enumerate(plan.rows, 1):
-            c = row.candidate
-            mark = " ✔" if row.cumulative >= plan.gap else ""
-            self.plan_tree.insert("", END, values=(
-                i, c.grade or "-", c.name, c.region or "미상",
-                f"{row.monthly_expected / 1e4:,.0f}만원",
-                f"{row.cumulative / 1e4:,.0f}만원{mark}"))
-        self.plan_note.configure(
-            text=plan.note + "\n'한 달 예상 금액' 은 그 회사가 최근에 한 공사 규모에서 판넬 몫을"
-                 " 잡고, 연락했을 때 실제로 일이 올 확률(A 35% · B 25% · C 15% · D 8%)을"
-                 " 곱한 값입니다. 모두 어림짐작이니 연락할 순서를 정하는 데만 쓰세요.")
-        self.gap_target = 0
-        self.tabs.select(self.sales_tab)
-        self.result_tabs.select(self.plan_tab)
-        self.say(f"모자란 만큼 채우려면: {plan.note}")
-
     def _failed(self, exc: Exception) -> None:
         messagebox.showerror(
             "잘 안 됐습니다",
             f"{redact_secrets(exc)}\n\n아래 '진행 상황' 칸에 자세한 내용이 적혀 있습니다.\n"
             "인증키가 맞는지, 인터넷이 되는지 먼저 확인해 보세요.")
         self.status.configure(text="실패")
-        # [이만큼 채울 회사 찾기]로 시작했다가 실패하면, 다음 평범한 [후보 찾기]가
-        # 엉뚱하게 '모자란 만큼 채울 회사' 탭으로 넘어가지 않게 지운다.
-        self.gap_target = 0
         self._finish()
 
     def _finish(self) -> None:
