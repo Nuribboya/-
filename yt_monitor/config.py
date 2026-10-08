@@ -36,6 +36,7 @@ DEFAULT_ANALYSIS = {
 }
 
 DEFAULT_TRENDS = {  # 최근 유행 쇼츠 분석 (trends.py)
+    "niche": "extreme",            # 콘텐츠 장르: extreme(익스트림 · 도파민) | general(급상승 전체) — niches.py
     "region": "US",
     "language": "en",
     "lookback_days": 3,            # 최근 며칠 안에 올라온 영상만

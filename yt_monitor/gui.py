@@ -149,6 +149,12 @@ def open_path(path: Path, select: bool = False) -> None:
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(target)])
 
 
+def niche_label(name: str | None) -> str:
+    from .niches import DEFAULT_NICHE, NICHES
+
+    return NICHES.get(name or DEFAULT_NICHE, NICHES[DEFAULT_NICHE])["label"]
+
+
 # ---- 업로드 정보 창 ------------------------------------------------------------------
 
 STUDIO_URL = "https://studio.youtube.com"
@@ -310,6 +316,7 @@ class SetupDialog(tk.Toplevel):
             "threshold": tk.StringVar(value=f"{r['analysis']['drop_threshold_pct']:g}"),
             "auto_gen": tk.BooleanVar(value=bool(r["ollama"].get("auto_generate_on_slowdown", True))),
             "language": tk.StringVar(value=LANGUAGE_LABELS.get(r.get("language", "en"), LANGUAGE_LABELS["en"])),
+            "niche": tk.StringVar(value=niche_label((r.get("trends") or {}).get("niche"))),
         }
         row = 1
 
@@ -343,6 +350,13 @@ class SetupDialog(tk.Toplevel):
                      state="readonly", width=20).grid(row=row, column=1, sticky="w", pady=3)
         row += 1
         hint_label("유행 분석 지역 · 대본 언어 · 음성 · 자막 폰트가 함께 바뀜")
+        from .niches import NICHES
+
+        ttk.Label(frm, text="콘텐츠 장르").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Combobox(frm, textvariable=self.vars["niche"], values=[n["label"] for n in NICHES.values()],
+                     state="readonly", width=36).grid(row=row, column=1, columnspan=2, sticky="w", pady=3)
+        row += 1
+        hint_label("어떤 쇼츠를 유행으로 볼지 · 어떤 주제와 화면으로 만들지")
         field("YouTube API 키 *", "api_key")
         ttk.Label(frm, text="채널 목록 *").grid(row=row, column=0, sticky="nw", pady=3)
         from .ui_theme import style_text
@@ -477,6 +491,10 @@ class SetupDialog(tk.Toplevel):
         lang = next((k for k, label in LANGUAGE_LABELS.items() if label == v["language"]), "en")
         if lang != r.get("language"):
             apply_language(r, lang)
+        from .niches import NICHES
+
+        r.setdefault("trends", {})["niche"] = next((k for k, n in NICHES.items() if n["label"] == v["niche"]),
+                                                   "extreme")
         r["channels"] = merged
         r["youtube"]["api_key"] = v["api_key"].strip()
         r["telegram"]["bot_token"] = v["bot_token"].strip()
@@ -1134,12 +1152,13 @@ class App:
     # ---- 유행 쇼츠 분석 ------------------------------------------------------------------
 
     def _apply_language_ui(self):
-        t = self.cfg.raw.get("trends", {})
-        self.trend_auto_var.set(bool(t.get("auto_video", False)))
-        from .trends import region_name
+        from .niches import label_of
+        from .trends import region_name, trend_settings
 
-        self.trend_hint.configure(text=f"최근 {t.get('lookback_days', 3)}일 {region_name(t.get('region', 'US'))}에서 조회수가 "
-                                       f"빠르게 오른 쇼츠 → 주제 추천 → 쇼츠 대본 "
+        t = trend_settings(self.cfg)
+        self.trend_auto_var.set(bool(t.get("auto_video", False)))
+        self.trend_hint.configure(text=f"[{label_of(t)}] 최근 {t.get('lookback_days', 3)}일 "
+                                       f"{region_name(t.get('region', 'US'))}에서 조회수가 빠르게 오른 쇼츠 → 주제 → 대본 "
                                        f"({LANGUAGE_LABELS.get(self.cfg.language, '')})")
 
     def _save_trend_auto(self):

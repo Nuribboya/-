@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 from .collector import parse_duration
 from .config import DEFAULT_TRENDS
 from .db import from_iso, utcnow
+from .niches import apply_niche, focus_text, matches_niche, visual_text
 from .report import fnum
 
 log = logging.getLogger(__name__)
@@ -120,6 +121,11 @@ def _thumb_url(snippet: dict) -> str:
     return ""
 
 
+def trend_settings(cfg) -> dict:
+    """config의 trends + 기본값 + 장르(niche) 값."""
+    return apply_niche({**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})})
+
+
 def _int(v) -> int | None:
     return int(v) if v not in (None, "") else None
 
@@ -134,9 +140,19 @@ class TrendCollector:
     def _popular(self) -> dict[str, dict]:
         items: dict[str, dict] = {}
         token = None
+        cat = self.s.get("popular_category")
         for _ in range(int(self.s["popular_pages"])):
-            resp = self.yt.videos().list(part="snippet,statistics,contentDetails", chart="mostPopular",
-                                         regionCode=self.s["region"], maxResults=50, pageToken=token).execute()
+            kw = dict(part="snippet,statistics,contentDetails", chart="mostPopular",
+                      regionCode=self.s["region"], maxResults=50, pageToken=token)
+            if cat:
+                kw["videoCategoryId"] = cat         # 장르: 예) 스포츠(17)만
+            try:
+                resp = self.yt.videos().list(**kw).execute()
+            except Exception as exc:  # 지역에 따라 카테고리 차트가 없을 수 있다 → 건너뜀
+                if not cat:
+                    raise
+                log.warning("카테고리 %s 인기 목록 없음: %s", cat, exc)
+                break
             self.units += 1
             for it in resp.get("items", []):
                 items[it["id"]] = it
@@ -198,7 +214,7 @@ class TrendCollector:
         raw: dict[str, dict] = {}
         sources: dict[str, set[str]] = {}
         where = region_name(self.s["region"])
-        status(f"{where} 인기 급상승 목록 가져오는 중…")
+        status(f"{where} 인기 급상승 목록 가져오는 중…" + (" (스포츠)" if self.s.get("popular_category") == "17" else ""))
         for vid, it in self._popular().items():
             raw[vid] = it
             sources.setdefault(vid, set()).add("popular")
@@ -229,6 +245,9 @@ class TrendCollector:
                 continue
             title = sn.get("title", "")
             if not title_matches(title, self.s.get("title_language", "any")):
+                continue
+            # 장르: 인기 급상승에서 온 영상은 장르 키워드가 있어야 (검색 결과는 검색어로 이미 걸러짐)
+            if sources.get(vid) == {"popular"} and not matches_niche(title, sn.get("tags"), self.s.get("keywords")):
                 continue
             vids.append(TrendVideo(vid, title, sn.get("channelId", ""), sn.get("channelTitle", ""),
                                    published, duration, views, _int(st.get("likeCount")),
@@ -392,12 +411,12 @@ def _script_seconds(settings: dict, ins) -> float:
     return float(settings["script_seconds"])
 
 
-def _apply_insights(g, ins, mine=None) -> None:
-    """분석 결과를 생성 결과에 붙인다: 추천 업로드 시간(내 채널 기준이 있으면 먼저) · 첫 화면 스타일."""
+def _apply_insights(g, ins, mine=None, settings: dict | None = None) -> None:
+    """분석 결과를 생성 결과에 붙인다: 추천 업로드 시간(내 채널 기준이 있으면 먼저) · 첫 화면 · 장르 화면 스타일."""
     times = list(mine.upload_times) if mine is not None and mine.ready else []
     if ins is not None:
         times += [t for t in ins.upload_times if t not in times]
-        g.visual_hint = ins.visual_summary_en
+    g.visual_hint = "\n".join(x for x in (visual_text(settings), ins.visual_summary_en if ins else "") if x)
     if g.upload is not None and times:
         g.upload["upload_times"] = times[:3]
 
@@ -427,7 +446,7 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
 
     now = now or utcnow()
     tz = ZoneInfo(cfg.schedule["timezone"])
-    settings = {**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})}
+    settings = trend_settings(cfg)
     status = on_status or log.info
     videos, thumbs, units, cached_at = _collect(cfg, settings, now, service=service, use_cache=use_cache,
                                                 status=status, cancel=cancel)
@@ -442,8 +461,8 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
         save_cache(trend_cache_path(cfg), settings, videos, thumbs, cached_at or now)
     except OSError as exc:
         log.warning("유행 캐시 저장 실패: %s", exc)
-    context = _join(trend_context(videos, now, tz, settings), prompt_text(ins, cfg.language),
-                    learning.prompt_text(mine, cfg.language))
+    context = _join(focus_text(settings, cfg.language), trend_context(videos, now, tz, settings),
+                    prompt_text(ins, cfg.language), learning.prompt_text(mine, cfg.language))
     table = trend_table(videos, now, tz, breakout_ratio=float(settings["breakout_ratio"]))
     report = _join(learning.report_ko(mine), report_ko(ins))
     result = TrendResult(videos, context, (report + "\n\n" + table) if report else table, units=units,
@@ -467,7 +486,7 @@ def run_trends(cfg, *, service=None, generator=None, generate: bool = True, now:
                      trigger="trend", topics_prompt=TREND_TOPICS_PROMPT, script_prompt=SHORTS_SCRIPT_PROMPT,
                      script_minutes=seconds / 60, upload_hint=hint, upload_stats=stats,
                      on_status=on_status, on_token=on_token, cancel=cancel)
-    _apply_insights(g, ins, mine)
+    _apply_insights(g, ins, mine, settings)
     save_generation(g, cfg.outputs_dir, tz)
     from .db import Database
 
@@ -491,7 +510,7 @@ def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
         raise TrendError("주제를 입력하세요.")
     now = now or utcnow()
     tz = ZoneInfo(cfg.schedule["timezone"])
-    settings = {**DEFAULT_TRENDS, **(cfg.raw.get("trends") or {})}
+    settings = trend_settings(cfg)
     # 최근에 유행 분석을 했다면 그 결과(길이 · 제목 패턴 · 업로드 시간 · 첫 화면 스타일)를 그대로 활용 (쿼터 0)
     ins = None
     hit = load_cache(trend_cache_path(cfg), settings, now, float(settings.get("cache_hours", 3)) * 4)
@@ -503,7 +522,7 @@ def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
     mine = _my_insights(cfg, now, on_status or log.info)
     ensure_prompts(cfg)
     gen = generator or ScriptGenerator.from_config(cfg)
-    context = _join(f"(The creator picked this topic: {topic})",
+    context = _join(focus_text(settings, cfg.language), f"(The creator picked this topic: {topic})",
                     prompt_text(ins, cfg.language) if ins is not None else "",
                     learning.prompt_text(mine, cfg.language))
     seconds = learning.blend_seconds(_script_seconds(settings, ins), mine, cfg.raw.get("learning"),
@@ -515,7 +534,7 @@ def run_topic(cfg, topic: str, *, generator=None, now: datetime | None = None,
                    upload_hint=_join(title_hint(ins, cfg.language) if ins is not None else "",
                                      learning.title_hint(mine, cfg.language)))
     gen.write_script(g, 0, on_status=on_status, on_token=on_token, cancel=cancel)
-    _apply_insights(g, ins, mine)
+    _apply_insights(g, ins, mine, settings)
     save_generation(g, cfg.outputs_dir, tz)
     with Database(cfg.db_path) as db:
         record_generation(db, g)

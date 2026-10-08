@@ -219,7 +219,7 @@ def test_trend_flow_with_auto_video(root, dialogs, tmp_path, monkeypatch):
         raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
                             subtitle_font_size=20, subtitle_margin_bottom=40)
         raw["pexels"]["api_key"] = "fake"
-        raw["trends"].update(popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
+        raw["trends"].update(niche="general", popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
         save_config(raw, path)
         app = gui.App(root, path, check_ollama_on_start=False)
         app.video_pipeline_factory = lambda c: VideoPipeline(c, pexels=None, tts=FakeEdgeTTS(retry_delay=0),
@@ -264,7 +264,7 @@ def test_one_click(root, dialogs, tmp_path, monkeypatch, topic):
         raw["video"].update(width=180, height=320, fps=15, preset="ultrafast", crf=30,
                             subtitle_font_size=20, subtitle_margin_bottom=40)
         raw["pexels"]["api_key"] = "fake"
-        raw["trends"].update(popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
+        raw["trends"].update(niche="general", popular_pages=1, region="KR", language="ko", title_language="ko", min_views=10000)
         save_config(raw, path)
         app = gui.App(root, path, check_ollama_on_start=False)
         app.video_pipeline_factory = lambda c: VideoPipeline(c, pexels=None, tts=FakeEdgeTTS(retry_delay=0),

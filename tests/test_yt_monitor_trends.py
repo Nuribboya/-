@@ -116,6 +116,7 @@ def make_cfg(tmp_path, url, lang="ko"):
     raw["channels"] = [{"handle": "@test"}]
     raw["youtube"]["api_key"] = "fake"
     raw["ollama"].update(host=url)
+    raw["trends"]["niche"] = "general"           # 장르 테스트는 test_yt_monitor_niches.py
     raw["trends"]["popular_pages"] = 1
     raw["trends"]["min_views"] = 10000
     return load_config(save_config(raw, tmp_path / "config.yaml"), load_env=False)

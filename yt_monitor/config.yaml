@@ -65,6 +65,8 @@ ollama:                           # 로컬 LLM (https://ollama.com) — API 비�
   timeout_sec: 900                # CPU만 있는 PC는 대본 생성에 수 분 걸릴 수 있음
 
 trends:                           # 🔥 최근 유행 쇼츠 분석 → 주제/쇼츠 대본 → 영상
+  niche: extreme                  # 장르: extreme = 익스트림 · 도파민(극한 스포츠 · 아찔한 순간) / general = 급상승 전체
+                                  #   extreme이면 검색어 · 기간 · 최소 조회수는 장르 값을 씀 (niches.py)
   region: US                      # 유행을 볼 나라 (US, GB, CA, AU, KR …)
   language: en
   lookback_days: 3                # 최근 며칠 안에 올라온 쇼츠만
