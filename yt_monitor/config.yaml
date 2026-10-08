@@ -166,7 +166,10 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   bgm_duck: true                  # 목소리가 나올 때 음악 자동으로 줄이기
   realism: light                  # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
   voice_fx: natural               # 목소리를 마이크로 녹음한 것처럼 다듬기 (natural | off)
-  suspense: auto                  # 긴장감 연출: auto(익스트림 장르면 켬) | on | off
+  suspense: auto                  # 긴장감 연출: auto(액션 스포츠 장르면 켬) | on | off
+  pov: auto                       # 1인칭 시점: auto(액션 스포츠면 켬) | on | off
+                                  #   헬멧캠 영상만 · "나"의 속마음 내레이션 · 바람 소리 · 줌 없음
+  wind_volume: 0.35
                                   #   클라이맥스로 갈수록 빠른 컷 · 슬로 모션 · 어두운 색감 · 심장 박동 · 결말 '쿵'
   heartbeat_volume: 0.55
   impact_volume: 0.7

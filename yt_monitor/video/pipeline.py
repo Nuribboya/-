@@ -71,6 +71,20 @@ class VideoResult:
 
 # ---- 긴장감 연출 ----------------------------------------------------------------------
 
+POV_WORDS = ("pov", "first person", "first-person", "gopro", "helmet cam", "helmet camera", "bodycam")
+
+
+def pov_keywords(scenes, niche: dict) -> None:
+    """1인칭 모드: 검색어마다 'POV'를 붙이고, 종목별 POV 검색어를 예비로 덧붙인다."""
+    extra = list(niche.get("pov_stock") or [])
+    for s in scenes:
+        kws = [k if any(w in k.lower() for w in POV_WORDS) else f"{k} POV" for k in s.keywords]
+        if extra:
+            i = (s.index - 1) % len(extra)
+            kws += [t for t in extra[i:] + extra[:i] if t not in kws][:2]
+        s.keywords = kws
+
+
 def suspense_plan(n_scenes: int, climax: int | None) -> dict | None:
     """클라이맥스 씬 → {"build": [고조 씬들], "climax", "payoff"}. 씬이 3개 미만이면 None."""
     if n_scenes < 3:
@@ -93,14 +107,15 @@ def suspense_pace(index: int, plan: dict | None) -> float:
     return 1.0
 
 
-def suspense_fx(index: int, k: int, plan: dict | None, fps: int, frames: int) -> dict:
-    """컷별 효과: 고조 = 숨 막히는 색감, 클라이맥스 = 슬로 모션 + 확 당기는 줌, 결말 첫 컷 = 번쩍."""
+def suspense_fx(index: int, k: int, plan: dict | None, fps: int, frames: int, pov: bool = False) -> dict:
+    """컷별 효과: 고조 = 숨 막히는 색감, 클라이맥스 = 슬로 모션 + 확 당기는 줌, 결말 첫 컷 = 번쩍.
+    1인칭이면 줌은 아주 약하게 (헬멧캠 화면이 갑자기 확대되면 어색하다)."""
     if not plan:
         return {}
     if index == plan["climax"]:
-        return {"grade": "tense", "speed": 0.5, "zoom": 0.22}
+        return {"grade": "tense", "speed": 0.5, "zoom": 0.06 if pov else 0.22}
     if index in plan["build"]:
-        return {"grade": "tense", "zoom": 0.14}
+        return {"grade": "tense", "zoom": 0.0 if pov else 0.14}
     if index == plan["payoff"] and k == 0:
         return {"flash": True}
     return {}
@@ -258,10 +273,16 @@ class VideoPipeline:
         niche = niche_of(self.cfg.raw.get("trends"))
         mode = str(self.v.get("suspense", "auto")).lower()
         suspense = (mode == "on" or (mode == "auto" and bool(niche.get("suspense")))) and len(scenes) >= 3
+        pov_mode = str(self.v.get("pov", "auto")).lower()
+        pov = pov_mode == "on" or (pov_mode == "auto" and bool(niche.get("pov")))
         extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir, meta=meta,
                          title=title, per_scene=int(self.v.get("keywords_per_scene", 3)),
                          options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status,
                          visual_hint=visual_hint, suspense=suspense)
+        if pov:
+            pov_keywords(scenes, niche)
+            comp.zoom = 0.0                  # 1인칭은 줌인/줌아웃 없이 (헬멧캠처럼)
+            status("1인칭 POV 모드: 헬멧캠 영상만 · 관중 컷/AI 그림 없음 · 바람 소리")
         for s in scenes:
             status(f"  씬 {s.index}: {', '.join(s.keywords) or '-'}")
         upload = self._upload_meta(upload_meta, scenes, title, ollama, status, cancel)
@@ -313,10 +334,11 @@ class VideoPipeline:
                 scene_clips[s.index] = good
                 srcs = ", ".join(sorted({c.source for c in good}))
                 status(f"  씬 {s.index}: 영상 {len(good)}개" + (f" ({srcs})" if good else " → 단색 배경"))
-            crowd_clips = self._crowd_clips(niche, stock, used, cache, status, warn, cancel)
+            crowd_clips = [] if pov else self._crowd_clips(niche, stock, used, cache, status, warn, cancel)
             status("요청 수: " + ", ".join(f"{type(p).__name__.replace('Client', '')} "
                                             f"{getattr(p, 'requests_made', 0)}회" for p in stock))
-        scene_images = self._ai_images(comfy, scenes, scene_clips, work, status, warn, cancel) if comfy else {}
+        scene_images = self._ai_images(comfy, scenes, scene_clips, work, status, warn, cancel,
+                                       only_missing=pov) if comfy else {}
 
         # 3) TTS -------------------------------------------------------------------------
         step(3, "TTS 음성 생성 중…")
@@ -348,11 +370,13 @@ class VideoPipeline:
         for d in durations:
             bounds.append(bounds[-1] + d)
         plan = suspense_plan(len(scenes), meta.get("climax")) if suspense else None
+        if pov:
+            audio = self._add_wind(comp, audio, bounds, plan, status, warn)
         if plan:
             status(f"긴장감 연출: {plan['build'][0]}~{plan['climax']}번 씬 고조 → 클라이맥스 {plan['climax']}번"
                    + (f" → 결말 {plan['payoff']}번" if plan["payoff"] else ""))
             audio = self._add_suspense_sfx(comp, audio, bounds, plan, status, warn)
-        if niche.get("crowd_sfx"):
+        if niche.get("crowd_sfx") and not pov:
             audio = self._add_crowd_sfx(comp, audio, total, status, warn)
 
         # 4) 자막 -------------------------------------------------------------------------
@@ -380,7 +404,8 @@ class VideoPipeline:
         shots: list[Shot] = []
         every = int(self.v.get("crowd_every", 4) or 0)
         cut_no = crowd_i = 0
-        limits = [clip_max * suspense_pace(s.index, plan) for s in scenes] if plan else clip_max
+        base_cut = clip_max * (1.6 if pov else 1.0)          # 1인칭은 길게 이어지는 컷
+        limits = [base_cut * suspense_pace(s.index, plan) for s in scenes] if plan else base_cut
         for s, frames in zip(scenes, split_frames(bounds, fps, limits)):
             # AI 이미지가 있으면 그 씬의 첫 컷으로, 나머지는 스톡 영상
             sources: list = ([scene_images[s.index]] if s.index in scene_images else []) + \
@@ -389,7 +414,7 @@ class VideoPipeline:
             for k, n in enumerate(frames):
                 zoom_out = len(shots) % 2 == 1      # 컷마다 줌인/줌아웃 번갈아
                 cut_no += 1
-                fx = suspense_fx(s.index, k, plan, fps, n) if plan else {}
+                fx = suspense_fx(s.index, k, plan, fps, n, pov=pov) if plan else {}
                 # 결말 직후: 관중 리액션 (긴장이 풀리는 순간 사람들의 반응)
                 reaction = bool(plan and crowd_clips and s.index == plan["payoff"] and k == 1)
                 # 현장감: N컷마다 관중 리액션 컷 (첫 씬 훅 · 고조 구간 제외, 0.8초 이상 컷만)
@@ -493,6 +518,20 @@ class VideoPipeline:
         status(f"관중 리액션 컷 {len(out)}개 준비 (현장감)")
         return out
 
+    def _add_wind(self, comp, audio: Path, bounds: list[float], plan: dict | None, status, warn) -> Path:
+        """1인칭 속도감: 바람 소리를 전체에 깔고 고조 구간에서 세게."""
+        try:
+            total = bounds[-1]
+            rise = bounds[plan["build"][0] - 1] if plan else None
+            peak = bounds[plan["climax"]] if plan else None
+            wind = comp.wind(total, rise, peak)
+            audio = comp.overlay_sfx(audio, wind, 0.0, float(self.v.get("wind_volume", 0.35)),
+                                     comp.work / "with_wind.wav")
+            status("  바람 소리 (속도감)")
+        except FFmpegError as exc:
+            warn(f"바람 소리를 넣지 못했습니다: {str(exc).splitlines()[0]}")
+        return audio
+
     def _add_suspense_sfx(self, comp, audio: Path, bounds: list[float], plan: dict, status, warn) -> Path:
         """고조 구간 내내 점점 빨라지는 심장 박동, 결말 시작에 '쿵'."""
         try:
@@ -570,10 +609,13 @@ class VideoPipeline:
                                     script=script, options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel)
 
     # ---- AI 이미지 -------------------------------------------------------------------
-    def _ai_images(self, comfy, scenes, scene_clips, work: Path, status, warn, cancel) -> dict[int, Path]:
-        """mix: 첫 씬(훅) + 스톡 영상을 못 찾은 씬 / all: 모든 씬 → ComfyUI로 세로 이미지 생성."""
+    def _ai_images(self, comfy, scenes, scene_clips, work: Path, status, warn, cancel,
+                   only_missing: bool = False) -> dict[int, Path]:
+        """mix: 첫 씬(훅) + 스톡 영상을 못 찾은 씬 / all: 모든 씬 → ComfyUI로 세로 이미지 생성.
+        only_missing(1인칭 모드): 영상을 못 찾은 씬만 (정지 그림이 1인칭 화면을 깨지 않게)."""
         mode = str(self.cfg.raw.get("ai_images", {}).get("mode", "mix"))
-        targets = [s for s in scenes if mode == "all" or s.index == 1 or not scene_clips.get(s.index)]
+        targets = [s for s in scenes if (not only_missing and (mode == "all" or s.index == 1))
+                   or not scene_clips.get(s.index)]
         if not targets:
             return {}
         launcher = None

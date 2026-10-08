@@ -166,6 +166,7 @@ def make_cfg(tmp_path, **ai) -> Config:
     raw["video"].update(width=180, height=320, fps=15, crf=30, preset="ultrafast", clip_max_seconds=1.5,
                         subtitle_font_size=20, subtitle_margin_bottom=40, hook_font_size=24)
     raw["ai_images"].update(enabled=True, **ai)
+    raw["video"]["pov"] = "off"
     return Config(raw=raw, base_dir=tmp_path, path=tmp_path / "config.yaml")
 
 

@@ -310,6 +310,7 @@ def test_compose_steps(tmp_path):
 def make_cfg(tmp_path, lang="ko", **video) -> Config:
     raw = read_raw(tmp_path / "config.yaml")
     raw["language"] = lang
+    raw["video"]["pov"] = "off"          # 1인칭 모드는 test_pipeline_pov에서
     raw["video"].update(width=180, height=320, fps=15, crf=30, preset="ultrafast", clip_max_seconds=1.5,
                         subtitle_font_size=20, subtitle_margin_bottom=40, **video)
     raw["pexels"]["api_key"] = "fake-key"
@@ -548,3 +549,47 @@ def test_pipeline_suspense(tmp_path, services):
     assert any(sh["speed"] == 0.5 for sh in debug["shots"]) and any(sh["grade"] == "tense" for sh in debug["shots"])
     assert probe(FF.path, res.video_path).has_audio and not res.warnings, res.warnings
     assert sum(sh["frames"] for sh in debug["shots"]) == round(res.duration * 15)
+
+
+@needs_ffmpeg
+def test_pipeline_pov(tmp_path, services):
+    """1인칭 모드: 검색어에 POV · 관중 컷/함성 없음 · 줌 없음 · 바람 소리."""
+    from yt_monitor.video.pipeline import pov_keywords
+    from yt_monitor.video.scenes import Scene
+
+    sc = [Scene(1, "x", ["mountain bike downhill", "gopro trail"]), Scene(2, "y", ["parkour"])]
+    pov_keywords(sc, {"pov_stock": ["mountain bike POV", "parkour POV", "snowboarding POV"]})
+    assert sc[0].keywords[:2] == ["mountain bike downhill POV", "gopro trail"]
+    assert sc[1].keywords == ["parkour POV", "snowboarding POV", "mountain bike POV"]
+
+    (tmp_path / "sfx" / "crowd").mkdir(parents=True)
+    (tmp_path / "sfx" / "crowd" / "cheer.wav").write_bytes(tone_wav(2.0))
+    cfg = make_cfg(tmp_path, pov="auto")
+    cfg.raw["trends"]["niche"] = "extreme"
+    statuses = []
+    script = ("Okay. Breathe. The drop is right there. I can't see the landing. "
+              "My hands are shaking on the bars. Three seconds. Commit. "
+              "Front wheel down. I made it. Would you ride this?")
+    res = make_pipeline(cfg, services).run(script, "POV", on_status=statuses.append)
+    assert any("1인칭 POV 모드" in m for m in statuses) and any("바람 소리" in m for m in statuses)
+    assert not any("관중 리액션" in m or "관중 함성" in m for m in statuses)
+    assert all("POV" in k or "pov" in k.lower() for s in res.scenes for k in s.keywords[:1])
+    assert (res.work_dir / "with_wind.wav").exists() and not res.warnings, res.warnings
+    debug = json.loads((res.work_dir / "scenes.json").read_text(encoding="utf-8"))
+    assert all((sh["zoom"] or 0) <= 0.06 for sh in debug["shots"])
+
+
+@needs_ffmpeg
+def test_zoom_out_slow_motion_does_not_crash(tmp_path):
+    """줌아웃 + 슬로 모션 + 손떨림 + 그레인/비네팅 조합에서 ffmpeg가 죽던 문제 (copy 필터로 해결)."""
+    from yt_monitor.video.compose import Composer, Shot
+    from yt_monitor.video.ffmpeg import FFmpegRunner
+
+    clip = make_test_clip(FF.path, tmp_path / "c.mp4", "testsrc2", seconds=2.0)
+    src = tmp_path / "c.mp4"
+    if isinstance(clip, (bytes, bytearray)):
+        src.write_bytes(clip)
+    comp = Composer(FFmpegRunner(FF.path, tmp_path / "logs"), tmp_path / "w",
+                    {"width": 180, "height": 320, "fps": 15, "realism": "light"})
+    out = comp.prepare_shot(Shot(10, src, zoom_out=True, speed=0.5, zoom=0.06, grade="tense"), tmp_path / "s.mp4")
+    assert out.exists() and probe(FF.path, out).duration > 0

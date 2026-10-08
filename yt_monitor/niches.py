@@ -19,51 +19,63 @@ SPORTS: dict[str, dict] = {
     "mtb": {"label": "산악자전거", "en": "mountain biking (downhill / enduro / freeride)",
             "query": "mountain bike downhill",
             "keywords": ["mtb", "mountain ?bik", "downhill", "enduro", "bike ?park", "freeride", "dirt ?jump"],
-            "stock": ["mountain bike downhill", "mountain biking forest trail", "mtb jump", "mountain biker POV"]},
+            "stock": ["mountain bike downhill", "mountain biking forest trail", "mtb jump", "mountain biker POV"],
+            "pov": ["mountain bike POV", "first person mountain biking", "gopro mountain bike trail", "helmet camera downhill"]},
     "parkour": {"label": "파쿠르", "en": "parkour / free running",
                 "query": "parkour",
                 "keywords": ["parkour", "free ?run", "rooftop", "freerunn"],
-                "stock": ["parkour jump", "free running rooftop", "parkour city", "parkour flip"]},
+                "stock": ["parkour jump", "free running rooftop", "parkour city", "parkour flip"],
+            "pov": ["parkour POV", "first person parkour", "rooftop running POV", "gopro parkour"]},
     "snowboard": {"label": "스노보드", "en": "snowboarding",
                   "query": "snowboarding",
                   "keywords": ["snowboard", "backcountry", "halfpipe", "slopestyle", "big air"],
-                  "stock": ["snowboarding powder", "snowboard jump", "snowboarder mountain", "snowboard trick"]},
+                  "stock": ["snowboarding powder", "snowboard jump", "snowboarder mountain", "snowboard trick"],
+            "pov": ["snowboarding POV", "first person snowboarding", "gopro snowboard powder"]},
     "diving": {"label": "다이빙 (절벽 · 하이다이빙)", "en": "cliff diving / high diving",
                "query": "cliff diving",
                "keywords": ["cliff ?div", "high ?div", "diving", "diver"],
-               "stock": ["cliff diving", "high diving", "diving into ocean", "cliff jump water"]},
+               "stock": ["cliff diving", "high diving", "diving into ocean", "cliff jump water"],
+            "pov": ["cliff jump POV", "first person cliff jump", "gopro jump into water"]},
     "paragliding": {"label": "패러글라이딩", "en": "paragliding / speed flying",
                     "query": "paragliding",
                     "keywords": ["paraglid", "paramotor", "speed ?fl", "hang ?glid", "acro"],
-                    "stock": ["paragliding", "paraglider flying mountains", "paragliding sunset", "paragliding POV"]},
+                    "stock": ["paragliding", "paraglider flying mountains", "paragliding sunset", "paragliding POV"],
+            "pov": ["paragliding POV", "first person paragliding", "gopro paragliding flight"]},
     "skydiving": {"label": "스카이다이빙", "en": "skydiving",
                   "query": "skydiving",
                   "keywords": ["skydiv", "free ?fall", "parachute", "canopy"],
-                  "stock": ["skydiving freefall", "skydivers formation", "parachute opening"]},
+                  "stock": ["skydiving freefall", "skydivers formation", "parachute opening"],
+            "pov": ["skydiving POV", "freefall first person", "gopro skydiving"]},
     "wingsuit": {"label": "윙슈트 · 베이스점프", "en": "wingsuit / BASE jumping",
                  "query": "wingsuit",
                  "keywords": ["wingsuit", "base ?jump", "proximity"],
-                 "stock": ["wingsuit flying", "base jumping cliff"]},
+                 "stock": ["wingsuit flying", "base jumping cliff"],
+            "pov": ["wingsuit POV", "first person wingsuit flight"]},
     "ski": {"label": "스키", "en": "freeride skiing",
             "query": "freeride skiing",
             "keywords": ["ski", "freeride", "powder", "avalanche"],
-            "stock": ["freeride skiing powder", "ski jump mountain"]},
+            "stock": ["freeride skiing powder", "ski jump mountain"],
+            "pov": ["skiing POV", "first person skiing powder", "gopro ski run"]},
     "surf": {"label": "서핑", "en": "big wave surfing",
              "query": "big wave surfing",
              "keywords": ["surf", "big wave", "barrel", "nazar"],
-             "stock": ["big wave surfing", "surfing barrel wave"]},
+             "stock": ["big wave surfing", "surfing barrel wave"],
+            "pov": ["surfing POV", "first person surfing wave"]},
     "bmx": {"label": "BMX · 스케이트보드", "en": "BMX / skateboarding",
             "query": "bmx tricks",
             "keywords": ["bmx", "skate", "skatepark", "kickflip"],
-            "stock": ["bmx trick skatepark", "skateboarding trick"]},
+            "stock": ["bmx trick skatepark", "skateboarding trick"],
+            "pov": ["bmx POV", "skateboarding POV first person"]},
     "motocross": {"label": "모토크로스", "en": "motocross / FMX",
                   "query": "motocross",
                   "keywords": ["motocross", "fmx", "dirt ?bike", "supercross"],
-                  "stock": ["motocross jump", "dirt bike race"]},
+                  "stock": ["motocross jump", "dirt bike race"],
+            "pov": ["motocross POV", "dirt bike first person"]},
     "climbing": {"label": "암벽등반", "en": "rock climbing / free solo",
                  "query": "rock climbing",
                  "keywords": ["climb", "free ?solo", "boulder"],
-                 "stock": ["rock climbing cliff", "climber mountain wall"]},
+                 "stock": ["rock climbing cliff", "climber mountain wall"],
+            "pov": ["climbing POV", "first person rock climbing"]},
 }
 DEFAULT_SPORTS = ["mtb", "parkour", "snowboard", "diving", "paragliding"]
 
@@ -82,6 +94,7 @@ NICHES: dict[str, dict] = {
                           "audience shocked", "stadium crowd"],
         "crowd_sfx": True,
         "suspense": True,                  # 긴장감 연출: 컷 가속 · 클라이맥스 슬로 모션 · 심장 박동 · 임팩트
+        "pov": True,                       # 1인칭 시점: 헬멧캠 영상만 · "나"의 속마음 내레이션 · 바람 소리
         "image_style": ("action sports photography, telephoto lens, spectators in the background, real photo, "
                         "motion blur, natural light"),
     },
@@ -116,6 +129,9 @@ def niche_of(settings: dict | None) -> dict:
     n["search_queries"] = [SPORTS[k]["query"] for k in keys]
     n["keywords"] = [kw for k in keys for kw in SPORTS[k]["keywords"]]
     en, ko = _sports_list_en(keys), _sports_list_ko(keys)
+    pov = bool(n.get("pov")) and (settings or {}).get("pov", True) is not False
+    n["pov"] = pov
+    n["pov_stock"] = [t for k in keys for t in SPORTS[k].get("pov", [])]
     n["focus_en"] = (
         "[Channel niche: ACTION SPORTS]\n"
         f"This channel ONLY makes Shorts about these sports: {en}.\n"
@@ -142,7 +158,28 @@ def niche_of(settings: dict | None) -> dict:
         "점점 커지는 위험, 클라이맥스 직전 아주 짧은 문장과 카운트다운, 결과를 한 줄 더 미룬 뒤 착지나 반전.\n"
         "- 주인공은 익명. 실존 인물에 대한 정확한 사실을 지어내지 말 것. 따라 하라고 하지 말 것."
     )
-    stock = "; ".join(", ".join(SPORTS[k]["stock"]) for k in keys)
+    if pov:
+        n["focus_en"] += (
+            "\n- FIRST-PERSON POV (most important): the video is helmet-cam footage, so the narration is the RIDER'S "
+            "OWN INNER VOICE — 'I', present tense, right now, as if I'm doing it this second: what I see in front of "
+            "me, the speed, the wind, my heartbeat, my hands. ('Okay. Breathe. The drop is right there.' / "
+            "'I can't see the landing.' / 'Three seconds. Commit.') Short, breathy lines. No narrator describing a "
+            "third person. Titles often start with 'POV:' ('POV: you just dropped into the steepest line')."
+        )
+        n["focus_ko"] += (
+            "\n- 1인칭 시점(가장 중요): 화면은 헬멧캠 영상이라 내레이션은 타는 사람 본인의 속마음 — '나', 현재형, "
+            "지금 이 순간 내가 하고 있는 것처럼: 눈앞에 보이는 것, 속도, 바람, 심장 소리, 손. "
+            "('좋아. 숨 쉬자. 바로 저기가 낭떠러지야.' / '착지 지점이 안 보여.' / '3초. 간다.') 짧고 숨찬 문장. "
+            "제3자를 설명하는 내레이터 금지. 제목은 'POV:'로 시작하는 경우가 많다."
+        )
+    stock = "; ".join(", ".join(SPORTS[k]["pov" if pov else "stock"]) for k in keys)
+    if pov:
+        n["visual_en"] = (
+            f"This Short is FIRST-PERSON POV of {en}. EVERY search keyword must be POV / helmet-cam footage of "
+            f"that sport and must include 'POV' or 'first person' or 'gopro' (examples: {stock}). "
+            "No third-person shots, no crowds, no storms, animals, office or calm footage."
+        )
+        return n
     n["visual_en"] = (
         f"This Short is about {en}. EVERY search keyword must show that sport in action "
         f"(examples: {stock}). Prefer POV helmet cam, slow motion, drone shots of the rider. "

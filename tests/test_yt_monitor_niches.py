@@ -85,7 +85,7 @@ def test_extreme_collect_and_prompts(tmp_path):
         assert "Channel niche: ACTION SPORTS" in prompts[0] and "mountain biking" in prompts[0]
         assert "No storms, animals" in prompts[0] and "Never tell viewers to try it" in prompts[0]
         assert "ACTION SPORTS" in prompts[1]                              # 대본에도 장르 지시
-        assert "EVERY search keyword must show that sport" in res.generation.visual_hint
+        assert "FIRST-PERSON POV" in res.generation.visual_hint and "gopro" in res.generation.visual_hint
     finally:
         server.shutdown()
 
@@ -105,3 +105,13 @@ def test_climax_parse_and_suspense_prompt():
     assert parse_climax('{"climax": 12}', 8) is None and parse_climax("not json", 8) is None
     focus = focus_text({"niche": "extreme"}, "en")
     assert "what's at stake" in focus and "countdown" in focus and "Never reveal it early" in focus
+
+
+def test_pov_focus_and_off_switch():
+    from yt_monitor.niches import focus_text, visual_text
+
+    assert "RIDER'S OWN INNER VOICE" in focus_text({"niche": "extreme"}, "en")
+    assert "'나', 현재형" in focus_text({"niche": "extreme"}, "ko")
+    assert "POV" in visual_text({"niche": "extreme"})
+    off = {"niche": "extreme", "pov": False}
+    assert "INNER VOICE" not in focus_text(off, "en") and "EVERY search keyword must show that sport" in visual_text(off)

@@ -171,6 +171,9 @@ class Composer:
                              f":y='(ih-{h})/2+{ay}*sin(t*1.3+1.1)*cos(t*0.9)'")
             else:
                 parts.append(f"crop={w}:{h}")
+            # 프레임마다 크기가 바뀐 뒤 잘라낸 프레임은 버퍼가 제각각이라, 뒤 필터(noise · vignette …)가
+            # 메모리를 잘못 읽어 ffmpeg가 죽는 경우가 있다 (줌아웃 · 슬로 모션). 새 버퍼로 복사해서 막는다.
+            parts.append("copy")
         # AI 이미지는 색 보정을 하지 않는다 (채도를 올리면 AI 티가 더 난다)
         if shot.source is not None and not shot.is_image and shot.grade != "tense" and \
                 (self.contrast != 1 or self.saturation != 1):
@@ -198,6 +201,19 @@ class Composer:
                 f"+0.65*gte({tau},0.21)*sin(2*PI*46*({tau}-0.21))*exp(-30*({tau}-0.21))")
         self.runner.run(["-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d={d:.3f}",
                          "-af", "lowpass=f=180,volume=1.6", "-ac", "2", out], "효과음 심장 박동")
+        return out
+
+    def wind(self, duration: float, rise_at: float | None = None, peak_at: float | None = None,
+             out: Path | None = None) -> Path:
+        """1인칭 속도감: 갈색 잡음을 걸러 만든 바람 소리. 고조 구간에서 점점 세지고 결말에서 잦아든다."""
+        out = out or self.work / "sfx_wind.wav"
+        d = max(duration, 0.5)
+        a = rise_at if rise_at is not None else d * 0.5
+        b = peak_at if peak_at is not None and peak_at > a else d * 0.85
+        vol = (f"if(lt(t,{a:.3f}),0.45,if(lt(t,{b:.3f}),0.45+0.55*(t-{a:.3f})/{(b - a):.3f},0.35))")
+        self.runner.run(["-f", "lavfi", "-i", f"anoisesrc=color=brown:sample_rate=48000:amplitude=0.6:duration={d:.3f}",
+                         "-af", f"highpass=f=120,lowpass=f=2500,tremolo=f=0.35:d=0.5,volume='{vol}':eval=frame",
+                         "-ac", "2", out], "효과음 바람")
         return out
 
     def impact(self, out: Path | None = None) -> Path:

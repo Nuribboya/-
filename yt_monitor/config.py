@@ -194,6 +194,8 @@ DEFAULTS = {
         "realism": "light",                 # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
         "voice_fx": "natural",              # 목소리를 마이크로 녹음한 것처럼 다듬기: natural | off
         "suspense": "auto",                 # 긴장감 연출: auto(장르가 원하면) | on | off
+        "pov": "auto",                      # 1인칭 시점: auto(장르가 원하면) | on | off
+        "wind_volume": 0.35,                # 1인칭 바람 소리 크기
         "heartbeat_volume": 0.55,           # 고조 구간 심장 박동 크기
         "impact_volume": 0.7,               # 결말 '쿵' 크기
         "scene_pause": 0.18,                # 문장(씬) 사이 숨 쉬는 쉼(초)
