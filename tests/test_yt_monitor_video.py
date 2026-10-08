@@ -396,6 +396,48 @@ def test_pipeline_background_music(tmp_path, services):
 
 
 @needs_ffmpeg
+def test_pipeline_live_event_realism(tmp_path, services):
+    """익스트림 장르: 관중 리액션 컷 · 관중 함성 · 손떨림/그레인으로 현장감."""
+    from yt_monitor.video.compose import Composer
+
+    (tmp_path / "sfx" / "crowd").mkdir(parents=True)
+    (tmp_path / "sfx" / "crowd" / "cheer.wav").write_bytes(tone_wav(2.0))
+    cfg = make_cfg(tmp_path, crowd_every=2)
+    cfg.raw["trends"]["niche"] = "extreme"
+    statuses = []
+    res = make_pipeline(cfg, services).run(SCRIPT, "현장감", on_status=statuses.append)
+    assert any("관중 리액션 컷 4개" in m for m in statuses) and any("관중 함성: cheer.wav" in m for m in statuses)
+    debug = json.loads((res.work_dir / "scenes.json").read_text(encoding="utf-8"))
+    scene_srcs = {Path(u).name for sc in debug["scenes"] for u in sc["clips"]}
+    crowd_shots = [sh for sh in debug["shots"] if sh["source"] and "pexels.com" not in sh["source"]
+                   and Path(sh["source"]).name not in scene_srcs]
+    assert crowd_shots, "관중 컷이 들어가야 함"
+    assert (res.work_dir / "with_crowd.wav").exists() and probe(FF.path, res.video_path).has_audio
+    assert res.credits_path.read_text(encoding="utf-8").count("Pexels —") >= 5
+    assert not res.warnings, res.warnings
+    # 촬영한 느낌: 손떨림 crop 표현식 + 그레인
+    comp = Composer.__new__(Composer)
+    comp.w, comp.h, comp.fps, comp.zoom, comp.contrast, comp.saturation = 1080, 1920, 30, 0.08, 1, 1
+    comp.shake, comp.grain = 0.025, 4
+    vf = comp.shot_filter(compose_shot(Path("a.mp4")))
+    assert "(1.025+0.08*t/2.000)" in vf and "sin(t*1.9)" in vf and "noise=alls=4" in vf
+
+    # 일반 장르는 관중 컷 없음
+    (tmp_path / "g").mkdir()
+    cfg2 = make_cfg(tmp_path / "g", crowd_every=2)
+    cfg2.raw["trends"]["niche"] = "general"
+    st2 = []
+    make_pipeline(cfg2, services).run(SCRIPT, "일반", on_status=st2.append)
+    assert not any("관중" in m for m in st2)
+
+
+def compose_shot(path):
+    from yt_monitor.video.compose import Shot
+
+    return Shot(60, path)
+
+
+@needs_ffmpeg
 def test_pipeline_without_pexels_key_uses_solid_background(tmp_path):
     cfg = make_cfg(tmp_path)
     cfg.raw["pexels"]["api_key"] = ""

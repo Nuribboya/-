@@ -28,6 +28,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from ..generator import has_hangul, tts_lines
+from ..niches import niche_of
 from ..report import safe_name
 from ..upload_meta import (UploadMeta, description_body, fallback_meta, generate_upload_meta,
                            render_upload_text)
@@ -232,6 +233,8 @@ class VideoPipeline:
         clip_max = float(self.v.get("clip_max_seconds", 2.5))
         scene_clips: dict[int, list[Clip]] = {}
         used: set[tuple[str, int]] = set()
+        crowd_clips: list[Clip] = []
+        niche = niche_of(self.cfg.raw.get("trends"))
         if stock:
             cache = self.cfg.video_cache_dir
             for s in scenes:
@@ -271,6 +274,7 @@ class VideoPipeline:
                 scene_clips[s.index] = good
                 srcs = ", ".join(sorted({c.source for c in good}))
                 status(f"  씬 {s.index}: 영상 {len(good)}개" + (f" ({srcs})" if good else " → 단색 배경"))
+            crowd_clips = self._crowd_clips(niche, stock, used, cache, status, warn, cancel)
             status("요청 수: " + ", ".join(f"{type(p).__name__.replace('Client', '')} "
                                             f"{getattr(p, 'requests_made', 0)}회" for p in stock))
         scene_images = self._ai_images(comfy, scenes, scene_clips, work, status, warn, cancel) if comfy else {}
@@ -295,6 +299,8 @@ class VideoPipeline:
         status(f"전체 음성 {total:.1f}초 ({getattr(tts, 'voice', '')})")
         mood = meta.get("mood") if meta.get("mood") in MOODS else DEFAULT_MOOD
         audio, bgm_track = self._add_bgm(comp, narration, total, mood, status, warn)
+        if niche.get("crowd_sfx"):
+            audio = self._add_crowd_sfx(comp, audio, total, status, warn)
 
         # 4) 자막 -------------------------------------------------------------------------
         step(4, "자막 생성 중…")
@@ -322,6 +328,8 @@ class VideoPipeline:
         # 5) 클립 이어붙이기 + 음성 --------------------------------------------------------
         step(5, "클립 이어붙이기 · 음성 삽입 중…")
         shots: list[Shot] = []
+        every = int(self.v.get("crowd_every", 4) or 0)
+        cut_no = crowd_i = 0
         for s, frames in zip(scenes, split_frames(bounds, fps, clip_max)):
             # AI 이미지가 있으면 그 씬의 첫 컷으로, 나머지는 스톡 영상
             sources: list = ([scene_images[s.index]] if s.index in scene_images else []) + \
@@ -329,6 +337,13 @@ class VideoPipeline:
             color = BACKGROUND_COLORS[(s.index - 1) % len(BACKGROUND_COLORS)]
             for k, n in enumerate(frames):
                 zoom_out = len(shots) % 2 == 1      # 컷마다 줌인/줌아웃 번갈아
+                cut_no += 1
+                # 현장감: N컷마다 관중 리액션 컷 (첫 씬 훅 제외, 0.8초 이상 컷만)
+                if crowd_clips and every > 0 and s.index > 1 and cut_no % every == 0 and n >= fps * 0.8:
+                    c = crowd_clips[crowd_i % len(crowd_clips)]
+                    crowd_i += 1
+                    shots.append(Shot(n, c.path, color=color, zoom_out=zoom_out))
+                    continue
                 if not sources:
                     shots.append(Shot(n, None, color=color))
                     continue
@@ -351,7 +366,8 @@ class VideoPipeline:
         comp.burn_subtitles(v2, ass, final)
         srt = final.with_suffix(".srt")
         shutil.copyfile(srt_work, srt)
-        credits = self._write_credits(final, scenes, scene_clips, bgm_credit(bgm_track) if bgm_track else "")
+        credits = self._write_credits(final, scenes, scene_clips, bgm_credit(bgm_track) if bgm_track else "",
+                                      extra=crowd_clips)
         upload_path = None
         description = bgm_note = ""
         if upload is not None:
@@ -388,6 +404,60 @@ class VideoPipeline:
                 db.commit()
         except Exception as exc:  # 기록 실패가 영상 생성을 막으면 안 된다
             log.warning("제작 기록 저장 실패: %s", exc)
+
+    def _crowd_clips(self, niche: dict, stock, used, cache, status, warn, cancel) -> list[Clip]:
+        """장르가 관중 컷을 쓰면(익스트림) 관중 리액션 스톡 영상을 몇 개 받아 둔다."""
+        queries = niche.get("crowd_queries") or []
+        if not queries or int(self.v.get("crowd_every", 4) or 0) <= 0:
+            return []
+        out: list[Clip] = []
+        for i, q in enumerate(queries):
+            if len(out) >= 4:
+                break
+            provider = stock[i % len(stock)]
+            try:
+                results = provider.search(q)
+            except PexelsAuthError:
+                raise
+            except PexelsError as exc:
+                warn(f"관중 영상 '{q}' 검색 실패: {exc}")
+                continue
+            c = next((c for c in results if c.key not in used), None)
+            if c is None:
+                continue
+            try:
+                provider.download(c, cache, cancel)
+            except InterruptedError:
+                raise Cancelled("사용자가 영상 생성을 취소했습니다.") from None
+            except PexelsError as exc:
+                warn(str(exc))
+                continue
+            used.add(c.key)
+            out.append(c)
+        status(f"관중 리액션 컷 {len(out)}개 준비 (현장감)")
+        return out
+
+    def _add_crowd_sfx(self, comp, audio: Path, total: float, status, warn) -> Path:
+        """sfx/crowd 폴더의 관중 함성을 작게 깐다 (없으면 안내만)."""
+        from .bgm import ensure_sfx_dirs, pick_sfx
+
+        root = self.cfg.sfx_dir
+        try:
+            ensure_sfx_dirs(root)
+        except OSError:
+            pass
+        track = pick_sfx(root, "crowd")
+        if track is None:
+            status(f"관중 함성 없음 → {root / 'crowd'} 폴더에 함성 · 환호 소리를 넣으면 현장감이 커집니다 "
+                   "(YouTube 오디오 보관함 → 음향 효과 → crowd)")
+            return audio
+        status(f"관중 함성: {track.name}")
+        try:
+            return comp.mix_bgm(audio, track, total, volume=float(self.v.get("crowd_volume", 0.12)), duck=True,
+                                out=comp.work / "with_crowd.wav")
+        except FFmpegError as exc:
+            warn(f"관중 함성을 넣지 못했습니다: {str(exc).splitlines()[0]}")
+            return audio
 
     def _add_bgm(self, comp, narration: Path, total: float, mood: str, status, warn) -> tuple[Path, Path | None]:
         """분위기에 맞는 배경음악을 bgm/ 폴더에서 골라 섞는다. 곡이 없거나 실패하면 목소리만."""
@@ -472,7 +542,9 @@ class VideoPipeline:
                     raise Cancelled("사용자가 영상 생성을 취소했습니다.")
                 status(f"  AI 이미지 {n}/{len(targets)} (씬 {s.index}): {s.image_prompt}")
                 try:
-                    out[s.index] = comfy.generate(s.image_prompt, work / "ai" / f"scene_{s.index:03d}.png",
+                    style = niche_of(self.cfg.raw.get("trends")).get("image_style")
+                    prompt = f"{s.image_prompt}, {style}" if style else s.image_prompt
+                    out[s.index] = comfy.generate(prompt, work / "ai" / f"scene_{s.index:03d}.png",
                                                   cancel=cancel)
                 except InterruptedError:
                     raise Cancelled("사용자가 영상 생성을 취소했습니다.") from None
@@ -501,11 +573,11 @@ class VideoPipeline:
         (work / "scenes.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
 
     @staticmethod
-    def _write_credits(final: Path, scenes, scene_clips, music: str = "") -> Path | None:
+    def _write_credits(final: Path, scenes, scene_clips, music: str = "", extra=()) -> Path | None:
         """영상 설명란에 붙여넣을 출처 목록 (영어권 시청자 기준으로 영어)."""
         seen, lines, sources = set(), [], set()
-        for s in scenes:
-            for c in scene_clips.get(s.index, []):
+        for clips in [scene_clips.get(s.index, []) for s in scenes] + [list(extra)]:
+            for c in clips:
                 if c.key not in seen:
                     seen.add(c.key)
                     sources.add(c.source)

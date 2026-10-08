@@ -59,12 +59,19 @@ NICHES: dict[str, dict] = {
             "- 긴장감: 충격적인 첫 문장 → 점점 커지는 위험 → 마지막 반전/결말.\n"
             "- 위험한 행동을 따라 하라고 하지 말 것, 잔인한 묘사 금지, 특정 일반인에 대한 주장 금지."
         ),
+        # 현장감: 관중 리액션 컷 (스톡 영상 검색어) · 관중 함성(sfx/crowd 폴더) · AI 이미지 스타일
+        "crowd_queries": ["crowd cheering", "stadium crowd", "spectators cheering", "crowd watching event",
+                          "people filming with phones", "audience shocked"],
+        "crowd_sfx": True,
+        "image_style": ("live event sports photography, telephoto lens, crowd of spectators in the background, "
+                        "real photo, motion blur, natural light, candid"),
         # 장면 검색어 · AI 이미지 지시 (영상 1단계 프롬프트에 붙는다)
         "visual_en": (
             "This is an extreme/adrenaline Short. Pick high-energy ACTION stock footage: POV helmet cam, "
             "slow motion, aerial drone shots, skydiving, wingsuit, big wave surfing, motocross jumps, "
             "snowboarding, rock climbing, storms, lightning, waves crashing. Avoid calm or office footage. "
-            "AI image prompts: dramatic real-looking action moments, motion blur, low angle, golden hour."
+            "AI image prompts: dramatic real-looking action moments at a live event with spectators watching, "
+            "motion blur, low angle, golden hour."
         ),
     },
 }

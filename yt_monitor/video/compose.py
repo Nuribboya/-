@@ -98,6 +98,10 @@ class Composer:
         # 스톡 영상이 밋밋해 보이지 않게: 천천히 줌 + 대비/채도 강화
         self.zoom = float(video_cfg.get("zoom", 0.08) or 0)
         self.contrast = float(video_cfg.get("contrast", 1.08) or 1)
+        # 현장감(촬영한 느낌): off | light | strong → 손떨림 · 필름 그레인
+        realism = str(video_cfg.get("realism", "light") or "off").lower()
+        self.shake = {"light": 0.025, "strong": 0.045}.get(realism, 0.0)
+        self.grain = {"light": 4, "strong": 8}.get(realism, 0)
         self.saturation = float(video_cfg.get("saturation", 1.2) or 1)
 
     def _encode_args(self) -> list[str]:
@@ -116,13 +120,29 @@ class Composer:
         """크기 맞추기 → (줌) → 색감. 줌은 매 프레임 크기를 키운 뒤 가운데를 잘라내는 방식 (zoompan보다 2배 빠름)."""
         w, h = self.w, self.h
         parts = [f"scale={w}:{h}:force_original_aspect_ratio=increase", f"crop={w}:{h}", f"fps={self.fps}", "setpts=PTS-STARTPTS"]
-        if self.zoom > 0 and shot.source is not None:
+        shake = getattr(self, "shake", 0.0) if shot.source is not None else 0.0
+        if (self.zoom > 0 or shake) and shot.source is not None:
             dur = max(shot.frames / self.fps, 0.1)
-            z = f"(1+{self.zoom:g}*(1-t/{dur:.3f}))" if shot.zoom_out else f"(1+{self.zoom:g}*t/{dur:.3f})"
-            parts += [f"scale=w='trunc({w}*{z}/2)*2':h='trunc({h}*{z}/2)*2':eval=frame", f"crop={w}:{h}"]
+            m = f"{1 + shake:g}"                      # 손떨림용 여유 (가장자리가 보이지 않게)
+            if self.zoom > 0:
+                z = f"({m}+{self.zoom:g}*(1-t/{dur:.3f}))" if shot.zoom_out else f"({m}+{self.zoom:g}*t/{dur:.3f})"
+            else:
+                z = f"({m})"
+            if z == "(1)":
+                z = "1"
+            parts.append(f"scale=w='trunc({w}*{z}/2)*2':h='trunc({h}*{z}/2)*2':eval=frame")
+            if shake:
+                # 손으로 든 카메라처럼 천천히 흔들림 (여러 사인파를 섞어 규칙적이지 않게)
+                ax, ay = int(w * shake * 0.4), int(h * shake * 0.4)
+                parts.append(f"crop={w}:{h}:x='(iw-{w})/2+{ax}*sin(t*1.9)*cos(t*0.7)'"
+                             f":y='(ih-{h})/2+{ay}*sin(t*1.3+1.1)*cos(t*0.9)'")
+            else:
+                parts.append(f"crop={w}:{h}")
         # AI 이미지는 색 보정을 하지 않는다 (채도를 올리면 AI 티가 더 난다)
         if shot.source is not None and not shot.is_image and (self.contrast != 1 or self.saturation != 1):
             parts.append(f"eq=contrast={self.contrast:g}:saturation={self.saturation:g}")
+        if getattr(self, "grain", 0) and shot.source is not None:
+            parts.append(f"noise=alls={self.grain}:allf=t")         # 필름 그레인 (AI 티 · 스톡 티를 줄임)
         return ",".join(parts + ["setsar=1", "format=yuv420p"])
 
     def prepare_shot(self, shot: Shot, out: Path) -> Path:

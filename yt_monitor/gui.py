@@ -716,6 +716,7 @@ class App:
         self.btn_upload_info = ttk.Button(result, text="📋 업로드 정보", style="Accent.TButton", state="disabled",
                                           command=self._open_upload_info)
         self.btn_upload_info.pack(side="right")
+        ttk.Button(result, text="🔊 효과음", command=self._open_sfx_dir).pack(side="right", padx=(4, 0))
         ttk.Button(result, text="🎵 BGM 폴더", command=self._open_bgm_dir).pack(side="right", padx=4)
         self.btn_open_video = ttk.Button(result, text="▶ 영상 열기", state="disabled",
                                          command=lambda: self._open_result(select=False))
@@ -1397,6 +1398,16 @@ class App:
         if old is not None and old.winfo_exists():
             old.destroy()
         self.upload_dialog = UploadDialog(self.root, res, warnings)
+
+    def _open_sfx_dir(self):
+        """효과음 폴더(sfx/crowd = 관중 함성)를 만들고 연다."""
+        from .video.bgm import README_NAME, ensure_sfx_dirs
+
+        root = ensure_sfx_dirs(self.cfg.sfx_dir)
+        try:
+            open_path(root)
+        except OSError:
+            messagebox.showinfo(APP_TITLE, (root / README_NAME).read_text(encoding="utf-8"))
 
     def _open_upload_info(self):
         if getattr(self.video_result, "upload", None) is not None:

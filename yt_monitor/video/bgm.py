@@ -93,6 +93,27 @@ def bgm_credit(track: Path) -> str:
         return ""
 
 
+SFX_README = f"""효과음 폴더 (현장감)
+
+crowd/ 에 관중 함성 · 환호 · 탄성 소리(.mp3 .wav)를 넣어 두면, 익스트림 장르 영상에서 내레이션 밑에 작게 깔립니다.
+받는 곳 (무료): {LIBRARY_URL} → 위쪽 '음향 효과' 탭 → "crowd", "cheer", "applause", "gasp" 검색
+"""
+
+
+def ensure_sfx_dirs(root: Path) -> Path:
+    root = Path(root)
+    (root / "crowd").mkdir(parents=True, exist_ok=True)
+    readme = root / README_NAME
+    if not readme.exists():
+        readme.write_text(SFX_README, encoding="utf-8")
+    return root
+
+
+def pick_sfx(root: Path, kind: str = "crowd", rng: random.Random | None = None) -> Path | None:
+    files = _audio_files(Path(root) / kind)
+    return (rng or random.Random()).choice(files) if files else None
+
+
 def recommend_text(mood: str) -> str:
     """업로드정보.txt / 로그에 넣을 BGM 추천 (한국어)."""
     r = MOOD_BGM.get(mood) or MOOD_BGM["energetic"]

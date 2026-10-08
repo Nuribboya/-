@@ -183,6 +183,9 @@ DEFAULTS = {
         "bgm_enabled": True,                # bgm/<분위기>/ 폴더의 곡을 배경음악으로 (없으면 목소리만)
         "bgm_volume": 0.15,                 # 배경음악 크기 (0.1 = 작게 ~ 0.3 = 크게)
         "bgm_duck": True,                   # 목소리가 나올 때 음악을 자동으로 줄이기
+        "realism": "light",                 # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
+        "crowd_every": 4,                   # 장르가 관중 컷을 쓰면 N컷마다 관중 리액션 컷 (0이면 끔)
+        "crowd_volume": 0.12,               # sfx/crowd 관중 함성 크기
     },
     "pixabay": {                            # 무료 스톡 영상 추가 소스 (https://pixabay.com/api/docs/)
         "api_key": "",
@@ -221,6 +224,7 @@ DEFAULTS = {
     "storage": {
         "video_cache_dir": "data/video_cache",   # 다운로드한 스톡 영상 캐시
         "bgm_dir": "bgm",                        # 배경음악 폴더 (분위기별 하위 폴더)
+        "sfx_dir": "sfx",                        # 효과음 폴더 (sfx/crowd = 관중 함성)
         "db_path": "data/yt_monitor.db",
         "reports_dir": "reports",
         "outputs_dir": "outputs",
@@ -335,6 +339,10 @@ class Config:
     @property
     def bgm_dir(self) -> Path:
         return self.storage_path("bgm_dir")
+
+    @property
+    def sfx_dir(self) -> Path:
+        return self.storage_path("sfx_dir")
 
     def secret(self, section: str, key: str, required: bool = True) -> str | None:
         """환경변수(<key>_env에 적힌 이름) → config.yaml의 <key> 순으로 찾는다."""
