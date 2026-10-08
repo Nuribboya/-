@@ -69,6 +69,43 @@ class VideoResult:
     bgm_note: str = ""
 
 
+# ---- 긴장감 연출 ----------------------------------------------------------------------
+
+def suspense_plan(n_scenes: int, climax: int | None) -> dict | None:
+    """클라이맥스 씬 → {"build": [고조 씬들], "climax", "payoff"}. 씬이 3개 미만이면 None."""
+    if n_scenes < 3:
+        return None
+    c = climax if climax and 2 <= climax <= n_scenes else max(2, min(n_scenes - 1, round(n_scenes * 0.75)))
+    build = list(range(max(2, c - 2), c + 1))
+    return {"build": build, "climax": c, "payoff": c + 1 if c + 1 <= n_scenes else None}
+
+
+def suspense_pace(index: int, plan: dict | None) -> float:
+    """씬별 컷 길이 배율: 고조될수록 짧게 (훅 1.0 → 고조 0.65 → 클라이맥스 0.4), 결말은 길게 보여준다."""
+    if not plan:
+        return 1.0
+    if index == plan["climax"]:
+        return 0.4
+    if index in plan["build"]:
+        return 0.65
+    if index == plan["payoff"]:
+        return 1.2
+    return 1.0
+
+
+def suspense_fx(index: int, k: int, plan: dict | None, fps: int, frames: int) -> dict:
+    """컷별 효과: 고조 = 숨 막히는 색감, 클라이맥스 = 슬로 모션 + 확 당기는 줌, 결말 첫 컷 = 번쩍."""
+    if not plan:
+        return {}
+    if index == plan["climax"]:
+        return {"grade": "tense", "speed": 0.5, "zoom": 0.22}
+    if index in plan["build"]:
+        return {"grade": "tense", "zoom": 0.14}
+    if index == plan["payoff"] and k == 0:
+        return {"flash": True}
+    return {}
+
+
 def output_path_for(outputs_dir: Path, title: str, now: datetime, tz: ZoneInfo) -> Path:
     """outputs/YYYY-MM-DD/<제목>.mp4 (이미 있으면 <제목>_HHMMSS.mp4)."""
     local = now.astimezone(tz)
@@ -218,10 +255,13 @@ class VideoPipeline:
         o = self.cfg.ollama
         ollama = self._make_ollama(status)
         meta: dict = {}
+        niche = niche_of(self.cfg.raw.get("trends"))
+        mode = str(self.v.get("suspense", "auto")).lower()
+        suspense = (mode == "on" or (mode == "auto" and bool(niche.get("suspense")))) and len(scenes) >= 3
         extract_keywords(scenes, client=ollama, prompts_dir=self.cfg.prompts_dir, meta=meta,
                          title=title, per_scene=int(self.v.get("keywords_per_scene", 3)),
                          options={"num_ctx": o.get("num_ctx", 8192)}, cancel=cancel, on_status=status,
-                         visual_hint=visual_hint)
+                         visual_hint=visual_hint, suspense=suspense)
         for s in scenes:
             status(f"  씬 {s.index}: {', '.join(s.keywords) or '-'}")
         upload = self._upload_meta(upload_meta, scenes, title, ollama, status, cancel)
@@ -234,7 +274,6 @@ class VideoPipeline:
         scene_clips: dict[int, list[Clip]] = {}
         used: set[tuple[str, int]] = set()
         crowd_clips: list[Clip] = []
-        niche = niche_of(self.cfg.raw.get("trends"))
         if stock:
             cache = self.cfg.video_cache_dir
             for s in scenes:
@@ -305,14 +344,19 @@ class VideoPipeline:
                 warn(f"음성 다듬기를 건너뜁니다: {str(exc).splitlines()[0]}")
         mood = meta.get("mood") if meta.get("mood") in MOODS else DEFAULT_MOOD
         audio, bgm_track = self._add_bgm(comp, narration, total, mood, status, warn)
+        bounds = [0.0]
+        for d in durations:
+            bounds.append(bounds[-1] + d)
+        plan = suspense_plan(len(scenes), meta.get("climax")) if suspense else None
+        if plan:
+            status(f"긴장감 연출: {plan['build'][0]}~{plan['climax']}번 씬 고조 → 클라이맥스 {plan['climax']}번"
+                   + (f" → 결말 {plan['payoff']}번" if plan["payoff"] else ""))
+            audio = self._add_suspense_sfx(comp, audio, bounds, plan, status, warn)
         if niche.get("crowd_sfx"):
             audio = self._add_crowd_sfx(comp, audio, total, status, warn)
 
         # 4) 자막 -------------------------------------------------------------------------
         step(4, "자막 생성 중…")
-        bounds = [0.0]
-        for d in durations:
-            bounds.append(bounds[-1] + d)
         max_chars = int(self.v.get("subtitle_max_chars", 14))
         cues = []
         for s, words, a, b in zip(scenes, scene_words, bounds, bounds[1:]):
@@ -336,7 +380,8 @@ class VideoPipeline:
         shots: list[Shot] = []
         every = int(self.v.get("crowd_every", 4) or 0)
         cut_no = crowd_i = 0
-        for s, frames in zip(scenes, split_frames(bounds, fps, clip_max)):
+        limits = [clip_max * suspense_pace(s.index, plan) for s in scenes] if plan else clip_max
+        for s, frames in zip(scenes, split_frames(bounds, fps, limits)):
             # AI 이미지가 있으면 그 씬의 첫 컷으로, 나머지는 스톡 영상
             sources: list = ([scene_images[s.index]] if s.index in scene_images else []) + \
                 (scene_clips.get(s.index) or [])
@@ -344,8 +389,13 @@ class VideoPipeline:
             for k, n in enumerate(frames):
                 zoom_out = len(shots) % 2 == 1      # 컷마다 줌인/줌아웃 번갈아
                 cut_no += 1
-                # 현장감: N컷마다 관중 리액션 컷 (첫 씬 훅 제외, 0.8초 이상 컷만)
-                if crowd_clips and every > 0 and s.index > 1 and cut_no % every == 0 and n >= fps * 0.8:
+                fx = suspense_fx(s.index, k, plan, fps, n) if plan else {}
+                # 결말 직후: 관중 리액션 (긴장이 풀리는 순간 사람들의 반응)
+                reaction = bool(plan and crowd_clips and s.index == plan["payoff"] and k == 1)
+                # 현장감: N컷마다 관중 리액션 컷 (첫 씬 훅 · 고조 구간 제외, 0.8초 이상 컷만)
+                in_build = bool(plan and s.index in plan["build"])
+                if reaction or (crowd_clips and every > 0 and s.index > 1 and not in_build
+                                and cut_no % every == 0 and n >= fps * 0.8):
                     c = crowd_clips[crowd_i % len(crowd_clips)]
                     crowd_i += 1
                     shots.append(Shot(n, c.path, color=color, zoom_out=zoom_out))
@@ -355,12 +405,12 @@ class VideoPipeline:
                     continue
                 src = sources[k % len(sources)]
                 if isinstance(src, Path):
-                    shots.append(Shot(n, src, color=color, zoom_out=zoom_out))
+                    shots.append(Shot(n, src, color=color, zoom_out=zoom_out, **fx))
                     continue
                 # 같은 클립을 다시 쓰면 뒷부분부터 보여준다
                 reuse = k // len(sources)
                 seek = (reuse * n / fps) % src.duration if reuse and src.duration > n / fps else 0.0
-                shots.append(Shot(n, src.path, seek=seek, color=color, zoom_out=zoom_out))
+                shots.append(Shot(n, src.path, seek=seek, color=color, zoom_out=zoom_out, **fx))
         self._write_debug(work, scenes, scene_clips, durations, shots)
         shot_paths = comp.prepare_shots(shots, lambda i, n: (check_cancel(),
                                                              status(f"  클립 맞추기 {i}/{n}")))
@@ -442,6 +492,22 @@ class VideoPipeline:
             out.append(c)
         status(f"관중 리액션 컷 {len(out)}개 준비 (현장감)")
         return out
+
+    def _add_suspense_sfx(self, comp, audio: Path, bounds: list[float], plan: dict, status, warn) -> Path:
+        """고조 구간 내내 점점 빨라지는 심장 박동, 결말 시작에 '쿵'."""
+        try:
+            start = bounds[plan["build"][0] - 1]
+            end = bounds[plan["climax"]]                 # 클라이맥스 씬 끝 = 결말 시작
+            beat = comp.heartbeat(end - start)
+            audio = comp.overlay_sfx(audio, beat, start, float(self.v.get("heartbeat_volume", 0.55)),
+                                     comp.work / "with_heartbeat.wav")
+            if plan["payoff"]:
+                audio = comp.overlay_sfx(audio, comp.impact(), end, float(self.v.get("impact_volume", 0.7)),
+                                         comp.work / "with_impact.wav")
+            status(f"  심장 박동 {end - start:.1f}초 (점점 빠르게)" + (" + 결말 임팩트" if plan["payoff"] else ""))
+        except FFmpegError as exc:
+            warn(f"긴장감 효과음을 넣지 못했습니다: {str(exc).splitlines()[0]}")
+        return audio
 
     def _add_crowd_sfx(self, comp, audio: Path, total: float, status, warn) -> Path:
         """sfx/crowd 폴더의 관중 함성을 작게 깐다 (없으면 안내만)."""
@@ -574,7 +640,8 @@ class VideoPipeline:
                         "clips": [c.page_url or str(c.path) for c in scene_clips.get(s.index, [])]}
                        for s, d in zip(scenes, durations)],
             "shots": [{"frames": sh.frames, "source": str(sh.source) if sh.source else None,
-                       "seek": sh.seek} for sh in shots],
+                       "seek": sh.seek, "speed": sh.speed, "grade": sh.grade, "flash": sh.flash,
+                       "zoom": sh.zoom} for sh in shots],
         }
         (work / "scenes.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
 

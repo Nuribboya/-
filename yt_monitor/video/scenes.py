@@ -133,6 +133,16 @@ def guess_mood(text: str) -> str:
     return best if scores[best] > 0 else DEFAULT_MOOD
 
 
+def parse_climax(text: str, count: int) -> int | None:
+    """응답의 "climax": 씬 번호 (가장 긴장되는 순간, 결말 바로 앞)."""
+    try:
+        data = _extract_json(text)
+        n = int(data.get("climax")) if isinstance(data, dict) and data.get("climax") is not None else None
+    except (GenerationError, TypeError, ValueError):
+        return None
+    return n if n and 1 <= n <= count else None
+
+
 def parse_mood(text: str) -> str | None:
     from .tts import MOODS
 
@@ -168,13 +178,14 @@ def parse_image_prompts(text: str, count: int) -> dict[int, str]:
 def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | None = None,
                      title: str = "", per_scene: int = 3, options: dict | None = None,
                      cancel: threading.Event | None = None, on_status=None,
-                     meta: dict | None = None, visual_hint: str = "") -> list[Scene]:
+                     meta: dict | None = None, visual_hint: str = "", suspense: bool = False) -> list[Scene]:
     """씬마다 keywords 채우기. client(OllamaClient)가 없거나 실패하면 간이 키워드.
 
     meta 에 dict를 넘기면 대본 분위기를 meta["mood"], 출처를 meta["mood_source"]에 담는다.
     """
     got: dict[int, list[str]] = {}
     mood = None
+    climax = None
     images: dict[int, str] = {}
     if client is not None and scenes:
         try:
@@ -182,6 +193,9 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             prompt = render_template(template, {
                 "title": title or "(제목 없음)", "keywords_per_scene": per_scene,
                 "scenes": "\n".join(f"{s.index}. {s.text}" for s in scenes)})
+            if suspense:             # 긴장감 연출: 클라이맥스 씬 번호를 같이 받는다
+                prompt += ('\n\n[클라이맥스] JSON에 "climax": 씬 번호 도 넣어. 가장 숨 막히는 순간, '
+                           '결말이 밝혀지기 바로 앞 씬. 예: {"mood": "dramatic", "climax": 5, "scenes": [...]}')
             if visual_hint:          # 요즘 뜨는 쇼츠의 첫 화면(썸네일) 스타일 → 첫 씬 이미지에 반영
                 prompt += ("\n\n[요즘 조회수 높은 쇼츠의 첫 화면 스타일]\n" + visual_hint +
                            "\n→ 1번 씬의 image_prompt는 이 스타일을 따라 스크롤을 멈추게 만들어.")
@@ -190,6 +204,7 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
             got = parse_keywords(text, len(scenes), per_scene)
             images = parse_image_prompts(text, len(scenes))
             mood = parse_mood(text)
+            climax = parse_climax(text, len(scenes))
             log.info("Ollama 키워드: %d/%d개 씬", len(got), len(scenes))
         except GenerationError as exc:
             log.warning("키워드 응답 해석 실패 → 간이 키워드 사용: %s", exc)
@@ -211,6 +226,9 @@ def extract_keywords(scenes: list[Scene], *, client=None, prompts_dir: Path | No
     if meta is not None:
         meta["mood"] = mood or guess_mood(title + " " + " ".join(s.text for s in scenes))
         meta["mood_source"] = "ollama" if mood else "guess"
+        # 클라이맥스를 못 받았으면 전체의 3/4 지점 (마지막 씬은 결말로 남긴다)
+        meta["climax"] = climax or (max(1, min(len(scenes) - 1, round(len(scenes) * 0.75))) if scenes else None)
+        meta["climax_source"] = "ollama" if climax else "guess"
     return scenes
 
 

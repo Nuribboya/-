@@ -192,6 +192,9 @@ DEFAULTS = {
         "bgm_duck": True,                   # 목소리가 나올 때 음악을 자동으로 줄이기
         "realism": "light",                 # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
         "voice_fx": "natural",              # 목소리를 마이크로 녹음한 것처럼 다듬기: natural | off
+        "suspense": "auto",                 # 긴장감 연출: auto(장르가 원하면) | on | off
+        "heartbeat_volume": 0.55,           # 고조 구간 심장 박동 크기
+        "impact_volume": 0.7,               # 결말 '쿵' 크기
         "scene_pause": 0.18,                # 문장(씬) 사이 숨 쉬는 쉼(초)
         "crowd_every": 4,                   # 장르가 관중 컷을 쓰면 N컷마다 관중 리액션 컷 (0이면 끔)
         "crowd_volume": 0.12,               # sfx/crowd 관중 함성 크기

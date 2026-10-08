@@ -43,10 +43,16 @@ NICHES: dict[str, dict] = {
             "nature's raw power (storms, waves, avalanches, volcanoes), wild animal encounters, records and "
             "survival stories.\n"
             "- Every topic must belong to this niche, even if other trends appear in the data.\n"
-            "- It is told as narration over action stock footage: rankings, records, 'what happens if', "
-            "the physics/biology behind it, survival stories, 'the most dangerous ...'. No need for the "
-            "original clips.\n"
-            "- Build tension: a shocking first line, escalating stakes, a twist or payoff at the end.\n"
+            "- It is told as narration over action stock footage (no need for the original clips).\n"
+            "- DEFAULT FORMAT = ONE heart-stopping moment told like a thriller, present tense, second by second:\n"
+            "  1) Line 1 = the stakes + a ticking clock ('He has four seconds to open his parachute.')\n"
+            "  2) Small concrete details that raise the stakes (wind, height, distance to the edge, what fails)\n"
+            "  3) A complication — the plan goes wrong\n"
+            "  4) Near the climax: very short lines (3-8 words), a countdown ('Three. Two...'), 'and then—'\n"
+            "  5) Hold the answer for ONE more line, then the payoff or twist. Never reveal the ending early.\n"
+            "  Sometimes put the viewer inside it ('Imagine you're 30,000 feet up...').\n"
+            "- Use an anonymous protagonist ('a surfer', 'a climber') unless it is a famous, well-documented "
+            "record; don't invent precise facts about real people. Rankings/lists only occasionally.\n"
             "- Never encourage viewers to try dangerous stunts, no gore, no real injuries or deaths described "
             "in graphic detail, no claims about specific private people."
         ),
@@ -55,14 +61,21 @@ NICHES: dict[str, dict] = {
             "이 채널은 극한 스포츠, 아찔한 묘기, 간발의 차로 피한 순간, 대자연의 위력(폭풍 · 파도 · 눈사태 · 화산), "
             "야생동물과의 조우, 기록과 생존 이야기만 다룬다.\n"
             "- 데이터에 다른 유행이 있어도 주제는 반드시 이 장르 안에서 고른다.\n"
-            "- 액션 스톡 영상 위 내레이션: 랭킹, 기록, '만약 ~하면', 그 뒤의 과학, 생존 이야기, '가장 위험한 ~'.\n"
-            "- 긴장감: 충격적인 첫 문장 → 점점 커지는 위험 → 마지막 반전/결말.\n"
+            "- 액션 스톡 영상 위 내레이션.\n"
+            "- 기본 형식 = 심장 쫄리는 '한 순간'을 스릴러처럼, 현재형으로, 초 단위로:\n"
+            "  1) 첫 줄 = 걸린 것 + 시간 압박 ('그에게 남은 시간은 4초.')\n"
+            "  2) 위험을 키우는 구체적인 묘사 (바람, 높이, 낭떠러지까지 거리, 고장 난 장비)\n"
+            "  3) 계획이 틀어지는 순간\n"
+            "  4) 클라이맥스 직전엔 아주 짧은 문장, 카운트다운 ('셋. 둘...'), '그리고 그 순간—'\n"
+            "  5) 답을 한 줄 더 미룬 뒤 결말이나 반전. 결말을 미리 말하지 말 것.\n"
+            "- 주인공은 익명('한 서퍼', '한 등반가'). 실존 인물에 대한 정확한 사실을 지어내지 말 것.\n"
             "- 위험한 행동을 따라 하라고 하지 말 것, 잔인한 묘사 금지, 특정 일반인에 대한 주장 금지."
         ),
         # 현장감: 관중 리액션 컷 (스톡 영상 검색어) · 관중 함성(sfx/crowd 폴더) · AI 이미지 스타일
         "crowd_queries": ["crowd cheering", "stadium crowd", "spectators cheering", "crowd watching event",
                           "people filming with phones", "audience shocked"],
         "crowd_sfx": True,
+        "suspense": True,                  # 긴장감 연출: 컷 가속 · 클라이맥스 슬로 모션 · 심장 박동 · 임팩트
         "image_style": ("live event sports photography, telephoto lens, crowd of spectators in the background, "
                         "real photo, motion blur, natural light, candid"),
         # 장면 검색어 · AI 이미지 지시 (영상 1단계 프롬프트에 붙는다)

@@ -518,3 +518,33 @@ def test_config_v4_switches_to_natural_voice(tmp_path):
     raw2.update(config_version=3, channels=[{"handle": "@x"}])
     raw2["video"]["tts_voice"] = "en-US-JennyNeural"                 # 직접 고른 음성은 그대로
     assert read_raw(save_config(raw2, tmp_path / "c2.yaml"))["video"]["tts_voice"] == "en-US-JennyNeural"
+
+
+def test_suspense_plan_helpers():
+    from yt_monitor.video.pipeline import suspense_fx, suspense_pace, suspense_plan
+
+    plan = suspense_plan(8, 6)
+    assert plan == {"build": [4, 5, 6], "climax": 6, "payoff": 7}
+    assert suspense_plan(6, None)["climax"] == 4 and suspense_plan(2, 1) is None
+    assert suspense_plan(5, 5)["payoff"] is None                 # 마지막 씬이 클라이맥스면 결말 없음
+    assert suspense_pace(6, plan) < suspense_pace(4, plan) < suspense_pace(1, plan) < suspense_pace(7, plan)
+    assert suspense_fx(6, 0, plan, 30, 30)["speed"] == 0.5 and suspense_fx(7, 0, plan, 30, 30) == {"flash": True}
+    assert suspense_fx(7, 1, plan, 30, 30) == {} and suspense_fx(2, 0, plan, 30, 30) == {}
+
+
+@needs_ffmpeg
+def test_pipeline_suspense(tmp_path, services):
+    """익스트림 장르: 클라이맥스로 갈수록 빠른 컷 · 슬로 모션 · 심장 박동 · 임팩트 · 결말 직후 관중 반응."""
+    cfg = make_cfg(tmp_path)
+    cfg.raw["trends"]["niche"] = "extreme"
+    statuses = []
+    script = ("He has four seconds to open his parachute. The wind is pulling him sideways. "
+              "The main chute tangles. He cuts it away. Three. Two. One. "
+              "The reserve snaps open. He lands safely in a field. Would you jump?")
+    res = make_pipeline(cfg, services).run(script, "서스펜스", on_status=statuses.append)
+    assert any("긴장감 연출" in m for m in statuses) and any("심장 박동" in m for m in statuses), statuses
+    assert (res.work_dir / "with_heartbeat.wav").exists() and (res.work_dir / "sfx_heartbeat.wav").exists()
+    debug = json.loads((res.work_dir / "scenes.json").read_text(encoding="utf-8"))
+    assert any(sh["speed"] == 0.5 for sh in debug["shots"]) and any(sh["grade"] == "tense" for sh in debug["shots"])
+    assert probe(FF.path, res.video_path).has_audio and not res.warnings, res.warnings
+    assert sum(sh["frames"] for sh in debug["shots"]) == round(res.duration * 15)

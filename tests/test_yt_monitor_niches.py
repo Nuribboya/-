@@ -86,3 +86,13 @@ def test_collector_without_niche_keywords_keeps_everything():
 
     vids = TrendCollector(FakeTrendYouTube(), KO).collect(NOW)
     assert len(vids) == 3
+
+
+def test_climax_parse_and_suspense_prompt():
+    from yt_monitor.niches import focus_text
+    from yt_monitor.video.scenes import parse_climax
+
+    assert parse_climax('{"mood": "dramatic", "climax": 5, "scenes": []}', 8) == 5
+    assert parse_climax('{"climax": 12}', 8) is None and parse_climax("not json", 8) is None
+    focus = focus_text({"niche": "extreme"}, "en")
+    assert "ticking clock" in focus and "countdown" in focus and "Never reveal the ending early" in focus

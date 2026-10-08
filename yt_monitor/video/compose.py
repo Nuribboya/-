@@ -39,6 +39,11 @@ class Shot:
     seek: float = 0.0              # 원본에서 시작할 위치(초). 같은 영상을 두 번 쓸 때 다른 장면이 나오게
     color: str = BACKGROUND_COLORS[0]
     zoom_out: bool = False         # True면 확대된 상태에서 천천히 빠진다 (컷마다 번갈아 → 단조롭지 않게)
+    # 긴장감 연출 (클라이맥스 · 결말)
+    speed: float = 1.0             # 0.5 = 슬로 모션
+    zoom: float | None = None      # 이 컷만 줌 세기 (None이면 설정값)
+    grade: str = ""                # "tense" = 대비↑ 채도↓ 비네팅 (숨 막히는 색감)
+    flash: bool = False            # 시작할 때 하얗게 번쩍 (임팩트)
 
     @property
     def is_image(self) -> bool:
@@ -48,15 +53,18 @@ class Shot:
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
-def split_frames(boundaries: list[float], fps: int, clip_max_seconds: float) -> list[list[int]]:
+def split_frames(boundaries: list[float], fps: int, clip_max_seconds) -> list[list[int]]:
     """씬 경계 시각 [0, t1, t2, ..., T] → 씬마다 클립별 프레임 수 목록.
 
     씬이 clip_max_seconds 보다 길면 똑같은 길이의 클립 여러 개로 나눈다 ("씬당 클립 길이").
     모든 경계를 fps 격자에 반올림하므로 프레임 합계 = round(T * fps).
+    clip_max_seconds 에 목록을 주면 씬마다 다른 컷 길이 (긴장감 연출: 클라이맥스로 갈수록 짧게).
     """
     out = []
-    for a, b in zip(boundaries, boundaries[1:]):
-        n = max(1, math.ceil((b - a) / clip_max_seconds - 1e-6)) if clip_max_seconds > 0 else 1
+    limits = clip_max_seconds if isinstance(clip_max_seconds, (list, tuple)) else \
+        [clip_max_seconds] * (len(boundaries) - 1)
+    for (a, b), limit in zip(zip(boundaries, boundaries[1:]), limits):
+        n = max(1, math.ceil((b - a) / limit - 1e-6)) if limit > 0 else 1
         cuts = [round((a + (b - a) * k / n) * fps) for k in range(n + 1)]
         frames = [y - x for x, y in zip(cuts, cuts[1:]) if y > x]
         out.append(frames or [1])
@@ -135,7 +143,16 @@ class Composer:
     def shot_filter(self, shot: Shot) -> str:
         """크기 맞추기 → (줌) → 색감. 줌은 매 프레임 크기를 키운 뒤 가운데를 잘라내는 방식 (zoompan보다 2배 빠름)."""
         w, h = self.w, self.h
-        parts = [f"scale={w}:{h}:force_original_aspect_ratio=increase", f"crop={w}:{h}", f"fps={self.fps}", "setpts=PTS-STARTPTS"]
+        speed = shot.speed if shot.source is not None and not shot.is_image else 1.0
+        if speed != 1.0:   # 슬로 모션: 시간을 늘린 뒤 fps로 프레임을 채운다
+            parts = [f"scale={w}:{h}:force_original_aspect_ratio=increase", f"crop={w}:{h}",
+                     f"setpts=(PTS-STARTPTS)/{speed:g}", f"fps={self.fps}"]
+        else:
+            parts = [f"scale={w}:{h}:force_original_aspect_ratio=increase", f"crop={w}:{h}", f"fps={self.fps}",
+                     "setpts=PTS-STARTPTS"]
+        base_zoom = self.zoom
+        if shot.zoom is not None:
+            self.zoom = shot.zoom
         shake = getattr(self, "shake", 0.0) if shot.source is not None else 0.0
         if (self.zoom > 0 or shake) and shot.source is not None:
             dur = max(shot.frames / self.fps, 0.1)
@@ -155,11 +172,51 @@ class Composer:
             else:
                 parts.append(f"crop={w}:{h}")
         # AI 이미지는 색 보정을 하지 않는다 (채도를 올리면 AI 티가 더 난다)
-        if shot.source is not None and not shot.is_image and (self.contrast != 1 or self.saturation != 1):
+        if shot.source is not None and not shot.is_image and shot.grade != "tense" and \
+                (self.contrast != 1 or self.saturation != 1):
             parts.append(f"eq=contrast={self.contrast:g}:saturation={self.saturation:g}")
         if getattr(self, "grain", 0) and shot.source is not None:
             parts.append(f"noise=alls={self.grain}:allf=t")         # 필름 그레인 (AI 티 · 스톡 티를 줄임)
+        if shot.grade == "tense":
+            parts += ["eq=contrast=1.18:saturation=0.78:brightness=-0.03", "vignette=PI/4"]
+        if shot.flash:
+            parts.append("fade=t=in:st=0:d=0.2:color=white")
+        self.zoom = base_zoom
         return ",".join(parts + ["setsar=1", "format=yuv420p"])
+
+    # 긴장감 효과음 (파일 없이 ffmpeg로 직접 만든다) ---------------------------------------------
+    def heartbeat(self, duration: float, bpm_from: float = 72, bpm_to: float = 130,
+                  out: Path | None = None) -> Path:
+        """점점 빨라지는 심장 박동 (쿵-쿵). 템포를 선형으로 올린다."""
+        out = out or self.work / "sfx_heartbeat.wav"
+        d = max(duration, 0.5)
+        r0, r1 = bpm_from / 60, bpm_to / 60
+        p = f"({r0:.4f}*t+{(r1 - r0):.4f}*t*t/(2*{d:.3f}))"          # 지금까지 뛴 박동 수
+        rate = f"({r0:.4f}+{(r1 - r0):.4f}*t/{d:.3f})"
+        tau = f"(({p}-floor({p}))/{rate})"                           # 이번 박동 시작 후 시간
+        expr = (f"0.9*sin(2*PI*55*{tau})*exp(-26*{tau})"
+                f"+0.65*gte({tau},0.21)*sin(2*PI*46*({tau}-0.21))*exp(-30*({tau}-0.21))")
+        self.runner.run(["-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d={d:.3f}",
+                         "-af", "lowpass=f=180,volume=1.6", "-ac", "2", out], "효과음 심장 박동")
+        return out
+
+    def impact(self, out: Path | None = None) -> Path:
+        """결말 순간의 '쿵' (낮게 떨어지는 소리 + 짧은 잡음)."""
+        out = out or self.work / "sfx_impact.wav"
+        expr = "sin(2*PI*(70-40*t)*t)*exp(-3.5*t)+0.25*(random(0)*2-1)*exp(-25*t)"
+        self.runner.run(["-f", "lavfi", "-i", f"aevalsrc='{expr}':s=48000:d=1.6",
+                         "-af", "lowpass=f=900,volume=1.4", "-ac", "2", out], "효과음 임팩트")
+        return out
+
+    def overlay_sfx(self, base: Path, sfx: Path, start: float, volume: float, out: Path) -> Path:
+        """base 오디오의 start초 지점에 효과음을 얹는다 (길이는 base 그대로)."""
+        ms = max(0, int(start * 1000))
+        graph = ("[0:a]aresample=48000,aformat=channel_layouts=stereo[b];"
+                 f"[1:a]aresample=48000,aformat=channel_layouts=stereo,adelay={ms}|{ms},volume={volume:.3f}[s];"
+                 "[b][s]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[a]")
+        self.runner.run(["-i", base, "-i", sfx, "-filter_complex", graph, "-map", "[a]", "-ar", "48000", out],
+                        "효과음 얹기")
+        return out
 
     def prepare_shot(self, shot: Shot, out: Path) -> Path:
         vf = self.shot_filter(shot)
