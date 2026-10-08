@@ -16,9 +16,10 @@ class FakeExtremeYouTube:
     """스포츠 인기 목록 + 장르 검색어 결과."""
 
     def __init__(self):
-        self.popular = [video("p1", "INSANE wingsuit flight through a canyon", 10, 900_000, tags=["wingsuit"]),
+        self.popular = [video("p1", "INSANE downhill line on a mountain bike", 10, 900_000, tags=["mtb"]),
                         video("p2", "NFL week 5 highlights", 5, 2_000_000, seconds=50),       # 장르 아님 → 제외
-                        video("p3", "Big wave surfing at Nazaré 🌊", 8, 600_000)]
+                        video("p3", "Paragliding over the Alps 🪂", 8, 600_000),
+                        video("p4", "Big wave surfing at Nazaré 🌊", 8, 700_000)]      # 고르지 않은 종목 → 제외
         self.searched = {"s1": video("s1", "He almost didn't make it…", 20, 3_000_000, channel="C2"),
                          "s2": video("s2", "Storm chaser gets too close to a tornado", 30, 1_000_000,
                                      channel="C3")}
@@ -51,14 +52,21 @@ class FakeExtremeYouTube:
 
 
 def test_niche_settings_and_matching():
+    from yt_monitor.niches import label_of
+
     s = apply_niche({"niche": "extreme", "search_queries": ["", "#shorts"], "lookback_days": 3})
-    assert "wingsuit" in s["search_queries"] and s["lookback_days"] == 7 and s["popular_category"] == "17"
+    assert s["search_queries"] == ["mountain bike downhill", "parkour", "snowboarding", "cliff diving", "paragliding"]
+    assert s["lookback_days"] == 7 and s["popular_category"] == "17"
     assert apply_niche({"niche": "general", "search_queries": ["x"]})["search_queries"] == ["x"]
-    assert niche_of({})["label"].startswith("익스트림")                       # 기본 장르
+    assert niche_of({})["label"].startswith("액션 스포츠")                     # 기본 장르
+    picked = apply_niche({"niche": "extreme", "sports": ["skydiving", "없는종목", "wingsuit"]})
+    assert picked["search_queries"] == ["skydiving", "wingsuit"]
+    assert label_of({"niche": "extreme", "sports": ["mtb"]}) == "액션 스포츠: 산악자전거"
     kw = niche_of({"niche": "extreme"})["keywords"]
-    assert matches_niche("Skydiver's parachute fails at 10,000 ft", [], kw)
-    assert matches_niche("Watch this", ["dirt bike"], kw)
+    assert matches_niche("He sent the biggest drop in the bike park", [], kw)
+    assert matches_niche("Watch this", ["parkour"], kw) and matches_niche("Paraglider vs storm", [], kw)
     assert not matches_niche("NFL week 5 highlights", ["football"], kw)
+    assert not matches_niche("Tornado hits town", [], kw)                    # 종목 아님
 
 
 def test_extreme_collect_and_prompts(tmp_path):
@@ -70,13 +78,14 @@ def test_extreme_collect_and_prompts(tmp_path):
         fake = FakeExtremeYouTube()
         res = run_trends(cfg, service=fake, now=NOW)
         ids = [v.video_id for v in res.videos]
-        assert "p2" not in ids and {"p1", "p3", "s1", "s2"} <= set(ids)
+        assert "p2" not in ids and "p4" not in ids and {"p1", "p3", "s1", "s2"} <= set(ids)
         assert ("videos", "mostPopular", "17") in fake.calls
         assert [c[1] for c in fake.calls if c[0] == "search"] == trend_settings(cfg)["search_queries"]
         prompts = [r["messages"][-1]["content"] for r in handler.requests_log]
-        assert "Channel niche: EXTREME" in prompts[0] and "Never encourage viewers" in prompts[0]
-        assert "EXTREME" in prompts[1]                                    # 대본에도 장르 지시
-        assert "ACTION stock footage" in res.generation.visual_hint       # 영상 1단계 장면 검색어용
+        assert "Channel niche: ACTION SPORTS" in prompts[0] and "mountain biking" in prompts[0]
+        assert "No storms, animals" in prompts[0] and "Never tell viewers to try it" in prompts[0]
+        assert "ACTION SPORTS" in prompts[1]                              # 대본에도 장르 지시
+        assert "EVERY search keyword must show that sport" in res.generation.visual_hint
     finally:
         server.shutdown()
 
@@ -95,4 +104,4 @@ def test_climax_parse_and_suspense_prompt():
     assert parse_climax('{"mood": "dramatic", "climax": 5, "scenes": []}', 8) == 5
     assert parse_climax('{"climax": 12}', 8) is None and parse_climax("not json", 8) is None
     focus = focus_text({"niche": "extreme"}, "en")
-    assert "ticking clock" in focus and "countdown" in focus and "Never reveal the ending early" in focus
+    assert "what's at stake" in focus and "countdown" in focus and "Never reveal it early" in focus

@@ -357,6 +357,18 @@ class SetupDialog(tk.Toplevel):
                      state="readonly", width=36).grid(row=row, column=1, columnspan=2, sticky="w", pady=3)
         row += 1
         hint_label("어떤 쇼츠를 유행으로 볼지 · 어떤 주제와 화면으로 만들지")
+        from .niches import SPORTS, selected_sports
+
+        ttk.Label(frm, text="액션 스포츠 종목").grid(row=row, column=0, sticky="nw", pady=3)
+        box = ttk.Frame(frm)
+        box.grid(row=row, column=1, columnspan=2, sticky="w", pady=3)
+        chosen = set(selected_sports(r.get("trends")))
+        self.sport_vars = {k: tk.BooleanVar(value=k in chosen) for k in SPORTS}
+        for i, (k, sp) in enumerate(SPORTS.items()):
+            ttk.Checkbutton(box, text=sp["label"].split(" (")[0], variable=self.sport_vars[k]).grid(
+                row=i // 3, column=i % 3, sticky="w", padx=(0, 10))
+        row += 1
+        hint_label("액션 스포츠 장르일 때 이 종목들만 분석하고 만들어요 · 1종목 = 검색 쿼터 100")
         field("YouTube API 키 *", "api_key")
         ttk.Label(frm, text="채널 목록 *").grid(row=row, column=0, sticky="nw", pady=3)
         from .ui_theme import style_text
@@ -495,6 +507,9 @@ class SetupDialog(tk.Toplevel):
 
         r.setdefault("trends", {})["niche"] = next((k for k, n in NICHES.items() if n["label"] == v["niche"]),
                                                    "extreme")
+        from .niches import DEFAULT_SPORTS
+
+        r["trends"]["sports"] = [k for k, var in self.sport_vars.items() if var.get()] or list(DEFAULT_SPORTS)
         r["channels"] = merged
         r["youtube"]["api_key"] = v["api_key"].strip()
         r["telegram"]["bot_token"] = v["bot_token"].strip()

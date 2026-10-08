@@ -385,7 +385,7 @@ def _video_from_dict(d: dict):
 
 
 def cache_key(settings: dict) -> str:
-    keys = ("niche", "region", "language", "title_language", "lookback_days", "shorts_max_seconds",
+    keys = ("niche", "sports", "region", "language", "title_language", "lookback_days", "shorts_max_seconds",
             "search_queries", "popular_pages", "popular_category", "min_views")
     return json.dumps({k: settings.get(k) for k in keys}, sort_keys=True, ensure_ascii=False)
 
