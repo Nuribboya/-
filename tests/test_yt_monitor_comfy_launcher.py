@@ -106,7 +106,7 @@ def test_old_ai_style_upgraded_to_realistic(tmp_path):
     path = save_config(raw, tmp_path / "config.yaml")
     up = read_raw(path)
     assert up["ai_images"]["style"] == REALISTIC_STYLE and up["ai_images"]["negative"] == "my own negative"
-    assert REALISTIC_NEGATIVE.startswith("cgi, 3d render") and up["config_version"] == 3
+    assert REALISTIC_NEGATIVE.startswith("cgi, 3d render") and up["config_version"] == 4
 
 
 def test_generate_uses_tuned_params(tmp_path):

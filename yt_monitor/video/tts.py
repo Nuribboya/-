@@ -24,6 +24,11 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 VOICES = {
+    # Multilingual 계열: 숨소리 · 억양이 자연스러운 최신 음성 (사람 같은 대화체) ⭐
+    "en-US-AndrewMultilingualNeural": "영어 남성 (Andrew, 자연스러운 대화체 ⭐)",
+    "en-US-BrianMultilingualNeural": "영어 남성 (Brian, 낮고 진지함 ⭐)",
+    "en-US-AvaMultilingualNeural": "영어 여성 (Ava, 밝고 자연스러움 ⭐)",
+    "en-US-EmmaMultilingualNeural": "영어 여성 (Emma, 따뜻함 ⭐)",
     "en-US-GuyNeural": "영어 남성 (Guy, 쇼츠 내레이션용)",
     "en-US-ChristopherNeural": "영어 남성 (Christopher, 차분함)",
     "en-US-EricNeural": "영어 남성 (Eric)",
@@ -37,7 +42,8 @@ VOICES = {
 TICKS = 10_000_000  # edge-tts 시간 단위: 100ns
 
 # 대본 분위기 → 음성 자동 선택. 무료 edge-tts는 감정 스타일(외침, 속삭임 등)을 못 쓰므로
-# 음성 · 말하기 속도 · 음높이 조합으로 분위기를 맞춘다.
+# 음성 · 말하기 속도로 분위기를 맞춘다. 음높이(pitch)를 바꾸면 기계음처럼 들려서 쓰지 않고,
+# 사람처럼 들리는 Multilingual 음성을 쓴다 (없으면 FALLBACK_VOICES로 자동 대체).
 MOODS = {
     "energetic": "신나고 빠른 (랭킹, 꿀팁, 챌린지)",
     "dramatic": "긴장감 있는 (반전, 충격 사실, 미스터리한 사건)",
@@ -49,21 +55,31 @@ MOODS = {
 DEFAULT_MOOD = "energetic"
 MOOD_VOICES = {
     "en": {
-        "energetic": {"voice": "en-US-GuyNeural", "rate": "+12%", "pitch": "+2Hz"},
-        "dramatic": {"voice": "en-US-ChristopherNeural", "rate": "+2%", "pitch": "-3Hz"},
-        "mysterious": {"voice": "en-US-ChristopherNeural", "rate": "-6%", "pitch": "-6Hz"},
-        "calm": {"voice": "en-US-EricNeural", "rate": "+0%", "pitch": "+0Hz"},
-        "playful": {"voice": "en-US-AriaNeural", "rate": "+10%", "pitch": "+3Hz"},
-        "emotional": {"voice": "en-US-JennyNeural", "rate": "-4%", "pitch": "+0Hz"},
+        "energetic": {"voice": "en-US-AndrewMultilingualNeural", "rate": "+6%", "pitch": "+0Hz"},
+        "dramatic": {"voice": "en-US-BrianMultilingualNeural", "rate": "+2%", "pitch": "+0Hz"},
+        "mysterious": {"voice": "en-US-BrianMultilingualNeural", "rate": "-4%", "pitch": "+0Hz"},
+        "calm": {"voice": "en-US-AndrewMultilingualNeural", "rate": "-2%", "pitch": "+0Hz"},
+        "playful": {"voice": "en-US-AvaMultilingualNeural", "rate": "+5%", "pitch": "+0Hz"},
+        "emotional": {"voice": "en-US-EmmaMultilingualNeural", "rate": "-3%", "pitch": "+0Hz"},
     },
     "ko": {
-        "energetic": {"voice": "ko-KR-InJoonNeural", "rate": "+12%", "pitch": "+2Hz"},
-        "dramatic": {"voice": "ko-KR-HyunsuMultilingualNeural", "rate": "+2%", "pitch": "-3Hz"},
-        "mysterious": {"voice": "ko-KR-InJoonNeural", "rate": "-6%", "pitch": "-6Hz"},
+        "energetic": {"voice": "ko-KR-HyunsuMultilingualNeural", "rate": "+8%", "pitch": "+0Hz"},
+        "dramatic": {"voice": "ko-KR-HyunsuMultilingualNeural", "rate": "+2%", "pitch": "+0Hz"},
+        "mysterious": {"voice": "ko-KR-InJoonNeural", "rate": "-4%", "pitch": "+0Hz"},
         "calm": {"voice": "ko-KR-SunHiNeural", "rate": "+0%", "pitch": "+0Hz"},
-        "playful": {"voice": "ko-KR-SunHiNeural", "rate": "+10%", "pitch": "+3Hz"},
-        "emotional": {"voice": "ko-KR-SunHiNeural", "rate": "-4%", "pitch": "+0Hz"},
+        "playful": {"voice": "ko-KR-SunHiNeural", "rate": "+6%", "pitch": "+0Hz"},
+        "emotional": {"voice": "ko-KR-SunHiNeural", "rate": "-3%", "pitch": "+0Hz"},
     },
+}
+
+
+# Multilingual 음성이 지역/버전 문제로 안 될 때 자동으로 바꿀 음성
+FALLBACK_VOICES = {
+    "en-US-AndrewMultilingualNeural": "en-US-GuyNeural",
+    "en-US-BrianMultilingualNeural": "en-US-ChristopherNeural",
+    "en-US-AvaMultilingualNeural": "en-US-AriaNeural",
+    "en-US-EmmaMultilingualNeural": "en-US-JennyNeural",
+    "ko-KR-HyunsuMultilingualNeural": "ko-KR-InJoonNeural",
 }
 
 
@@ -96,8 +112,9 @@ class TTSResult:
 class EdgeTTS:
     def __init__(self, voice: str = "ko-KR-SunHiNeural", rate: str = "+0%", volume: str = "+0%",
                  pitch: str = "+0Hz", proxy: str | None = None, retries: int = 3,
-                 retry_delay: float = 1.5, timeout: float = 120):
+                 retry_delay: float = 1.5, timeout: float = 120, fallback_voice: str | None = None):
         self.voice = voice
+        self.fallback_voice = fallback_voice if fallback_voice is not None else FALLBACK_VOICES.get(voice)
         self.rate = rate
         self.volume = volume
         self.pitch = pitch
@@ -160,6 +177,10 @@ class EdgeTTS:
                 last_exc = exc
                 log.warning("TTS 실패 (%d/%d): %s: %s", attempt + 1, self.retries, type(exc).__name__, exc)
                 time.sleep(self.retry_delay * (attempt + 1))
+        if self.fallback_voice and self.fallback_voice != self.voice:
+            log.warning("음성 %s 실패 → %s 로 바꿔서 다시 시도", self.voice, self.fallback_voice)
+            self.voice, self.fallback_voice = self.fallback_voice, None
+            return self.synthesize(text, out_path)
         detail = str(last_exc) or ("응답 시간 초과" if isinstance(last_exc, asyncio.TimeoutError) else "")
         raise TTSError(
             f"edge-tts 음성 생성 실패 ({self.voice}): {type(last_exc).__name__}: {detail}\n"

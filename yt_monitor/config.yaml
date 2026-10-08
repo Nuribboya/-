@@ -144,8 +144,8 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   voice_mode: auto                # auto = 대본 분위기(신남/긴장/미스터리/차분/유쾌/감성)에 맞춰 음성 자동 선택
                                   # fixed = 아래 tts_voice 고정. 영상 생성 탭에서 음성을 고르면 그 음성 사용
   mood_voices: {}                 # 분위기별 음성 바꾸기 (선택). 예: {en: {calm: {voice: en-US-JennyNeural, rate: "+0%"}}}
-  tts_voice: en-US-GuyNeural      # 남성. 여성: en-US-JennyNeural, en-US-AriaNeural / 한국어: ko-KR-SunHiNeural
-  tts_rate: "+5%"                 # 말하기 속도
+  tts_voice: en-US-AndrewMultilingualNeural  # 자연스러운 남성. 여성: en-US-AvaMultilingualNeural / 한국어: ko-KR-SunHiNeural
+  tts_rate: "+3%"                 # 말하기 속도 (너무 빠르면 기계음처럼 들림)
   tts_volume: "+0%"
   tts_pitch: "+0Hz"
   tts_proxy: ""                   # 회사망 등에서 필요할 때만 (예: http://proxy:8080)
@@ -162,6 +162,8 @@ video:                            # 대본 → 쇼츠 영상 자동 생성 (edge
   bgm_volume: 0.15                # 배경음악 크기 (0.1 작게 ~ 0.3 크게)
   bgm_duck: true                  # 목소리가 나올 때 음악 자동으로 줄이기
   realism: light                  # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
+  voice_fx: natural               # 목소리를 마이크로 녹음한 것처럼 다듬기 (natural | off)
+  scene_pause: 0.18               # 문장(씬) 사이 숨 쉬는 쉼(초)
   crowd_every: 4                  # 익스트림 장르: N컷마다 관중 리액션 컷 (0이면 끔)
   crowd_volume: 0.12              # sfx/crowd 폴더의 관중 함성 크기
 

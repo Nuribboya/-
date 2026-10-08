@@ -109,11 +109,27 @@ class Composer:
                 "-r", str(self.fps)]
 
     # 오디오 -----------------------------------------------------------------------
-    def decode_audio(self, src: Path, out: Path, sample_rate: int = 24000) -> float:
-        """TTS mp3 → mono 16bit wav (길이를 샘플 단위로 정확히 알기 위해)."""
-        self.runner.run(["-i", src, "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", out],
+    def decode_audio(self, src: Path, out: Path, sample_rate: int = 24000, pad: float = 0.0) -> float:
+        """TTS mp3 → mono 16bit wav (길이를 샘플 단위로 정확히 알기 위해).
+
+        pad: 끝에 붙이는 짧은 쉼(초) — 문장 사이에 숨 쉬는 틈이 있어야 사람 말처럼 들린다.
+        """
+        af = ["-af", f"apad=pad_dur={pad:.3f}"] if pad > 0 else []
+        self.runner.run(["-i", src, "-vn", *af, "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", out],
                         f"음성 변환 {Path(src).name}")
         return wav_duration(out)
+
+    # 마이크로 녹음한 것처럼: 저음 정리 · 따뜻함 · 또렷함 · 압축 · 아주 작은 방 울림
+    VOICE_FX = ("highpass=f=75,lowpass=f=15000,equalizer=f=180:t=q:w=1:g=1.5,"
+                "equalizer=f=3200:t=q:w=1.2:g=2,"
+                "acompressor=threshold=-20dB:ratio=2.5:attack=8:release=120:makeup=1.5,"
+                "aecho=0.9:0.9:22|37:0.05|0.03,alimiter=limit=0.95")
+
+    def voice_fx(self, narration: Path, out: Path | None = None) -> Path:
+        out = out or self.work / "narration_fx.wav"
+        self.runner.run(["-i", narration, "-af", self.VOICE_FX, "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+                         out], "음성 다듬기")
+        return out
 
     # 1) 클립 맞추기 ------------------------------------------------------------------
     def shot_filter(self, shot: Shot) -> str:

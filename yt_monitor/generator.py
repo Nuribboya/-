@@ -368,11 +368,16 @@ class ScriptGenerator:
         if self.lang == "en":
             prompt += (f"\n\nLength matters: write about {words} words, at least {max(6, words // 11)} lines. "
                        "A short script is a failure.\n"
+                       "Sound like a real person telling a friend: contractions (it's, you're, don't), mix short "
+                       "punchy lines with longer ones, commas and dashes for natural pauses, an occasional "
+                       "'honestly', 'wait' or 'here's the thing' — never stiff, list-like or textbook wording.\n"
                        "Output ONLY the spoken lines, all in English. No Korean, no title line, "
                        "and no introduction such as \"Sure, here is the script\". Start with the hook.")
         else:
             prompt += (f"\n\n분량이 중요합니다: 약 {int(minutes * CHARS_PER_MINUTE)}자, "
-                       f"최소 {max(6, int(minutes * CHARS_PER_MINUTE) // 30)}줄. 짧게 쓰면 실패입니다.")
+                       f"최소 {max(6, int(minutes * CHARS_PER_MINUTE) // 30)}줄. 짧게 쓰면 실패입니다.\n"
+                       "친구한테 말하듯 자연스러운 구어체로: 짧은 문장과 조금 긴 문장을 섞고, 쉼표로 숨 쉴 곳을 만들고, "
+                       "'진짜', '근데', '여기서 반전' 같은 말을 가끔 넣되 딱딱한 설명문 · 나열식 문장은 쓰지 마세요.")
         skip = [title, topic.get("topic", ""), *topic.get("titles", [])]
         text = self.client.chat(prompt, options=self._options(), on_token=on_token, cancel=cancel)
         lines = tts_lines(text, self.lang, skip)

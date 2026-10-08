@@ -99,7 +99,7 @@ def test_config_upgrade_speeds_up_cuts_only_if_default(tmp_path):
         raw["channels"] = [{"handle": "@x"}]
         path = save_config(raw, tmp_path / f"c{old_value}.yaml")
         new = read_raw(path)
-        assert new["video"]["clip_max_seconds"] == expected and new["config_version"] == 3
+        assert new["video"]["clip_max_seconds"] == expected and new["config_version"] == 4
         assert new["video"]["zoom"] == 0.08 and new["ai_images"]["enabled"] is False
 
 
@@ -232,7 +232,8 @@ def test_voice_for_mood_presets_and_overrides():
         for preset in MOOD_VOICES[lang].values():
             assert preset["voice"] in VOICES                      # GUI 목록에 있는 음성만 사용
             assert preset["voice"].startswith("en-" if lang == "en" else "ko-")
-    assert voice_for_mood("mysterious", "en")["pitch"].startswith("-")
+    assert voice_for_mood("mysterious", "en")["rate"].startswith("-")          # 느리게 (음높이는 안 바꿈)
+    assert all(p["pitch"] == "+0Hz" for lang in MOOD_VOICES.values() for p in lang.values())
     assert voice_for_mood("없는분위기", "en")["mood"] == "energetic"
     over = voice_for_mood("calm", "en", {"en": {"calm": {"voice": "en-GB-RyanNeural"}}})
     assert over["voice"] == "en-GB-RyanNeural" and over["rate"] == MOOD_VOICES["en"]["calm"]["rate"]
@@ -248,7 +249,7 @@ def test_guess_mood_without_ollama():
 
 @needs_ffmpeg
 @pytest.mark.parametrize("chosen, expect_voice, expect_rate", [
-    (None, "en-US-ChristopherNeural", "+2%"),          # 가짜 Ollama가 mood=dramatic → 긴장감 있는 목소리
+    (None, "en-US-BrianMultilingualNeural", "+2%"),    # 가짜 Ollama가 mood=dramatic → 긴장감 있는 목소리
     ("en-US-JennyNeural", "en-US-JennyNeural", None),   # 직접 고르면 그 음성
 ])
 def test_pipeline_picks_voice_by_mood(tmp_path, monkeypatch, chosen, expect_voice, expect_rate):
@@ -273,7 +274,7 @@ def test_pipeline_picks_voice_by_mood(tmp_path, monkeypatch, chosen, expect_voic
             on_status=statuses.append)
         assert made[0].voice == expect_voice and res.voice == expect_voice and res.mood == "dramatic"
         if expect_rate:
-            assert made[0].rate == expect_rate and made[0].pitch == "-3Hz"
+            assert made[0].rate == expect_rate and made[0].pitch == "+0Hz"
             assert any("분위기: dramatic" in m for m in statuses)
         else:
             assert any("직접 선택" in m for m in statuses)

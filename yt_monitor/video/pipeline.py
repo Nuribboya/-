@@ -285,18 +285,24 @@ class VideoPipeline:
         tts_dir = work / "tts"
         tts_dir.mkdir()
         wavs, scene_words, durations = [], [], []
+        pause = float(self.v.get("scene_pause", 0.18) or 0) if not self.offline else 0.0
         for s in scenes:
             check_cancel()
             res = tts.synthesize(s.text, tts_dir / f"scene_{s.index:03d}.mp3")
             save_words(res.words, tts_dir / f"scene_{s.index:03d}_words.json")
             wav = tts_dir / f"scene_{s.index:03d}_pcm.wav"
-            durations.append(comp.decode_audio(res.audio_path, wav))
+            durations.append(comp.decode_audio(res.audio_path, wav, pad=pause))
             wavs.append(wav)
             scene_words.append(res.words)
             status(f"  씬 {s.index}: {durations[-1]:.1f}초")
         narration = work / "narration.wav"
         total = concat_wavs(wavs, narration)
         status(f"전체 음성 {total:.1f}초 ({getattr(tts, 'voice', '')})")
+        if str(self.v.get("voice_fx", "natural")).lower() == "natural":
+            try:
+                narration = comp.voice_fx(narration)       # 길이는 그대로 (필터만)
+            except FFmpegError as exc:
+                warn(f"음성 다듬기를 건너뜁니다: {str(exc).splitlines()[0]}")
         mood = meta.get("mood") if meta.get("mood") in MOODS else DEFAULT_MOOD
         audio, bgm_track = self._add_bgm(comp, narration, total, mood, status, warn)
         if niche.get("crowd_sfx"):

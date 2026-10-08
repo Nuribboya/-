@@ -62,12 +62,12 @@ DEFAULT_TRENDS = {  # 최근 유행 쇼츠 분석 (trends.py)
 LANGUAGE_PRESETS = {
     "en": {  # 영어권 (미국 중심) — 광고 단가가 높고 시청자가 많다
         "trends": {"region": "US", "language": "en", "title_language": "en", "min_views": 50000},
-        "video": {"tts_voice": "en-US-GuyNeural", "tts_rate": "+5%", "subtitle_font": "Arial Black",
+        "video": {"tts_voice": "en-US-AndrewMultilingualNeural", "tts_rate": "+3%", "subtitle_font": "Arial Black",
                   "subtitle_font_size": 76, "subtitle_max_chars": 18, "max_scene_chars": 160},
     },
     "ko": {
         "trends": {"region": "KR", "language": "ko", "title_language": "ko", "min_views": 10000},
-        "video": {"tts_voice": "ko-KR-SunHiNeural", "tts_rate": "+10%", "subtitle_font": "Malgun Gothic",
+        "video": {"tts_voice": "ko-KR-SunHiNeural", "tts_rate": "+5%", "subtitle_font": "Malgun Gothic",
                   "subtitle_font_size": 72, "subtitle_max_chars": 14, "max_scene_chars": 90},
     },
 }
@@ -84,7 +84,7 @@ def apply_language(raw: dict, lang: str) -> dict:
     return raw
 
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 OLD_AI_STYLE = "cinematic, dramatic lighting, high contrast, vivid colors, ultra detailed, 8k photo"
 OLD_AI_NEGATIVE = "text, watermark, logo, blurry, low quality, deformed, ugly, nsfw"
 REALISTIC_STYLE = "RAW photo, candid photograph, shot on 35mm, natural lighting, realistic skin texture, subtle film grain, sharp focus"
@@ -102,6 +102,13 @@ def upgrade_config(raw: dict, user: dict) -> dict:
         # v2: 쇼츠는 컷이 빨라야 한다 → 예전 기본값(4초)이면 2.5초로
         if float(raw["video"].get("clip_max_seconds") or 0) == 4.0:
             raw["video"]["clip_max_seconds"] = 2.5
+    if version < 4:
+        # v4: 사람 같은 Multilingual 음성으로 (예전 기본 음성/속도를 그대로 쓰고 있을 때만)
+        v = raw.get("video") or {}
+        if v.get("tts_voice") == "en-US-GuyNeural":
+            v["tts_voice"] = "en-US-AndrewMultilingualNeural"
+        if v.get("tts_rate") in ("+5%", "+10%"):
+            v["tts_rate"] = "+3%" if raw.get("language", "en") == "en" else "+5%"
     if version < 3:
         # v3: AI 이미지를 실제 사진처럼 → 예전 기본 스타일(영화 같은 · 과한 색감)을 그대로 쓰고 있으면 교체
         ai = raw.get("ai_images") or {}
@@ -166,8 +173,8 @@ DEFAULTS = {
         "keywords_per_scene": 3,
         "voice_mode": "auto",               # auto = 대본 분위기에 맞춰 음성·속도·톤 자동 선택 / fixed = tts_voice 고정
         "mood_voices": {},                  # 분위기별 음성 바꾸기 (선택), 예: {en: {calm: {voice: en-US-JennyNeural}}}
-        "tts_voice": "en-US-GuyNeural",     # edge-tts 음성 (en-US-JennyNeural = 여성, ko-KR-SunHiNeural = 한국어)
-        "tts_rate": "+5%",                  # 말하기 속도 (쇼츠는 약간 빠르게)
+        "tts_voice": "en-US-AndrewMultilingualNeural",  # edge-tts 음성 (자연스러운 Multilingual 계열)
+        "tts_rate": "+3%",                  # 말하기 속도 (너무 빠르면 기계음처럼 들림)
         "tts_volume": "+0%",
         "tts_pitch": "+0Hz",
         "tts_proxy": "",                    # 회사망 등에서 필요할 때만 (예: http://proxy:8080)
@@ -184,6 +191,8 @@ DEFAULTS = {
         "bgm_volume": 0.15,                 # 배경음악 크기 (0.1 = 작게 ~ 0.3 = 크게)
         "bgm_duck": True,                   # 목소리가 나올 때 음악을 자동으로 줄이기
         "realism": "light",                 # 촬영한 느낌: off | light | strong (손떨림 · 필름 그레인)
+        "voice_fx": "natural",              # 목소리를 마이크로 녹음한 것처럼 다듬기: natural | off
+        "scene_pause": 0.18,                # 문장(씬) 사이 숨 쉬는 쉼(초)
         "crowd_every": 4,                   # 장르가 관중 컷을 쓰면 N컷마다 관중 리액션 컷 (0이면 끔)
         "crowd_volume": 0.12,               # sfx/crowd 관중 함성 크기
     },

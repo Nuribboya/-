@@ -215,7 +215,7 @@ def test_old_config_without_language_switches_to_english(tmp_path):
     old["channels"] = [{"handle": "@x"}]
     path = save_config(old, tmp_path / "config.yaml")
     raw = read_raw(path)
-    assert raw["language"] == "en" and raw["video"]["tts_voice"] == "en-US-GuyNeural"
+    assert raw["language"] == "en" and raw["video"]["tts_voice"] == "en-US-AndrewMultilingualNeural"
     assert raw["trends"]["region"] == "US" and raw["video"]["subtitle_font"] == "Arial Black"
     # 언어가 저장된 뒤에는 사용자가 바꾼 값을 유지
     raw["video"]["tts_voice"] = "en-US-JennyNeural"

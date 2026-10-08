@@ -360,6 +360,7 @@ def test_pipeline_end_to_end(tmp_path, services):
     assert len(debug["scenes"]) == len(res.scenes)
     assert sum(s["frames"] for s in debug["shots"]) == round(res.duration * 15)
     assert (res.work_dir / "logs").is_dir() and not res.warnings
+    assert (res.work_dir / "narration_fx.wav").exists()                # 목소리 다듬기
     assert res.bgm == "" and any("배경음악 없음" in m for m in statuses)
     up = res.upload_path.read_text(encoding="utf-8")
     assert res.upload_path.name == "편의점_꿀조합_업로드정보.txt" and "노하우/스타일" in up
@@ -492,3 +493,28 @@ def test_output_path_for(tmp_path):
     assert p == tmp_path / "2026-01-02" / "제목_테스트_영상.mp4"
     p.write_bytes(b"x")
     assert output_path_for(tmp_path, "제목: 테스트/영상?", now, KST).name == "제목_테스트_영상_030405.mp4"
+
+
+def test_natural_voice_fallback(tmp_path):
+    """Multilingual 음성이 계속 실패하면 비슷한 기본 음성으로 바꿔서 다시 만든다."""
+    tts = FakeEdgeTTS("en-US-AndrewMultilingualNeural", retries=2, retry_delay=0, fail_times=2)
+    res = tts.synthesize("Hello there.", tmp_path / "a.mp3")
+    assert res.audio_path.exists() and tts.voice == "en-US-GuyNeural" and len(tts.calls) == 3
+    from yt_monitor.video.tts import voice_for_mood
+
+    pick = voice_for_mood("dramatic", "en")
+    assert pick["voice"] == "en-US-BrianMultilingualNeural" and pick["pitch"] == "+0Hz"
+
+
+def test_config_v4_switches_to_natural_voice(tmp_path):
+    from yt_monitor.config import save_config
+
+    raw = read_raw(tmp_path / "x.yaml")
+    raw.update(config_version=3, channels=[{"handle": "@x"}])
+    raw["video"].update(tts_voice="en-US-GuyNeural", tts_rate="+5%")
+    up = read_raw(save_config(raw, tmp_path / "config.yaml"))
+    assert up["video"]["tts_voice"] == "en-US-AndrewMultilingualNeural" and up["video"]["tts_rate"] == "+3%"
+    raw2 = read_raw(tmp_path / "y.yaml")
+    raw2.update(config_version=3, channels=[{"handle": "@x"}])
+    raw2["video"]["tts_voice"] = "en-US-JennyNeural"                 # 직접 고른 음성은 그대로
+    assert read_raw(save_config(raw2, tmp_path / "c2.yaml"))["video"]["tts_voice"] == "en-US-JennyNeural"
