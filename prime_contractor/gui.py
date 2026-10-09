@@ -919,7 +919,7 @@ class App:
             drop_far_companies, near_first,
             listed_names, mark_dart_registered, mark_groups, sort_listed)
         from prime_contractor.sources.dart import DartClient
-        from prime_contractor.sources.factory_api import FactoryApi
+        from prime_contractor.sources.factory_api import FactoryApi, QuotaExceeded
         try:
             _write_run_log("DART 준비")
             dart = DartClient(cfg.dart_api_key)
@@ -961,9 +961,14 @@ class App:
             self.say(f"  조회 순서: 본사가 거리 안인 제조 상장사 {len(near)}곳 → 나머지 제조 상장사 "
                      f"{len(far)}곳 → 자회사(지분 50%↑, 금융·유통·서비스 제외) {len(subsidiaries)}곳")
             fresh = sum(1 for q in queries if not api.cached(q))
-            if fresh:
+            if fresh and not api.verified:
                 self.say("공장 조회 API 를 시험합니다…")
-                self.say(f"  시험 조회 성공 — 삼성전자 공장 {api.check()}곳을 읽었습니다.")
+                try:
+                    self.say(f"  시험 조회 성공 — 삼성전자 공장 {api.check()}곳을 읽었습니다.")
+                except QuotaExceeded:
+                    if not any(api.cached(q) for q in queries):
+                        raise
+                    self.say("  오늘 한도를 이미 다 써서, 받아 둔 공장만 보여 줍니다.")
             self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
                      + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))
             if fresh > 900:

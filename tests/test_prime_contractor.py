@@ -2953,3 +2953,24 @@ def test_last_factories_survive_restart(tmp_path):
     assert back[0].name == c.name and back[0].distance_km == 3.2 and back[0].stock_code == "004370"
     assert meta["within"] == 70 and meta["knows_listed"] is True
     assert load_last_factories(tmp_path / "없음.json") == ([], {})
+
+
+def test_factory_api_after_quota_uses_saved_rows_only(tmp_path):
+    from prime_contractor.sources.factory_api import FactoryApi, QuotaExceeded
+    session = _ApiSession({"농심": [{"cmpnyNm": "(주)농심", "fctryAdres": "경기도 안성시"}]})
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=session)
+    api.factories_of("농심")
+    api.save_cache()
+    xml = ("<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>"
+           "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR</returnAuthMsg></cmmMsgHeader>"
+           "</OpenAPI_ServiceResponse>")
+    quota = _ApiSession({}, fail=xml)
+    again = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=quota)
+    assert again.verified                                  # 받아 둔 공장이 있으면 시험 조회는 건너뛴다
+    assert again.factories_of("농심")[0]["address"] == "경기도 안성시"
+    with pytest.raises(QuotaExceeded):
+        again.factories_of("오뚜기")
+    calls = len(quota.calls)
+    with pytest.raises(QuotaExceeded):
+        again.factories_of("삼양")                          # 한도 뒤엔 묻지도 않는다
+    assert len(quota.calls) == calls

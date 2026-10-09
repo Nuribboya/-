@@ -98,7 +98,9 @@ class FactoryApi:
         self._cache = self._load_cache()
         #: 시험 조회(삼성전자)에서 공장을 실제로 읽었는가. 안 읽혔으면 빈 결과를 남기지 않는다
         #: — 잘못 읽은 '0곳'을 60일 동안 믿으면 안 된다.
-        self.verified = False
+        self.verified = any(v.get("rows") for v in self._cache.values())
+        #: 오늘 한도를 넘겼으면 그 뒤로는 묻지 않고 바로 멈춘다(받아 둔 것만 쓴다).
+        self.quota_hit = ""
         #: 처음 받은 응답 한 줄의 칸 이름 — 칸을 못 읽을 때 진행 상황에 보여 고치려고.
         self.sample_keys: list[str] = []
 
@@ -120,7 +122,8 @@ class FactoryApi:
         time.sleep(self.sleep_sec)
         text = resp.text or ""
         if _QUOTA in text:
-            raise QuotaExceeded("공공데이터포털 하루 호출 한도를 넘었습니다 (개발계정은 하루 1,000번).")
+            self.quota_hit = "공공데이터포털 하루 호출 한도를 넘었습니다 (개발계정은 하루 1,000번)."
+            raise QuotaExceeded(self.quota_hit)
         if any(code in text for code in _NOT_REGISTERED):
             raise FactoryApiError(
                 "공공데이터포털에서 '한국산업단지공단 공장등록정보(생산정보) 조회서비스'를 활용신청해야 "
@@ -187,6 +190,8 @@ class FactoryApi:
             hit = self._cache.get(company)
         if hit and date.fromisoformat(hit["at"]) >= today - timedelta(days=CACHE_DAYS):
             return hit["rows"]
+        if self.quota_hit:
+            raise QuotaExceeded(self.quota_hit)
         op = self._resolve()
         rows: list[dict[str, str]] = []
         page = 1
