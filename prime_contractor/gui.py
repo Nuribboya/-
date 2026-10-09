@@ -155,26 +155,34 @@ class App:
 
         self.factory_file = StringVar(value=saved.get("factory_file", ""))
         self.dart_key = StringVar(value=saved.get("dart_key", ""))
+        # 공공데이터포털 키는 나라장터 때 쓰던 것과 같은 키다(같은 계정이면 서비스마다 같음).
+        self.data_key = StringVar(value=saved.get("data_key") or saved.get("g2b_key", ""))
         value = saved.get("distance")
         self.distance = StringVar(value=value if value in DISTANCE_CHOICES
                                   else _label_for(DISTANCE_CHOICES, 70.0))
 
-        ttk.Label(box, text="공장 목록 파일").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(box, textvariable=self.factory_file, width=60).grid(
-            row=0, column=1, columnspan=2, sticky=W, pady=4)
-        ttk.Button(box, text="파일 찾기", command=self.on_pick_factory_file).grid(
-            row=0, column=3, sticky=W, padx=6)
+        ttk.Label(box, text="공공데이터포털 인증키").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.data_key, width=46, show="•").grid(
+            row=0, column=1, sticky=W, pady=4)
+        ttk.Label(box, text="data.go.kr — 공장 정보 조회", foreground="#666").grid(
+            row=0, column=2, sticky=W, padx=6)
         ttk.Label(box, text="기업정보 인증키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Entry(box, textvariable=self.dart_key, width=46, show="•").grid(
             row=1, column=1, sticky=W, pady=4)
-        ttk.Label(box, text="상장사·계열사 확인에 씁니다", foreground="#666").grid(
+        ttk.Label(box, text="opendart.fss.or.kr — 상장사·계열사 확인", foreground="#666").grid(
             row=1, column=2, sticky=W, padx=6)
         ttk.Label(box, text="안성에서 얼마나").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
                      state="readonly", width=18).grid(row=2, column=1, sticky=W, pady=4)
+        ttk.Label(box, text="공장 목록 파일 (선택)").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.factory_file, width=46).grid(
+            row=3, column=1, sticky=W, pady=4)
+        ttk.Button(box, text="파일 찾기", command=self.on_pick_factory_file).grid(
+            row=3, column=2, sticky=W, padx=6)
         ttk.Label(box, foreground="#666", justify=LEFT, text=(
-            "공장 목록 파일: 공공데이터포털(data.go.kr)에서 '전국등록공장현황'을 검색해 받은 CSV "
-            "(팩토리온 엑셀도 됩니다).")).grid(row=3, column=0, columnspan=4, sticky=W, pady=(4, 0))
+            "인증키 두 개만 넣으면 상장사·계열사 공장을 바로 찾아옵니다. 파일은 비워 두세요 — "
+            "비상장 작은 공장까지 다 보고 싶을 때만 '전국등록공장현황' 파일을 고릅니다.")).grid(
+            row=4, column=0, columnspan=4, sticky=W, pady=(4, 0))
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
@@ -586,6 +594,7 @@ class App:
     def current_options(self) -> dict:
         return {
             "dart_key": self.dart_key.get(),
+            "data_key": self.data_key.get(),
             "distance": self.distance.get(),
             "factory_file": self.factory_file.get(),
             "sales_path": self.sales_path.get(),
@@ -764,20 +773,29 @@ class App:
         """등록공장 파일에서 근처 공장을 고른다 — 판넬을 실제로 쓰는 곳."""
         if self.running:
             return
-        if not self.factory_file.get().strip():
-            self.on_pick_factory_file()
         path = self.factory_file.get().strip()
-        if not path:
+        if path and not Path(path).exists():
+            messagebox.showwarning("파일이 없습니다", f"{path}\n\n공장 목록 파일을 다시 고르거나 "
+                                   "칸을 비워 두세요(인증키로 찾습니다).")
             return
-        if not Path(path).exists():
-            messagebox.showwarning("파일이 없습니다", f"{path}\n\n공장 목록 파일을 다시 골라 주세요.")
+        if not path and not (self.data_key.get().strip() and self.dart_key.get().strip()):
+            messagebox.showwarning(
+                "인증키가 필요합니다",
+                "'공공데이터포털 인증키'와 '기업정보 인증키'를 둘 다 넣어 주세요.\n\n"
+                "받는 곳은 도움말 탭에 적어 두었습니다.")
             return
         cfg = build_config(self.current_options())
         self.running = True
         self.run_button.configure(state="disabled")
         self.status.configure(text="찾는 중…")
-        self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
-        threading.Thread(target=self._load_factories, args=(path, cfg), daemon=True).start()
+        if path:
+            self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
+            target = self._load_factories
+            args = (path, cfg)
+        else:
+            target = self._load_factories_by_key
+            args = (self.data_key.get().strip(), cfg)
+        threading.Thread(target=target, args=args, daemon=True).start()
 
     def _load_factories(self, path: str, cfg) -> None:
         from prime_contractor.makers import (
@@ -825,6 +843,58 @@ class App:
                  "연락은 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 하세요.")
         self.root.after(0, self._factories_loaded, factories, cfg.within_km,
                         sized or knows_listed, knows_listed)
+
+    def _load_factories_by_key(self, data_key: str, cfg) -> None:
+        """파일 없이: 상장사(제조업)·계열사 이름으로 공장등록 API 를 물어 공장을 모은다."""
+        from prime_contractor.makers import (
+            affiliate_names, build_group_map, collect_by_name, find_factories,
+            is_manufacturer, listed_names, mark_dart_registered, mark_groups)
+        from prime_contractor.sources.dart import DartClient
+        from prime_contractor.sources.factory_api import FactoryApi
+        try:
+            dart = DartClient(cfg.dart_api_key)
+            api = FactoryApi(data_key, cache_dir=dart.cache_dir)
+            listed = [row for row in dart.listed_companies if row[2]]
+            self.say(f"상장사 {len(listed)}곳 중 제조업만 고릅니다 — 처음 한 번은 몇 분 걸리고, "
+                     "다음부터는 저장해 둔 걸 씁니다…")
+            makers = []
+            for i, row in enumerate(listed, 1):
+                try:
+                    if is_manufacturer(dart.company(row[1])):
+                        makers.append(row)
+                except Exception:              # 한 곳 실패로 멈추지 않는다
+                    continue
+                if i % 300 == 0:
+                    self.say(f"  업종 확인 {i}/{len(listed)}")
+            dart.save_company_cache()
+            self.say(f"제조업 상장사 {len(makers)}곳. 계열사를 확인합니다…")
+            group_map = build_group_map(
+                listed, dart.investments,
+                progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
+            dart.save_investment_cache()
+            queries = list(dict.fromkeys([name for name, _c, _s in makers]
+                                         + affiliate_names(makers, dart.investments)))
+            fresh = sum(1 for q in queries if not api.cached(q))
+            self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
+                     + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))
+            records, stopped = collect_by_name(
+                queries, api.factories_of,
+                progress=lambda done, total: self.say(f"  공장 조회 {done}/{total}"))
+            api.save_cache()
+            if stopped:
+                self.say(f"⚠ {stopped} 받은 데까지만 보여 줍니다 — 내일 다시 누르면 이어서 받습니다.")
+            if not records and api.sample_keys:
+                self.say("공장 칸을 못 읽었습니다. 받은 칸 이름: " + ", ".join(api.sample_keys))
+            factories = find_factories(records, within_km=cfg.within_km)
+            registered, on_market = mark_dart_registered(
+                factories, dart.corp_index, listed_names(listed))
+            mark_groups(factories, group_map, listed, cfg.incumbent)
+        except Exception as exc:
+            self.root.after(0, self._factories_failed, redact_secrets(exc))
+            return
+        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외, "
+                 f"상장사 공장 {on_market}곳). 연락은 그 공장 시설팀·공무팀에 하세요.")
+        self.root.after(0, self._factories_loaded, factories, cfg.within_km, True, True)
 
     def _factories_failed(self, message: str) -> None:
         self.running = False

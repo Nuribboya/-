@@ -2673,3 +2673,97 @@ def test_dart_investments_reads_last_annual_report_and_caches(tmp_path):
     again = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
     assert again.has_investments("N1") and again.investments("N1") == rows
     assert calls == ["2025", "2024"]                      # 두 번째는 캐시
+
+
+# --- 파일 없이 인증키로 공장 찾기 (공장등록 생산정보 API) ----------------------------
+
+class _ApiResp:
+    def __init__(self, status=200, payload=None, text=None):
+        self.status_code = status
+        self._payload = payload
+        self.text = text if text is not None else __import__("json").dumps(payload, ensure_ascii=False)
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise __import__("requests").HTTPError(str(self.status_code))
+
+
+def _api_payload(rows, total=None):
+    return {"response": {"header": {"resultCode": "00", "resultMsg": "NORMAL"},
+                         "body": {"items": {"item": rows}, "totalCount": total or len(rows)}}}
+
+
+class _ApiSession:
+    """첫 오퍼레이션은 없는 주소, 두 번째가 진짜. 회사 이름별로 공장을 돌려준다."""
+
+    def __init__(self, by_name, fail=None):
+        self.by_name, self.fail, self.calls = by_name, fail, []
+
+    def get(self, url, params=None, timeout=None):
+        op = url.rsplit("/", 1)[1]
+        self.calls.append((op, params["cmpnyNm"]))
+        if self.fail:
+            return _ApiResp(200, text=self.fail)
+        if op == "getFctryPrdctnService":
+            return _ApiResp(404, text="API not found")
+        return _ApiResp(200, _api_payload(self.by_name.get(params["cmpnyNm"], [])))
+
+
+def test_factory_api_finds_operation_reads_fields_and_caches(tmp_path):
+    from prime_contractor.sources.factory_api import FactoryApi
+    session = _ApiSession({"농심": [
+        {"cmpnyNm": "(주)농심", "fctryAdres": "경기도 안성시 공도읍", "mainProductCn": "라면",
+         "rprsntvNm": "신동원", "telNo": "031-000-0000", "emplyCnt": "512"}]})
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=session)
+    rows = api.factories_of("농심")
+    assert api.operation == "getFctryRegistPrdctnService"
+    assert rows == [{"name": "(주)농심", "address": "경기도 안성시 공도읍", "products": "라면",
+                     "ceo": "신동원", "phone": "031-000-0000", "employees": "512"}]
+    api.save_cache()
+    again = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=session)
+    calls = len(session.calls)
+    assert again.factories_of("농심") == rows and len(session.calls) == calls   # 캐시
+
+
+def test_factory_api_explains_missing_subscription_and_quota(tmp_path):
+    from prime_contractor.sources.factory_api import FactoryApi, FactoryApiError, QuotaExceeded
+    xml = ("<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>{}</returnAuthMsg>"
+           "</cmmMsgHeader></OpenAPI_ServiceResponse>")
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0,
+                     session=_ApiSession({}, fail=xml.format("SERVICE_KEY_IS_NOT_REGISTERED_ERROR")))
+    with pytest.raises(FactoryApiError, match="활용신청"):
+        api.factories_of("농심")
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=_ApiSession(
+        {}, fail=xml.format("LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR")))
+    with pytest.raises(QuotaExceeded):
+        api.factories_of("농심")
+
+
+def test_collect_by_name_keeps_same_company_and_reports_quota():
+    from prime_contractor.makers import collect_by_name
+    from prime_contractor.sources.factory_api import QuotaExceeded
+
+    def fetch(name):
+        if name == "오뚜기":
+            raise QuotaExceeded("공공데이터포털 하루 호출 한도를 넘었습니다.")
+        return [{"name": "(주)삼성전자", "address": "경기도 평택시"},
+                {"name": "삼성전자서비스(주)", "address": "경기도 수원시"}]
+
+    records, stopped = collect_by_name(["삼성전자", "오뚜기"], fetch, workers=2)
+    assert [r["name"] for r in records] == ["(주)삼성전자"]        # '서비스'는 다른 회사
+    assert "한도" in stopped
+
+
+def test_affiliate_names_keep_domestic_controlled_companies():
+    from prime_contractor.makers import affiliate_names
+    stakes = {"N1": [{"name": "(주)태경농산", "ratio": 51.0, "purpose": "경영참여"},
+                     {"name": "Nongshim America, Inc.", "ratio": 100.0, "purpose": "경영참여"},
+                     {"name": "상해농심식품유한공사", "ratio": 100.0, "purpose": "경영참여"},
+                     {"name": "작은투자처", "ratio": 3.0, "purpose": "단순투자"}]}
+    names = affiliate_names([("농심", "N1", "004370")], lambda code: stakes.get(code, []))
+    assert names == ["(주)태경농산"]

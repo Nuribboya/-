@@ -284,6 +284,68 @@ def mark_groups(factories: list[Candidate], group_map: dict[str, str],
     return tagged
 
 
+# --- 파일 없이: 상장사·계열사 이름으로 공장 모으기 -----------------------------------
+
+#: 제조업(한국표준산업분류 10~34). 상장사 중 이 업종만 공장을 물어본다 — 금융·유통·
+#: 서비스 회사까지 물으면 하루 호출 한도를 금방 넘긴다.
+MANUFACTURING = tuple(str(n) for n in range(10, 35))
+#: 해외 법인 이름 — 국내 공장 목록에 없으니 묻지 않는다.
+_FOREIGN = re.compile(r"(LTD|INC|LLC|GMBH|PTE|CORP|CO\.|S\.A|B\.V|有限|유한공사|"
+                      r"VIETNAM|CHINA|AMERICA|USA|JAPAN|INDIA|MEXICO|EUROPE)", re.I)
+
+
+def is_manufacturer(info: dict) -> bool:
+    return str(info.get("induty_code", "")).startswith(MANUFACTURING)
+
+
+def affiliate_names(listed_companies, fetch) -> list[str]:
+    """상장사들이 계열사로 가진 국내 회사 이름(원래 표기). fetch 는 캐시돼 있어 빠르다."""
+    names: dict[str, str] = {}
+    for _name, code, stock in listed_companies:
+        if not stock:
+            continue
+        try:
+            rows = fetch(code)
+        except Exception:
+            continue
+        for row in rows:
+            raw = row["name"]
+            if (is_affiliate_stake(row.get("ratio", 0.0), row.get("purpose", ""))
+                    and re.search(r"[가-힣]", raw) and not _FOREIGN.search(raw)):
+                names.setdefault(company_key(raw), raw)
+    return list(names.values())
+
+
+def same_company(record_name: str, query: str) -> bool:
+    """API 는 이름 일부만 맞아도 돌려준다('삼성전자' → '삼성전자서비스'). 같은 회사만."""
+    return company_key(record_name) == company_key(query)
+
+
+def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4) -> tuple[
+        list[dict[str, str]], str]:
+    """회사 이름마다 공장을 물어 모은다. (공장 줄, 멈춘 이유 — 한도 초과면 그 문구)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    records: list[dict[str, str]] = []
+    stopped = ""
+    done = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(fetch, q): q for q in queries}
+        for future in as_completed(futures):
+            query = futures[future]
+            done += 1
+            if progress and done % 100 == 0:
+                progress(done, len(queries))
+            try:
+                rows = future.result()
+            except Exception as exc:           # 한도 초과·키 오류는 이유를 남기고 계속 모은다
+                if not stopped and type(exc).__name__ in ("QuotaExceeded", "FactoryApiError"):
+                    stopped = str(exc)
+                continue
+            records += [r for r in rows if same_company(r.get("name", ""), query)]
+    return records, stopped
+
+
 def is_sizable(c: Candidate) -> bool:
     """규모 있는 공장인가 — 종업원·면적 기준을 넘거나 DART 등록 회사."""
     return (c.employees >= MIN_EMPLOYEES or c.area_m2 >= MIN_AREA_M2 or bool(c.corp_code))
