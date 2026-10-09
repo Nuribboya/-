@@ -301,6 +301,42 @@ def is_manufacturer(info: dict) -> bool:
     return str(info.get("induty_code", "")).startswith(MANUFACTURING)
 
 
+#: 지주회사(64992)·회사 본부(7151) — 공장은 없어도 계열 공장들을 거느린다.
+HOLDING = ("6499", "715")
+
+
+def is_holding(info: dict) -> bool:
+    return str(info.get("induty_code", "")).startswith(HOLDING)
+
+
+def sort_listed(listed_companies, company, progress=None, workers: int = 4):
+    """상장사를 (제조업, 계열사를 볼 회사 = 제조업+지주회사) 로 나눈다. 여러 곳을 한꺼번에 묻는다.
+
+    금융·유통·서비스 상장사의 출자현황까지 다 보면 두 배 넘게 오래 걸리는데, 그쪽 계열사는
+    공장이 거의 없다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def kind(row):
+        try:
+            info = company(row[1])
+        except Exception:                        # 한 곳 실패로 멈추지 않는다
+            return False, False
+        return is_manufacturer(info), is_holding(info)
+
+    makers, heads = [], []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for i, (row, (maker, holding)) in enumerate(
+                zip(listed_companies, pool.map(kind, listed_companies)), 1):
+            if maker:
+                makers.append(row)
+            if maker or holding:
+                heads.append(row)
+            if progress and (i % 300 == 0 or i == len(listed_companies)):
+                progress(i, len(listed_companies))
+    return makers, heads
+
+
 def affiliate_names(listed_companies, fetch) -> list[str]:
     """상장사들이 계열사로 가진 국내 회사 이름(원래 표기).
 

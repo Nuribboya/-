@@ -848,7 +848,7 @@ class App:
         """파일 없이: 상장사(제조업)·계열사 이름으로 공장등록 API 를 물어 공장을 모은다."""
         from prime_contractor.makers import (
             affiliate_names, build_group_map, collect_by_name, find_factories,
-            is_manufacturer, listed_names, mark_dart_registered, mark_groups)
+            listed_names, mark_dart_registered, mark_groups, sort_listed)
         from prime_contractor.sources.dart import DartClient
         from prime_contractor.sources.factory_api import FactoryApi
         try:
@@ -857,28 +857,28 @@ class App:
             listed = [row for row in dart.listed_companies if row[2]]
             self.say(f"상장사 {len(listed)}곳 중 제조업만 고릅니다 — 처음 한 번은 몇 분 걸리고, "
                      "다음부터는 저장해 둔 걸 씁니다…")
-            makers = []
-            for i, row in enumerate(listed, 1):
-                try:
-                    if is_manufacturer(dart.company(row[1])):
-                        makers.append(row)
-                except Exception:              # 한 곳 실패로 멈추지 않는다
-                    continue
-                if i % 300 == 0:
-                    self.say(f"  업종 확인 {i}/{len(listed)}")
+            makers, heads = sort_listed(
+                listed, dart.company,
+                progress=lambda done, total: self.say(f"  업종 확인 {done}/{total}"))
             dart.save_company_cache()
-            self.say(f"제조업 상장사 {len(makers)}곳. 계열사를 확인합니다…")
+            self.say(f"제조업 상장사 {len(makers)}곳. 이들과 지주회사 {len(heads) - len(makers)}곳의 "
+                     "계열사를 확인합니다…")
             failed: list[str] = []
-            group_map = build_group_map(
-                listed, dart.investments, failed=failed,
-                progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
+
+            def group_progress(done: int, total: int) -> None:
+                self.say(f"  계열사 확인 {done}/{total}")
+                if done % 500 == 0:                # 중간에 창을 닫아도 받은 데까지는 남긴다
+                    dart.save_investment_cache()
+
+            group_map = build_group_map(heads, dart.investments, failed=failed,
+                                        progress=group_progress)
             dart.save_investment_cache()
             if dart.invest_stopped:
                 self.say(f"⚠ {dart.invest_stopped}")
             elif failed:
                 self.say(f"  {len(failed)}곳은 DART 응답이 없어 건너뜀 — 다음에 누르면 다시 확인합니다.")
             queries = list(dict.fromkeys([name for name, _c, _s in makers]
-                                         + affiliate_names(makers, dart.cached_investments)))
+                                         + affiliate_names(heads, dart.cached_investments)))
             fresh = sum(1 for q in queries if not api.cached(q))
             self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
                      + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))

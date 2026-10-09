@@ -2818,3 +2818,22 @@ def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
     near_chip = Candidate(name="가까운반도체", sector_weight=0.2, distance_km=10.0)
     app._factories_loaded([far_food, near_chip], 70.0, True, True)
     assert [c.name for c in app.factories] == ["가까운반도체", "먼식품"]
+
+
+def test_sort_listed_keeps_makers_and_holdings_for_group_check():
+    from prime_contractor.makers import sort_listed
+
+    info = {"A": {"induty_code": "10301"}, "B": {"induty_code": "64992"},
+            "C": {"induty_code": "47111"}, "D": {"induty_code": "7151"}}
+
+    def company(code):
+        if code == "E":
+            raise RuntimeError("down")
+        return info[code]
+
+    listed = [(c, c, "1") for c in "ABCDE"]
+    seen = []
+    makers, heads = sort_listed(listed, company, progress=lambda d, t: seen.append(d), workers=3)
+    assert [r[0] for r in makers] == ["A"]
+    assert [r[0] for r in heads] == ["A", "B", "D"]      # 유통(C)·실패(E)는 계열사 확인을 건너뛴다
+    assert seen[-1] == 5

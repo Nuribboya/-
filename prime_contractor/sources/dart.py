@@ -140,12 +140,21 @@ class DartClient:
         self._company_cache_path.write_text(
             json.dumps(self._company_cache, ensure_ascii=False), encoding="utf-8")
 
+    def _thread_session(self):
+        """requests 세션은 스레드끼리 나눠 쓰지 않는다 — 스레드마다 하나씩."""
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._local.session = (
+                self.session if self._shared_session
+                or threading.current_thread() is threading.main_thread() else requests.Session())
+        return session
+
     # --- 기업개황 ------------------------------------------------------------
 
     def company(self, corp_code: str) -> dict:
         if corp_code in self._company_cache:
             return self._company_cache[corp_code]
-        resp = self.session.get(
+        resp = self._thread_session().get(
             COMPANY_URL, params={"crtfc_key": self.key, "corp_code": corp_code}, timeout=self.timeout
         )
         resp.raise_for_status()
@@ -187,11 +196,7 @@ class DartClient:
         if self.invest_stopped:
             raise DartError(self.invest_stopped)
         today = today or date.today()
-        session = getattr(self._local, "session", None)
-        if session is None:
-            session = self._local.session = (
-                self.session if self._shared_session
-                or threading.current_thread() is threading.main_thread() else requests.Session())
+        session = self._thread_session()
         rows: list[dict] = []
         for year in (today.year - 1, today.year - 2):
             resp = session.get(INVEST_URL, params={
