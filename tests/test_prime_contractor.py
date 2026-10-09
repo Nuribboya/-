@@ -2490,34 +2490,53 @@ def test_factories_go_to_their_own_excel_sheet_without_the_score_cutoff(tmp_path
     assert rows[(2, "D")] in ("덜 탐", "보통", "많이 탐")
 
 
-# --- 기계·장비 제작사 (등록공장 파일) ---------------------------------------------
+# --- 공장 찾기 (등록공장 파일) ---------------------------------------------------
 
-_FACTORY_CSV = """순번,회사명,단지명,대표자,전화번호,생산품,공장주소
-1,(주)한결포장기계,,김가나,031-000-0001,식품포장기계 제조,경기도 안성시 공도읍 1
-2,대명컨베이어,,이다라,031-000-0002,컨베이어 이송장치,경기도 평택시 포승읍 2
-3,안성판넬,,박마바,031-000-0003,배전반 분전반 제조,경기도 안성시 대덕면 3
-4,정밀부품(주),,최사아,031-000-0004,자동차부품,경기도 안성시 미양면 4
-5,먼기계(주),,정자차,051-000-0005,산업용 보일러,부산광역시 강서구 5
-6,청정환경,,한카타,041-000-0006,"집진기, 송풍기",충청남도 천안시 서북구 6
-6,청정환경,,한카타,041-000-0006,"집진기, 송풍기",충청남도 천안시 서북구 6
-7,주소없는기계,,,,,
+_FACTORY_CSV = """순번,회사명,단지명,대표자,전화번호,생산품,공장주소,종업원수,제조시설면적
+1,(주)한결포장기계,,김가나,031-000-0001,식품포장기계 제조,경기도 안성시 공도읍 1,45,
+2,대명컨베이어,,이다라,031-000-0002,컨베이어 이송장치,경기도 평택시 포승읍 2,8,500
+3,안성판넬,,박마바,031-000-0003,배전반 분전반 제조,경기도 안성시 대덕면 3,20,
+4,정밀부품(주),,최사아,031-000-0004,자동차부품,경기도 안성시 미양면 4,120,
+5,먼기계(주),,정자차,051-000-0005,산업용 보일러,부산광역시 강서구 5,300,
+6,청정식품,,한카타,041-000-0006,"김치, 반찬",충청남도 천안시 서북구 6,,"4,500"
+6,청정식품,,한카타,041-000-0006,"김치, 반찬",충청남도 천안시 서북구 6,,"4,500"
+7,주소없는기계,,,,,,,
+8,작은식품,,,,떡,경기도 용인시 처인구,3,100
 """
 
 
-def test_factory_csv_in_cp949_is_read_and_filtered(tmp_path):
-    from prime_contractor.makers import find_makers, read_factory_file
+def _factories(tmp_path, text=_FACTORY_CSV, encoding="cp949"):
+    from prime_contractor.makers import find_factories, read_factory_file
     path = tmp_path / "전국등록공장현황.csv"
-    path.write_bytes(_FACTORY_CSV.encode("cp949"))          # 공공데이터포털 CSV 는 대개 CP949
-    records = read_factory_file(path)
-    assert records[0]["name"] == "(주)한결포장기계" and records[0]["phone"] == "031-000-0001"
-    makers = find_makers(records, within_km=70.0)
-    names = [c.name for c in makers]
-    assert names == ["(주)한결포장기계", "대명컨베이어", "청정환경"]   # 가까운 순, 중복 한 번
+    path.write_bytes(text.encode(encoding))           # 공공데이터포털 CSV 는 대개 CP949
+    return find_factories(read_factory_file(path), within_km=70.0)
+
+
+def test_factory_csv_is_read_and_competitors_far_ones_dropped(tmp_path):
+    factories = _factories(tmp_path)
+    names = [c.name for c in factories]
     assert "안성판넬" not in names          # 판넬 업체 = 경쟁사
-    assert "정밀부품(주)" not in names      # 부품만
     assert "먼기계(주)" not in names        # 거리 밖
-    assert makers[0].sector == "포장·충진기계" and makers[1].sector == "컨베이어·물류설비"
-    assert makers[2].sector == "환경·수처리설비"
+    assert names.count("청정식품") == 1     # 같은 공장 두 줄은 한 번
+    assert names[0] in ("(주)한결포장기계", "정밀부품(주)")     # 가까운 순 (둘 다 안성)
+    by = {c.name: c for c in factories}
+    assert by["(주)한결포장기계"].kind == "maker" and by["(주)한결포장기계"].sector == "포장·충진기계"
+    assert by["정밀부품(주)"].sector == "자동차·운송부품"        # 공장으로는 남긴다
+    assert by["청정식품"].sector == "식품·음료" and by["청정식품"].sector_weight >= 0.8
+    assert by["청정식품"].area_m2 == 4500 and by["(주)한결포장기계"].employees == 45
+    assert by["(주)한결포장기계"].phone == "031-000-0001"
+
+
+def test_sizable_by_employees_area_or_dart(tmp_path):
+    from prime_contractor.industry import normalize_name
+    from prime_contractor.makers import is_sizable, mark_dart_registered, size_text
+    by = {c.name: c for c in _factories(tmp_path)}
+    assert is_sizable(by["(주)한결포장기계"])      # 45명
+    assert is_sizable(by["청정식품"])              # 4,500㎡
+    assert not is_sizable(by["작은식품"]) and not is_sizable(by["대명컨베이어"])
+    hits = mark_dart_registered(list(by.values()), {normalize_name("대명컨베이어"): "00123"})
+    assert hits == 1 and is_sizable(by["대명컨베이어"])
+    assert "외감" in size_text(by["대명컨베이어"]) and "500㎡" in size_text(by["대명컨베이어"])
 
 
 def test_factory_file_without_headers_is_a_clear_error(tmp_path):
@@ -2529,26 +2548,26 @@ def test_factory_file_without_headers_is_a_clear_error(tmp_path):
 
 
 def test_factory_xlsx_is_read_too(tmp_path):
-    from prime_contractor.makers import find_makers, read_factory_file
+    from prime_contractor.makers import find_factories, read_factory_file
     from prime_contractor.xlsx_writer import TEXT, Column, Sheet, write_workbook
     path = tmp_path / "공장.xlsx"
-    write_workbook(path, [Sheet("등록공장", [Column(h, 10, TEXT) for h in ("회사명", "생산품", "공장주소")],
-                                rows=[["로봇자동화(주)", "공장자동화 로봇", "경기도 용인시 처인구"]])])
-    makers = find_makers(read_factory_file(path), within_km=70.0)
-    assert [(c.name, c.sector) for c in makers] == [("로봇자동화(주)", "자동화·로봇")]
+    write_workbook(path, [Sheet("등록공장", [Column(h, 10, TEXT) for h in ("회사명", "생산품", "공장주소", "종업원수")],
+                                rows=[["로봇자동화(주)", "공장자동화 로봇", "경기도 용인시 처인구", 52]])])
+    found = find_factories(read_factory_file(path), within_km=70.0)
+    assert [(c.name, c.sector, c.employees) for c in found] == [("로봇자동화(주)", "자동화·로봇", 52)]
 
 
-def test_makers_excel_and_leads_keep_the_phone(tmp_path, monkeypatch):
+def test_factories_excel_and_leads_keep_the_phone(tmp_path):
     from prime_contractor.leads import LeadBook
-    from prime_contractor.makers import find_makers, read_factory_file
-    from prime_contractor.report import write_makers_xlsx
+    from prime_contractor.report import write_factories_xlsx
     from prime_contractor.xlsx import read_sheets
-    path = tmp_path / "f.csv"
-    path.write_text(_FACTORY_CSV, encoding="utf-8")
-    makers = find_makers(read_factory_file(path), within_km=70.0)
-    sheets = read_sheets(write_makers_xlsx(makers, tmp_path / "m.xlsx", within_km=70.0))
-    assert list(sheets) == ["기계 제작사", "읽는 법"]
-    assert sheets["기계 제작사"][(2, "H")] == "031-000-0001"
+    factories = _factories(tmp_path, encoding="utf-8")
+    sheets = read_sheets(write_factories_xlsx(factories, tmp_path / "m.xlsx", within_km=70.0,
+                                              rule="규모 있는 곳만"))
+    assert list(sheets) == ["공장", "읽는 법"]
+    main = sheets["공장"]
+    assert main[(1, "E")] == "규모" and main[(1, "J")] == "전화"
+    assert any("규모 있는 곳만" in str(v) for v in sheets["읽는 법"].values())
     book = LeadBook(path=tmp_path / "leads.json")
-    lead, created = book.add_candidate(makers[0])
-    assert created and lead.phone == "031-000-0001"
+    lead, created = book.add_candidate(next(c for c in factories if c.phone))
+    assert created and lead.phone.startswith("031-")

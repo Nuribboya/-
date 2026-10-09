@@ -249,7 +249,7 @@ class App:
         self.factory_button = ttk.Button(buttons, text="근처 공장 목록", state="disabled",
                                          command=self.on_show_factories)
         self.factory_button.pack(side=LEFT, padx=6)
-        _Button(buttons, text="기계 제작사 찾기", command=self.on_find_makers,
+        _Button(buttons, text="공장 찾기", command=self.on_find_factories,
                 bootstyle="primary-outline").pack(side=LEFT)
         self.factory_file = StringVar(value=saved.get("factory_file", ""))
         self.status = ttk.Label(buttons, text="준비됨")
@@ -1112,10 +1112,10 @@ class App:
         ttk.Label(row, foreground="#666", text="엑셀로 저장하면 '근처 공장' 시트에도 들어갑니다.").pack(
             side=LEFT, padx=10)
 
-    # --- 기계·장비 제작사 ---------------------------------------------------------
+    # --- 공장 찾기 -----------------------------------------------------------------
 
-    def on_find_makers(self) -> None:
-        """등록공장 파일에서 근처 기계·장비 제작사를 고른다 — 제어반이 원래 계속 필요한 곳."""
+    def on_find_factories(self) -> None:
+        """등록공장 파일에서 근처 공장을 고른다 — 판넬을 실제로 쓰는 곳."""
         start = Path(self.factory_file.get()).parent if self.factory_file.get() else None
         path = filedialog.askopenfilename(
             title="전국 등록공장 현황 파일을 고르세요 (공공데이터포털·팩토리온)",
@@ -1124,42 +1124,63 @@ class App:
         if not path:
             return
         self.factory_file.set(path)
-        within = build_config(self.current_options()).within_km
+        cfg = build_config(self.current_options())
         self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
-        threading.Thread(target=self._load_makers, args=(path, within), daemon=True).start()
+        threading.Thread(target=self._load_makers, args=(path, cfg), daemon=True).start()
 
-    def _load_makers(self, path: str, within) -> None:
-        from prime_contractor.makers import find_makers, read_factory_file
+    def _load_makers(self, path: str, cfg) -> None:
+        from prime_contractor.makers import (
+            find_factories, has_size_columns, mark_dart_registered, read_factory_file)
         try:
             records = read_factory_file(path)
-            makers = find_makers(records, within_km=within)
+            factories = find_factories(records, within_km=cfg.within_km)
         except (OSError, ValueError) as exc:
             self.root.after(0, messagebox.showerror, "공장 목록을 읽지 못했습니다", str(exc))
             return
-        self.say(f"공장 {len(records):,}곳 중 근처 기계·장비 제작사 {len(makers)}곳을 골랐습니다.")
-        self.root.after(0, self._show_makers, makers, within)
+        sized = has_size_columns(records)
+        if cfg.dart_api_key:
+            # 규모 칸이 없는 파일이 많아, 금감원(DART)에 등록된 회사인지로 규모를 가늠한다.
+            from prime_contractor.sources.dart import DartClient
+            try:
+                hits = mark_dart_registered(factories, DartClient(cfg.dart_api_key).corp_index)
+                self.say(f"그중 {hits}곳은 금감원(DART)에 등록된 회사(외부감사 받는 규모)입니다.")
+            except Exception as exc:              # 규모 표시만 빠지고 목록은 그대로 보여 준다
+                self.say(f"DART 확인 실패(목록은 그대로): {redact_secrets(exc)}")
+        elif not sized:
+            self.say("이 파일엔 종업원·면적 칸이 없습니다. '기업정보 인증키'를 넣으면 금감원 "
+                     "등록 여부로 규모를 가늠합니다.")
+        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외).")
+        can_size = sized or bool(cfg.dart_api_key)
+        self.root.after(0, self._show_makers, factories, cfg.within_km, can_size)
 
-    def _show_makers(self, makers, within) -> None:
+    def _show_makers(self, factories, within, can_size: bool = True) -> None:
         from collections import Counter
         from tkinter import Toplevel
-        if not makers:
-            messagebox.showinfo("기계 제작사", "거리 안에서 기계·장비 제작사를 찾지 못했습니다.\n"
-                                            "'안성에서 얼마나'를 넓혀 보세요.")
+        from prime_contractor.makers import (
+            MIN_AREA_M2, MIN_EMPLOYEES, is_sizable, size_text, steady_text)
+        if not factories:
+            messagebox.showinfo("공장 찾기", "거리 안에서 공장을 찾지 못했습니다.\n"
+                                          "'안성에서 얼마나'를 넓혀 보세요.")
             return
-        self.makers = makers
+        ordered = sorted(factories, key=lambda c: (-c.sector_weight, c.distance_km))
         win = Toplevel(self.root)
-        win.title(f"기계·장비 제작사 — {len(makers)}곳")
-        win.geometry("1040x600")
+        win.geometry("1080x620")
         body = ttk.Frame(win, padding=10)
         body.pack(fill=BOTH, expand=True)
-        fields = Counter(c.sector for c in makers).most_common()
-        ttk.Label(body, justify=LEFT, wraplength=1000, text=(
-            "기계 하나마다 제어반이 들어가고 같은 사양을 반복해서 맡기는 곳들입니다. 가까운 순.\n"
-            "분야: " + ", ".join(f"{f} {n}" for f, n in fields) + "\n"
-            "연락할 땐 '기계에 들어가는 제어반을 밖에 맡기시는지'부터 물어보세요 — 설계팀·"
-            "생산팀·대표가 정하는 경우가 많습니다.")).pack(fill=X, pady=(0, 8))
-        cols = (("#", 40), ("회사", 190), ("분야", 120), ("생산품", 260), ("지역", 60),
-                ("거리", 55), ("대표자", 70), ("전화", 110))
+        info = ttk.Label(body, justify=LEFT, wraplength=1040)
+        info.pack(fill=X, pady=(0, 6))
+        opts = ttk.Frame(body)
+        opts.pack(fill=X, pady=(0, 6))
+        only_big = BooleanVar(value=can_size)
+        only_machines = BooleanVar(value=False)
+        ttk.Checkbutton(opts, variable=only_big,
+                        text=f"규모 있는 곳만 (직원 {MIN_EMPLOYEES}명+ · 면적 {MIN_AREA_M2:,}㎡+ · "
+                             "금감원 등록 회사)",
+                        state="normal" if can_size else "disabled").pack(side=LEFT)
+        ttk.Checkbutton(opts, variable=only_machines,
+                        text="기계·장비 만드는 공장만 (제어반 반복 수요)").pack(side=LEFT, padx=16)
+        cols = (("#", 40), ("회사", 180), ("분야", 120), ("경기", 60), ("규모", 120),
+                ("생산품", 220), ("지역", 55), ("거리", 50), ("전화", 105))
         frame = ttk.Frame(body)
         frame.pack(fill=BOTH, expand=True)
         tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
@@ -1170,10 +1191,39 @@ class App:
         tree.configure(yscrollcommand=bar.set)
         tree.pack(side=LEFT, fill=BOTH, expand=True)
         bar.pack(side=RIGHT, fill=Y)
-        for i, c in enumerate(makers, 1):
-            tree.insert("", END, iid=str(i), values=(
-                i, c.name, c.sector, c.products, c.region, f"{c.distance_km:.0f}km",
-                c.ceo or "-", c.phone or "-"))
+        shown: list = []
+
+        def rule_text() -> str:
+            bits = []
+            if only_big.get():
+                bits.append("규모 있는 곳만")
+            if only_machines.get():
+                bits.append("기계·장비 만드는 공장만")
+            return ", ".join(bits)
+
+        def refresh(*_a) -> None:
+            shown[:] = [c for c in ordered
+                        if (not only_big.get() or is_sizable(c))
+                        and (not only_machines.get() or c.kind == "maker")]
+            tree.delete(*tree.get_children())
+            for i, c in enumerate(shown, 1):
+                tree.insert("", END, iid=str(i), values=(
+                    i, c.name, c.sector, steady_text(c.sector_weight), size_text(c),
+                    c.products, c.region, f"{c.distance_km:.0f}km", c.phone or "-"))
+            fields = Counter(c.sector for c in shown).most_common(6)
+            win.title(f"공장 찾기 — {len(shown)}곳")
+            info.configure(text=(
+                f"거리 안의 공장 {len(ordered)}곳 중 {len(shown)}곳"
+                + (f" ({rule_text()})" if rule_text() else "") + ". 경기 덜 타는 분야 먼저, 가까운 순.\n"
+                "많은 분야: " + (", ".join(f"{f} {n}" for f, n in fields) or "-") + "\n"
+                "연락은 본사 구매팀보다 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 "
+                "'판넬 교체·라인 개조 때 견적 낼 수 있게 해 달라'고 하세요."
+                + ("" if can_size else "\n※ 규모를 가늠할 자료가 없어 전부 보여 줍니다 — "
+                                       "'기업정보 인증키'를 넣고 다시 찾으면 규모로 거를 수 있습니다.")))
+
+        only_big.trace_add("write", refresh)
+        only_machines.trace_add("write", refresh)
+        refresh()
 
         def add_picked() -> None:
             picked = tree.selection()
@@ -1181,32 +1231,33 @@ class App:
                 messagebox.showinfo("회사를 고르세요", "목록에서 회사를 클릭해 고르세요 (Ctrl+클릭으로 여러 곳).",
                                     parent=win)
                 return
-            added = sum(self.lead_book.add_candidate(makers[int(i) - 1])[1] for i in picked)
+            added = sum(self.lead_book.add_candidate(shown[int(i) - 1])[1] for i in picked)
             self._save_leads()
             messagebox.showinfo("넣었습니다", f"영업 목록에 {added}곳 넣었습니다.", parent=win)
 
         def save() -> None:
             from datetime import date
-            from prime_contractor.report import write_makers_xlsx
+            from prime_contractor.report import write_factories_xlsx
             path = filedialog.asksaveasfilename(
                 parent=win, defaultextension=".xlsx",
-                initialfile=f"기계제작사_{date.today():%Y%m%d}.xlsx", filetypes=[("엑셀", "*.xlsx")])
+                initialfile=f"공장목록_{date.today():%Y%m%d}.xlsx", filetypes=[("엑셀", "*.xlsx")])
             if not path:
                 return
             try:
-                write_makers_xlsx(makers, path, within_km=within)
+                write_factories_xlsx(shown, path, within_km=within, rule=rule_text())
             except OSError as exc:
                 messagebox.showerror("저장하지 못했습니다", f"{exc}\n\n같은 이름의 파일이 엑셀에 "
                                      "열려 있으면 닫고 다시 해주세요.", parent=win)
                 return
-            if messagebox.askyesno("저장 완료", f"{path}\n\n폴더를 열까요?", parent=win):
+            if messagebox.askyesno("저장 완료", f"{path}\n\n지금 보이는 {len(shown)}곳을 "
+                                   "저장했습니다. 폴더를 열까요?", parent=win):
                 _open_folder(Path(path).parent)
 
         row = ttk.Frame(body)
         row.pack(fill=X, pady=(8, 0))
         _Button(row, text="고른 회사를 영업 목록에 넣기", command=add_picked,
                 bootstyle="info-outline").pack(side=LEFT)
-        _Button(row, text="엑셀로 저장", command=save,
+        _Button(row, text="엑셀로 저장 (보이는 것만)", command=save,
                 bootstyle="success-outline").pack(side=LEFT, padx=6)
 
     def _ask_profile(self, count: int) -> bool:
