@@ -40,8 +40,10 @@ _OP_NAMES = ("getFctryRegistInfoService", "getFctryRegistInfo", "getFctryInfoSer
              "getFctryPrdctService", "getFctryPrdlstService", "getFctryRegistInfoList",
              "getFctryRegistList", "getFctryList", "getFctryInfoList", "getFctryPrdctnList",
              "getFctryPrdctnInfoList")
-#: '서비스/오퍼레이션' 후보. 없는 주소는 하루 한도를 쓰지 않는다.
-OPERATIONS = tuple(f"{svc}/{op}" for svc in SERVICES for op in _OP_NAMES) + SERVICES
+#: '서비스/오퍼레이션' 후보. 맨 앞이 포털 활용신청 화면에 적힌 진짜 주소(회사명으로 조회,
+#: 2026-10 확인). 나머지는 이름이 또 바뀔 때를 대비한 예비 — 없는 주소는 하루 한도를 쓰지 않는다.
+OPERATIONS = (("fctryRegistInfo/getFctryPrdctnService_v2", "fctryRegistInfo/getFctryPrdctnService")
+              + tuple(f"{svc}/{op}" for svc in SERVICES for op in _OP_NAMES) + SERVICES)
 PROBE_NAME = "삼성전자"
 CACHE_DAYS = 60
 PAGE_SIZE = 100
