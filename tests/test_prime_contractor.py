@@ -2737,11 +2737,11 @@ class _ApiSession:
         self.by_name, self.fail, self.calls = by_name, fail, []
 
     def get(self, url, params=None, timeout=None):
-        op = url.rsplit("/", 1)[1]
+        op = url.split("/B550624/", 1)[1]
         self.calls.append((op, params["cmpnyNm"]))
         if self.fail:
             return _ApiResp(200, text=self.fail)
-        if op == "getFctryPrdctnService":
+        if op == __import__("prime_contractor.sources.factory_api", fromlist=["x"]).OPERATIONS[0]:
             return _ApiResp(404, text="API not found")
         return _ApiResp(200, _api_payload(self.by_name.get(params["cmpnyNm"], [])))
 
@@ -2753,7 +2753,8 @@ def test_factory_api_finds_operation_reads_fields_and_caches(tmp_path):
          "rprsntvNm": "신동원", "telNo": "031-000-0000", "emplyCnt": "512"}]})
     api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=session)
     rows = api.factories_of("농심")
-    assert api.operation == "getFctryRegistPrdctnService"
+    from prime_contractor.sources.factory_api import OPERATIONS
+    assert api.operation == OPERATIONS[1]                  # 없는 주소는 건너뛴다
     assert rows == [{"name": "(주)농심", "address": "경기도 안성시 공도읍", "products": "라면",
                      "ceo": "신동원", "phone": "031-000-0000", "employees": "512"}]
     api.save_cache()
@@ -2858,7 +2859,8 @@ def test_factory_api_reads_xml_and_reports_result_codes(tmp_path):
 
     class XmlSession(_ApiSession):
         def get(self, url, params=None, timeout=None):
-            if url.endswith("getFctryPrdctnService"):
+            if url.endswith(__import__("prime_contractor.sources.factory_api",
+                                       fromlist=["x"]).OPERATIONS[0]):
                 return _ApiResp(200, text="<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR"
                                           "</errMsg><returnAuthMsg>NO_OPENAPI_SERVICE_ERROR</returnAuthMsg>"
                                           "</cmmMsgHeader></OpenAPI_ServiceResponse>")
@@ -2871,7 +2873,8 @@ def test_factory_api_reads_xml_and_reports_result_codes(tmp_path):
                 "<totalCount>1</totalCount></body></response>"))
 
     api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=XmlSession({}))
-    assert api.check() == 1 and api.operation == "getFctryRegistPrdctnService"
+    from prime_contractor.sources.factory_api import OPERATIONS
+    assert api.check() == 1 and api.operation == OPERATIONS[1]
     assert api.factories_of("삼성전자")[0]["address"] == "충청남도 아산시 배방읍"
 
     bad = XmlSession({}, fail='{"response": {"header": {"resultCode": "30", "resultMsg": "KEY ERROR"}}}')

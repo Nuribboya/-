@@ -28,15 +28,20 @@ import requests
 
 log = logging.getLogger(__name__)
 
-BASE = "http://apis.data.go.kr/B550624/fctryRegistPrdctnInfo"
+BASE = "https://apis.data.go.kr/B550624"
+#: 포털 활용신청 화면의 서비스 주소. 지금은 fctryRegistInfo(공장등록정보), 예전 이름은
+#: fctryRegistPrdctnInfo. 오퍼레이션 이름은 문서로 확인하지 못해 차례로 시도한다.
+SERVICES = ("fctryRegistInfo", "fctryRegistPrdctnInfo")
 #: 문서로 확인하지 못해 차례로 시도한다. 형제 서비스(필지정보)는 getFctryLndpclService.
-OPERATIONS = ("getFctryPrdctnService", "getFctryRegistPrdctnService",
-              "getFctryRegistPrdctnInfo", "getFctryPrdctnInfo", "getFctryPrdctnInfoService",
-              "getFctryRegistPrdctnInfoService", "getFctryPrdctService", "getFctryPrdlstService",
-              "getFctryPrductService", "getFctryProductService", "getFctryInfoService",
-              "getFctryRegistInfoService", "getFctryIndutyPrdctnService", "getFctryService",
-              "getFctryPrdctnList", "getFctryPrdctnInfoList", "getFctryRegistPrdctnList",
-              "getPrdctnInfoService", "getRegistPrdctnInfo", "fctryRegistPrdctnInfo")
+_OP_NAMES = ("getFctryRegistInfoService", "getFctryRegistInfo", "getFctryInfoService",
+             "getFctryInfo", "getFctryRegistService", "getFctryService",
+             "getFctryPrdctnService", "getFctryRegistPrdctnService", "getFctryRegistPrdctnInfo",
+             "getFctryPrdctnInfo", "getFctryPrdctnInfoService", "getFctryRegistPrdctnInfoService",
+             "getFctryPrdctService", "getFctryPrdlstService", "getFctryRegistInfoList",
+             "getFctryRegistList", "getFctryList", "getFctryInfoList", "getFctryPrdctnList",
+             "getFctryPrdctnInfoList")
+#: '서비스/오퍼레이션' 후보. 없는 주소는 하루 한도를 쓰지 않는다.
+OPERATIONS = tuple(f"{svc}/{op}" for svc in SERVICES for op in _OP_NAMES) + SERVICES
 PROBE_NAME = "삼성전자"
 CACHE_DAYS = 60
 PAGE_SIZE = 100
@@ -116,7 +121,7 @@ class FactoryApi:
             raise QuotaExceeded("공공데이터포털 하루 호출 한도를 넘었습니다 (개발계정은 하루 1,000번).")
         if any(code in text for code in _NOT_REGISTERED):
             raise FactoryApiError(
-                "공공데이터포털에서 '한국산업단지공단_공장등록생산정보조회서비스'를 활용신청해야 "
+                "공공데이터포털에서 '한국산업단지공단 공장등록정보(생산정보) 조회서비스'를 활용신청해야 "
                 "합니다(나라장터 때 쓰던 같은 계정·같은 키면 됩니다). 신청 직후면 1~2시간 뒤에 "
                 f"다시 해 보세요. 받은 답: {_snippet(text)}")
         if resp.status_code in (404, 500) or any(w in text for w in _WRONG_OPERATION):
