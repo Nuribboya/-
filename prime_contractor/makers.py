@@ -69,6 +69,17 @@ OTHER_STEADY = 0.6
 #: 판넬을 만드는 곳 — 고객이 아니라 경쟁사.
 COMPETITOR_WORDS = ("배전반", "분전반", "제어반", "수배전", "MCC", "판넬", "패널",
                     "전기제어장치", "전동기제어", "계장반", "큐비클")
+#: 손일이 많아 판넬 물량이 거의 없는 업종 — 목록에서 뺀다. 기계를 만드는 곳('가구 가공기계')은
+#: 먼저 기계로 잡히므로 빠지지 않는다.
+LOW_DEMAND_WORDS = ("의류", "의복", "봉제", "셔츠", "니트", "속옷", "양말", "신발", "구두", "운동화",
+                    "가방", "핸드백", "지갑", "가구", "목재", "원목", "침대", "소파", "귀금속",
+                    "장신구", "액세서리", "악세사리", "주얼리", "안경", "문구", "필기구", "완구",
+                    "장난감", "인형", "악기", "피아노", "단순조립", "단순 조립", "임가공",
+                    "포장대행", "포장 대행")
+#: 같은 업종의 한국표준산업분류(DART 업종코드 앞자리) — 조회 전에 상장사를 거르는 데 쓴다.
+#: 14 의복, 15 가죽·가방·신발, 16 목재, 32 가구, 331 귀금속·장신구, 332 악기, 333 운동·완구,
+#: 3399 문구 등, 27402 안경.
+LOW_DEMAND_CODES = ("14", "15", "16", "32", "331", "332", "333", "3399", "27402")
 #: 기계 제작사만 볼 때, 이 말만 있고 '기계를 만든다'는 말이 없으면 부품·소재 업체로 본다.
 PART_WORDS = ("부품", "부분품", "소재", "금형", "베어링", "볼트", "너트", "스프링", "가스켓")
 
@@ -97,6 +108,8 @@ def classify(products: str, industry: str = "") -> tuple[str, bool, float]:
     for field, words in MACHINE_FIELDS:
         if any(w in text for w in words):
             return field, True, MACHINE_STEADY
+    if any(w in text for w in LOW_DEMAND_WORDS):
+        return "", False, 0.0
     for field, words, steady in PLANT_FIELDS:
         if any(w in text for w in words):
             return field, False, steady
@@ -298,7 +311,9 @@ _FOREIGN = re.compile(r"(LTD|INC|LLC|GMBH|PTE|CORP|CO\.|S\.A|B\.V|有限|유한�
 
 
 def is_manufacturer(info: dict) -> bool:
-    return str(info.get("induty_code", "")).startswith(MANUFACTURING)
+    """제조업이고, 손일이 많은 업종(의복·신발·가구·완구 등)은 아닌 곳."""
+    code = str(info.get("induty_code", ""))
+    return code.startswith(MANUFACTURING) and not code.startswith(LOW_DEMAND_CODES)
 
 
 #: 지주회사(64992)·회사 본부(7151) — 공장은 없어도 계열 공장들을 거느린다.
@@ -365,7 +380,8 @@ def affiliate_names(listed_companies, fetch, min_ratio: float = 0.0) -> list[str
             ratio = row.get("ratio", 0.0)
             if (is_affiliate_stake(ratio, row.get("purpose", "")) and ratio >= min_ratio
                     and re.search(r"[가-힣]", raw) and not _FOREIGN.search(raw)
-                    and not (min_ratio and _NOT_FACTORY.search(raw))):
+                    and not (min_ratio and (_NOT_FACTORY.search(raw)
+                                            or any(w in raw for w in LOW_DEMAND_WORDS)))):
                 names.setdefault(company_key(raw), raw)
     return list(names.values())
 

@@ -2915,3 +2915,14 @@ def test_drop_far_companies_keeps_unknown():
     where = {"대구회사": {"adres": "대구광역시 달서구"}, "천안회사": {"adres": "충청남도 천안시"}}
     kept, dropped = drop_far_companies(["대구회사", "천안회사", "모르는회사"], where.get, workers=2)
     assert kept == ["천안회사", "모르는회사"] and dropped == 1
+
+
+def test_low_demand_trades_are_left_out():
+    from prime_contractor.makers import classify, is_manufacturer
+    for products in ("여성의류", "운동화, 가방", "가구(침대)", "귀금속 장신구", "안경테", "완구", "피아노"):
+        assert classify(products)[0] == "", products
+    assert classify("가구 가공기계")[1] is True                # 가구를 만드는 기계는 고객
+    assert classify("라면")[0] == "식품·음료"
+    assert not is_manufacturer({"induty_code": "14111"})       # 의복
+    assert not is_manufacturer({"induty_code": "32021"})       # 가구
+    assert is_manufacturer({"induty_code": "10301"})
