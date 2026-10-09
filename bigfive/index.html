@@ -1,0 +1,476 @@
+<title>빅파이브 성격 검사</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: MBTI·에니어그램 검사와 같은 단일 컬럼 설문지. 결과는 5요인 막대 프로필 → 요인별 세부 6개 → 다른 검사와 교차 확인 */
+:root {
+  --bg: #eef0f4;
+  --paper: #ffffff;
+  --ink: #18202f;
+  --muted: #5d6679;
+  --line: #d8dce5;
+  --o: #2f4fd8;   /* 개방성 */
+  --c: #1f8a5b;   /* 성실성 */
+  --e: #d9771f;   /* 외향성 */
+  --a: #b5367a;   /* 우호성 */
+  --n: #6b4fbf;   /* 신경성 */
+  --good: #1f8a5b;
+  --warn: #b5671a;
+  --display: "Black Han Sans", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151e; --paper: #1a2030; --ink: #e8ebf2; --muted: #9aa3b6; --line: #2d3547;
+    --o: #7f95ff; --c: #4fc28d; --e: #f0a35e; --a: #e77ab4; --n: #a98bf0; --good: #4fc28d; --warn: #e7a35a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151e; --paper: #1a2030; --ink: #e8ebf2; --muted: #9aa3b6; --line: #2d3547;
+  --o: #7f95ff; --c: #4fc28d; --e: #f0a35e; --a: #e77ab4; --n: #a98bf0; --good: #4fc28d; --warn: #e7a35a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 760px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button, select { font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, select:focus-visible, .lk input:focus-visible + span { outline: 3px solid var(--o); outline-offset: 2px; }
+
+.mast { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 24px; }
+.mast h1 { font-family: var(--display); font-weight: 400; font-size: 26px; }
+.mast .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 22px; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.intro h2 { font-size: 22px; margin-bottom: 8px; }
+.intro ul { margin: 0; padding-left: 20px; color: var(--muted); }
+.intro li + li { margin-top: 4px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { border: 0; border-radius: 8px; padding: 12px 20px; font-weight: 600; background: var(--ink); color: var(--paper); }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+
+.prog { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 10px; margin-bottom: 8px; }
+.prog-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--ink); width: 0; transition: width .3s; }
+
+.q { padding: 20px 0; border-bottom: 1px solid var(--line); }
+.q:last-of-type { border-bottom: 0; }
+.q-text { font-size: 16px; font-weight: 500; margin-bottom: 14px; }
+.q-text .n { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 8px; }
+.q.missing .q-text { color: var(--warn); }
+.scale { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+.scale .end { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.lk { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.lk label { flex: 0 0 auto; display: grid; place-items: center; cursor: pointer; }
+.lk input { position: absolute; opacity: 0; pointer-events: none; }
+.lk span { display: block; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--ink) 30%, var(--line)); transition: background .15s, border-color .15s, transform .1s; }
+.lk label:hover span { transform: scale(1.08); }
+.lk input:checked + span { background: var(--ink); border-color: var(--ink); }
+.lk label:nth-child(1) span, .lk label:nth-child(5) span { width: 38px; height: 38px; }
+.lk label:nth-child(2) span, .lk label:nth-child(4) span { width: 30px; height: 30px; }
+.lk label:nth-child(3) span { width: 22px; height: 22px; }
+@media (max-width: 480px) {
+  .scale { grid-template-columns: 1fr 1fr; }
+  .scale .lk { grid-column: 1 / -1; grid-row: 1; }
+  .scale .end.r { text-align: right; }
+}
+.nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
+.hint { font-size: 13px; color: var(--warn); min-height: 1.4em; margin-top: 8px; text-align: right; }
+
+/* 결과 */
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+.profile { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.col { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.col .well { position: relative; width: 100%; max-width: 72px; height: 180px; background: var(--bg); border-radius: 6px; overflow: hidden; }
+.col .fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 6px 6px 0 0; }
+.col .ref { position: absolute; left: -2px; right: -2px; height: 0; border-top: 2px dashed var(--ink); opacity: .55; }
+.col .letter { font-family: var(--display); font-size: 34px; line-height: 1; }
+.col .nm { font-size: 12px; color: var(--muted); text-align: center; }
+.col .val { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+.col .lvl { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); white-space: nowrap; }
+.col .lvl.hi, .col .lvl.lo { color: var(--ink); border-color: var(--ink); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 14px; flex-wrap: wrap; align-items: center; }
+.legend .dash { display: inline-block; width: 18px; border-top: 2px dashed var(--ink); opacity: .55; margin-right: 6px; vertical-align: middle; }
+
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.sec-h h3 { font-size: 17px; display: flex; gap: 10px; align-items: baseline; }
+.sec-h h3 .big { font-family: var(--display); font-weight: 400; font-size: 26px; }
+.sec-h small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dom-desc { margin-bottom: 14px; max-width: 64ch; }
+.facets { display: flex; flex-direction: column; gap: 9px; }
+.f { display: grid; grid-template-columns: 112px 1fr 34px; gap: 10px; align-items: center; }
+.f .nm { font-size: 13px; }
+.f .nm small { display: block; font-size: 11px; color: var(--muted); line-height: 1.35; }
+.f .track { height: 12px; background: var(--bg); border-radius: 6px; position: relative; overflow: hidden; }
+.f .track i { position: absolute; inset: 0 auto 0 0; border-radius: 6px; }
+.f .v { font-family: var(--mono); font-size: 13px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .f { grid-template-columns: 96px 1fr 30px; } }
+
+.cmp { display: flex; flex-direction: column; gap: 8px; }
+.cmp > div { display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: center; border-bottom: 1px solid var(--line); padding-block: 6px; }
+.cmp > div:last-child { border-bottom: 0; }
+.cmp b { font-family: var(--mono); font-weight: 500; }
+.cmp span { font-size: 13px; color: var(--muted); min-width: 0; }
+.tag { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid currentColor; white-space: nowrap; }
+.tag.ok { color: var(--good); }
+.tag.no { color: var(--warn); }
+.tag.mid { color: var(--muted); }
+.pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.pick select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.est { font-family: var(--display); font-size: 40px; line-height: 1; letter-spacing: .04em; }
+.note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+.note strong { color: var(--ink); }
+.disclaimer { font-size: 12px; color: var(--muted); }
+.toast { font-size: 13px; color: var(--good); min-height: 1.4em; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <h1>빅파이브 성격 검사</h1>
+    <span class="meta">120문항 · 5요인 30세부요인</span>
+  </header>
+  <main id="app"></main>
+</div>
+
+<script>
+// ---------- 문항 (IPIP-NEO 120 구조를 따른 한국어 문항, s = +1 정방향 / -1 역방향) ----------
+// ref: 일반 성인 응답 평균을 0~100 척도로 옮긴 대략적인 기준선. 높음/낮음 판단에 사용
+const DOMAINS = [
+  { k: "O", name: "개방성", en: "Openness", ref: 62,
+    hi: "새로운 생각, 경험, 감정, 예술에 열려 있습니다. 호기심이 많고 추상적인 생각을 즐기며 관습에 얽매이지 않습니다.",
+    lo: "익숙하고 검증된 것을 선호합니다. 현실적이고 구체적인 것을 중시하며 전통과 일관성을 편하게 느낍니다.",
+    mid: "새로운 것과 익숙한 것 사이에서 상황에 따라 균형을 잡습니다.",
+    facets: [
+      { name: "상상력", d: "공상과 내면 세계", items: [["상상력이 생생하다.", 1], ["엉뚱한 공상에 빠지는 걸 즐긴다.", 1], ["백일몽 꾸는 걸 좋아한다.", 1], ["생각에 잠겨 시간 가는 줄 모를 때가 많다.", 1]] },
+      { name: "예술적 관심", d: "아름다움과 예술", items: [["예술은 삶에서 중요하다고 믿는다.", 1], ["남들이 그냥 지나치는 것에서 아름다움을 발견한다.", 1], ["시는 별로 좋아하지 않는다.", -1], ["미술관이나 전시회에 가는 걸 즐기지 않는다.", -1]] },
+      { name: "정서성", d: "자기 감정 인식", items: [["감정을 강렬하게 느낀다.", 1], ["다른 사람의 감정이 나에게도 느껴진다.", 1], ["내 감정 반응을 잘 알아차리지 못한다.", -1], ["감정적으로 구는 사람이 잘 이해되지 않는다.", -1]] },
+      { name: "모험성", d: "새로운 경험 시도", items: [["반복되는 일상보다 다양한 변화가 좋다.", 1], ["내가 아는 것만 고수하는 편이다.", -1], ["변화를 싫어한다.", -1], ["관습적인 방식이 익숙하고 편하다.", -1]] },
+      { name: "지성", d: "아이디어와 추상적 사고", items: [["어렵고 도전적인 글을 읽는 걸 좋아한다.", 1], ["철학적인 토론은 피하는 편이다.", -1], ["추상적인 개념을 이해하기 어렵다.", -1], ["이론적인 이야기에는 관심이 없다.", -1]] },
+      { name: "가치 개방성", d: "권위와 관습에 대한 태도", items: [["절대적인 옳고 그름은 없다고 생각한다.", 1], ["당연하게 여겨지는 사회 규범에도 의문을 던져볼 수 있다고 생각한다.", 1], ["전통과 관습은 함부로 바꾸면 안 된다고 생각한다.", -1], ["범죄는 무조건 엄하게 다스려야 한다고 생각한다.", -1]] },
+    ] },
+  { k: "C", name: "성실성", en: "Conscientiousness", ref: 65,
+    hi: "계획적이고 체계적이며 목표를 끝까지 밀고 갑니다. 약속과 규칙을 잘 지키고 충동을 조절합니다.",
+    lo: "즉흥적이고 유연합니다. 계획보다 그때그때의 흐름을 따르며, 마감이나 정리에 덜 얽매입니다.",
+    mid: "필요할 때는 계획적으로, 아닐 때는 느슨하게 움직입니다.",
+    facets: [
+      { name: "자기효능감", d: "일을 해낼 수 있다는 믿음", items: [["맡은 일을 성공적으로 해낸다.", 1], ["내가 하는 일에서 뛰어난 편이다.", 1], ["일을 매끄럽게 처리한다.", 1], ["일을 어떻게 끝내야 하는지 안다.", 1]] },
+      { name: "정돈성", d: "정리와 질서", items: [["정리 정돈하는 걸 좋아한다.", 1], ["물건을 제자리에 두는 걸 자주 잊는다.", -1], ["방을 어질러 놓는 편이다.", -1], ["내 물건을 여기저기 늘어놓는다.", -1]] },
+      { name: "책임감", d: "약속과 규칙 준수", items: [["약속을 지킨다.", 1], ["사실대로 말한다.", 1], ["규칙을 어길 때가 있다.", -1], ["약속을 어길 때가 있다.", -1]] },
+      { name: "성취 추구", d: "목표를 향한 노력", items: [["기대되는 것보다 더 많이 해낸다.", 1], ["열심히 일한다.", 1], ["일에 시간과 노력을 별로 들이지 않는다.", -1], ["딱 넘어갈 만큼만 일한다.", -1]] },
+      { name: "자기 통제", d: "미루지 않고 실행", items: [["항상 준비되어 있다.", 1], ["세운 계획을 실제로 실행한다.", 1], ["시간을 낭비할 때가 많다.", -1], ["일을 시작하는 게 어렵다.", -1]] },
+      { name: "신중함", d: "행동 전에 생각", items: [["생각 없이 일에 뛰어든다.", -1], ["성급하게 결정한다.", -1], ["서둘러 일을 벌인다.", -1], ["생각보다 행동이 먼저 나간다.", -1]] },
+    ] },
+  { k: "E", name: "외향성", en: "Extraversion", ref: 57,
+    hi: "사람들과 어울리고 활동하는 데서 에너지를 얻습니다. 활발하고 주도적이며 자극과 즐거움을 찾습니다.",
+    lo: "조용하고 차분한 환경을 선호합니다. 혼자 또는 소수와 있는 시간에서 에너지를 회복합니다.",
+    mid: "사람들과 어울리는 것과 혼자 있는 것 모두 필요합니다.",
+    facets: [
+      { name: "친근함", d: "사람에게 다가가는 따뜻함", items: [["친구를 쉽게 사귄다.", 1], ["사람들 곁에 있으면 편안하다.", 1], ["다른 사람과의 접촉을 피한다.", -1], ["사람들과 거리를 둔다.", -1]] },
+      { name: "사교성", d: "많은 사람과 어울림", items: [["사람 많은 파티나 모임이 정말 좋다.", 1], ["모임에서 여러 사람과 두루 이야기한다.", 1], ["혼자 있는 게 더 좋다.", -1], ["사람이 붐비는 곳을 피한다.", -1]] },
+      { name: "주장성", d: "앞에 나서서 이끔", items: [["상황을 주도한다.", 1], ["다른 사람들을 이끌려고 한다.", 1], ["일의 주도권을 잡는다.", 1], ["다른 사람이 앞장서길 기다린다.", -1]] },
+      { name: "활동성", d: "바쁘고 빠른 생활 속도", items: [["항상 바쁘다.", 1], ["늘 어딘가로 움직이고 있다.", 1], ["여가 시간에도 이것저것 많이 한다.", 1], ["느긋하게 쉬는 게 좋다.", -1]] },
+      { name: "자극 추구", d: "짜릿함과 모험", items: [["짜릿한 흥분을 좋아한다.", 1], ["모험을 찾아다닌다.", 1], ["무모하게 구는 걸 즐길 때가 있다.", 1], ["거칠고 미친 듯이 놀 때가 있다.", 1]] },
+      { name: "쾌활함", d: "긍정적 감정", items: [["기쁨이 겉으로 뿜어져 나온다.", 1], ["즐겁게 사는 편이다.", 1], ["삶을 사랑한다.", 1], ["삶의 밝은 면을 본다.", 1]] },
+    ] },
+  { k: "A", name: "우호성", en: "Agreeableness", ref: 67,
+    hi: "다른 사람을 믿고 배려하며 협조적입니다. 갈등보다 조화를 택하고 남의 처지에 공감합니다.",
+    lo: "회의적이고 경쟁적이며 직설적입니다. 남의 기분보다 자기 판단과 이익을 앞세우는 데 거리낌이 적습니다.",
+    mid: "상황에 따라 협조하기도 하고 할 말은 하기도 합니다.",
+    facets: [
+      { name: "신뢰", d: "남의 의도를 믿음", items: [["다른 사람을 믿는다.", 1], ["사람들의 의도는 대체로 선하다고 생각한다.", 1], ["사람들 말을 그대로 믿는 편이다.", 1], ["사람을 잘 믿지 않는다.", -1]] },
+      { name: "도덕성", d: "솔직하고 계산 없음", items: [["내 목적을 위해 다른 사람을 이용한다.", -1], ["앞서기 위해 꼼수를 쓴다.", -1], ["다른 사람을 이용해 이득을 본다.", -1], ["다른 사람의 계획을 방해한다.", -1]] },
+      { name: "이타심", d: "남을 돕고 챙김", items: [["다른 사람을 돕는 게 정말 좋다.", 1], ["다른 사람들을 걱정하고 신경 쓴다.", 1], ["다른 사람의 감정에 무관심하다.", -1], ["남을 위해 시간을 내지 않는다.", -1]] },
+      { name: "협조성", d: "대립을 피함", items: [["한바탕 붙는 걸 좋아한다.", -1], ["사람들에게 소리를 지를 때가 있다.", -1], ["사람들을 깎아내리거나 모욕한다.", -1], ["당한 만큼 되갚아준다.", -1]] },
+      { name: "겸손", d: "자신을 내세우지 않음", items: [["내가 다른 사람보다 낫다고 생각한다.", -1], ["나 자신을 높게 평가한다.", -1], ["스스로에 대한 자부심이 크다.", -1], ["내 장점을 자랑한다.", -1]] },
+      { name: "공감", d: "약자에 대한 연민", items: [["어려운 처지의 사람을 보면 마음이 쓰인다.", 1], ["나보다 형편이 어려운 사람에게 연민을 느낀다.", 1], ["다른 사람의 문제에 관심이 없다.", -1], ["어려운 사람들에 대해서는 생각하지 않으려 한다.", -1]] },
+    ] },
+  { k: "N", name: "신경성", en: "Neuroticism", ref: 47,
+    hi: "불안, 분노, 우울 같은 부정적 감정을 쉽고 강하게 느낍니다. 스트레스에 민감하고 감정 기복이 있는 편입니다.",
+    lo: "정서적으로 안정적이고 침착합니다. 스트레스를 받아도 잘 흔들리지 않고 빨리 회복합니다.",
+    mid: "평소엔 안정적이지만 압박이 크면 흔들리기도 합니다.",
+    facets: [
+      { name: "불안", d: "걱정과 두려움", items: [["이런저런 일로 걱정을 많이 한다.", 1], ["최악의 상황을 떠올리며 겁을 먹는다.", 1], ["두려운 것이 많다.", 1], ["쉽게 스트레스를 받는다.", 1]] },
+      { name: "분노", d: "짜증과 화", items: [["쉽게 화가 난다.", 1], ["쉽게 짜증이 난다.", 1], ["이성을 잃고 화를 낼 때가 있다.", 1], ["웬만한 일에는 거슬려하지 않는다.", -1]] },
+      { name: "우울", d: "울적함과 자기 비하", items: [["자주 울적해진다.", 1], ["나 자신이 싫을 때가 있다.", 1], ["기분이 가라앉아 있을 때가 많다.", 1], ["나 자신이 편안하게 느껴진다.", -1]] },
+      { name: "자의식", d: "사회적 불편감", items: [["다른 사람에게 먼저 다가가기 어렵다.", 1], ["사람들의 주목을 받는 게 두렵다.", 1], ["친한 사람들과 있을 때만 편하다.", 1], ["어색한 사회적 상황도 별로 신경 쓰이지 않는다.", -1]] },
+      { name: "충동성", d: "욕구 조절의 어려움", items: [["먹거나 노는 걸 한번 시작하면 폭주할 때가 있다.", 1], ["지나치게 빠져드는 일은 거의 없다.", -1], ["유혹을 쉽게 이겨낸다.", -1], ["무언가가 당겨도 잘 참는다.", -1]] },
+      { name: "취약성", d: "압박에 무너짐", items: [["쉽게 당황하고 패닉에 빠진다.", 1], ["일이 몰리면 감당이 안 된다고 느낀다.", 1], ["상황을 내가 해결할 수 없을 것 같다고 느낄 때가 많다.", 1], ["압박 속에서도 침착함을 유지한다.", -1]] },
+    ] },
+];
+const DOM = Object.fromEntries(DOMAINS.map(d => [d.k, d]));
+
+// MBTI 각 글자와 가장 강하게 연결되는 요인
+const MBTI_MAP = [
+  { pos: 0, dom: "E", hi: "E", lo: "I" },
+  { pos: 1, dom: "O", hi: "N", lo: "S" },
+  { pos: 2, dom: "A", hi: "F", lo: "T" },
+  { pos: 3, dom: "C", hi: "J", lo: "P" },
+];
+// 에니어그램 유형별로 자주 보이는 빅파이브 모양 (+1 높음, -1 낮음)
+const ENNEA = {
+  1: { name: "개혁가", exp: [["C", 1], ["N", 1]] },
+  2: { name: "조력가", exp: [["A", 1], ["E", 1]] },
+  3: { name: "성취자", exp: [["E", 1], ["C", 1], ["N", -1]] },
+  4: { name: "개인주의자", exp: [["N", 1], ["O", 1], ["E", -1]] },
+  5: { name: "탐구자", exp: [["E", -1], ["O", 1], ["A", -1]] },
+  6: { name: "충성가", exp: [["N", 1], ["C", 1]] },
+  7: { name: "열정가", exp: [["E", 1], ["O", 1], ["C", -1]] },
+  8: { name: "도전자", exp: [["A", -1], ["E", 1], ["N", -1]] },
+  9: { name: "평화주의자", exp: [["A", 1], ["N", -1], ["E", -1]] },
+};
+
+function buildItems() {
+  const out = [];
+  for (let i = 0; i < 4; i++) for (let f = 0; f < 6; f++) for (const k of ["N", "E", "O", "A", "C"]) {
+    const [text, s] = DOM[k].facets[f].items[i];
+    out.push({ id: `${k}${f}-${i}`, dom: k, f, s, text });
+  }
+  return out;
+}
+const ITEMS = buildItems();
+const PER_PAGE = 10;
+const PAGES = Math.ceil(ITEMS.length / PER_PAGE);
+
+// ---------- 상태 ----------
+const KEY = "bigfive-v1";
+let state = { answers: {}, page: 0, view: "intro", mbti: "", ennea: "" };
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.answers) state = Object.assign(state, s); } catch (e) {}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+const app = document.getElementById("app");
+const isDone = id => state.answers[id] != null;
+const doneCount = () => ITEMS.filter(i => isDone(i.id)).length;
+function go(view, page) { state.view = view; if (page != null) state.page = page; save(); render(); scrollTo(0, 0); }
+
+function render() {
+  if (state.view === "quiz") return renderQuiz();
+  if (state.view === "result") return renderResult();
+  renderIntro();
+}
+
+function renderIntro() {
+  const n = doneCount();
+  app.innerHTML = `
+    <section class="card intro stack">
+      <div>
+        <h2>성격을 다섯 개의 점수로 봅니다</h2>
+        <p>빅파이브는 성격 심리학 연구에서 가장 널리 쓰이는 모델입니다. 사람을 유형으로 나누지 않고 개방성, 성실성, 외향성, 우호성, 신경성 다섯 가지 연속된 점수로 보여주기 때문에 MBTI처럼 경계에 걸려서 애매해지는 일이 없습니다.</p>
+      </div>
+      <ul>
+        <li>총 ${ITEMS.length}문항, 한 페이지에 ${PER_PAGE}문항씩 ${PAGES}페이지. 12~15분 정도 걸립니다.</li>
+        <li>각 요인은 세부 요인 6개로 나뉘어서, 예를 들어 같은 외향성 중간이라도 사람 많은 곳을 좋아하는 쪽인지 짜릿함을 좋아하는 쪽인지 구분해 보여줍니다.</li>
+        <li>지금의 나를 기준으로, 비슷한 또래와 비교해서 솔직하게 답해 주세요.</li>
+        <li>결과에서 MBTI와 에니어그램 유형을 고르면 세 검사가 서로 맞는지 비교해 줍니다.</li>
+        <li>답변은 이 브라우저에만 저장되고 다른 곳으로 전송되지 않습니다.</li>
+      </ul>
+      <div class="row">
+        <button class="btn" id="start">${n === ITEMS.length ? "답변 처음부터 보기" : n ? `이어서 하기 (${n}/${ITEMS.length})` : "검사 시작"}</button>
+        ${n === ITEMS.length ? `<button class="btn ghost" id="toResult">결과 보기</button>` : ""}
+        ${n ? `<button class="btn ghost" id="reset">처음부터 다시</button>` : ""}
+      </div>
+    </section>`;
+  document.getElementById("start").onclick = () => {
+    const first = ITEMS.findIndex(i => !isDone(i.id));
+    go("quiz", first < 0 ? 0 : Math.floor(first / PER_PAGE));
+  };
+  const t = document.getElementById("toResult"); if (t) t.onclick = () => go("result");
+  const r = document.getElementById("reset"); if (r) r.onclick = () => { state.answers = {}; go("quiz", 0); };
+}
+
+const L5 = ["전혀 아니다", "아니다", "보통", "그렇다", "매우 그렇다"];
+function renderQuiz() {
+  const p = Math.min(state.page, PAGES - 1);
+  const items = ITEMS.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+  app.innerHTML = `
+    <div class="prog">
+      <div class="prog-top"><span>${p + 1} / ${PAGES} 페이지</span><span id="cnt"></span></div>
+      <div class="bar"><i id="barfill"></i></div>
+    </div>
+    <section class="card">
+      ${items.map((it, i) => { const idx = p * PER_PAGE + i + 1, v = state.answers[it.id];
+        return `<div class="q" data-id="${it.id}">
+          <p class="q-text"><span class="n">${String(idx).padStart(3, "0")}</span>${it.text}</p>
+          <div class="scale"><span class="end">아니다</span>
+            <div class="lk" role="radiogroup" aria-label="${idx}번 문항">${L5.map((lb, k) =>
+              `<label title="${lb}"><input type="radio" id="q-${it.id}-${k + 1}" name="${it.id}" value="${k + 1}" ${v === k + 1 ? "checked" : ""} aria-label="${lb}"><span></span></label>`).join("")}</div>
+            <span class="end r">그렇다</span></div>
+        </div>`; }).join("")}
+      <div class="nav">
+        <button class="btn ghost" id="prev">${p === 0 ? "처음으로" : "이전"}</button>
+        <button class="btn" id="next">${p === PAGES - 1 ? "결과 보기" : "다음"}</button>
+      </div>
+      <p class="hint" id="hint"></p>
+    </section>`;
+  const upd = () => {
+    const n = doneCount();
+    document.getElementById("barfill").style.width = (n / ITEMS.length * 100) + "%";
+    document.getElementById("cnt").textContent = `${n} / ${ITEMS.length} 응답`;
+  };
+  upd();
+  app.querySelectorAll(".lk input").forEach(inp => inp.addEventListener("change", e => {
+    state.answers[e.target.name] = +e.target.value; save(); upd();
+    const q = e.target.closest(".q"); q.classList.remove("missing");
+    const next = q.nextElementSibling;
+    if (next && next.classList.contains("q") && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (next.getBoundingClientRect().top > innerHeight * 0.7) next.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }));
+  document.getElementById("prev").onclick = () => p === 0 ? go("intro") : go("quiz", p - 1);
+  document.getElementById("next").onclick = () => {
+    const missing = items.filter(it => !isDone(it.id));
+    if (missing.length) {
+      missing.forEach(it => app.querySelector(`.q[data-id="${it.id}"]`).classList.add("missing"));
+      document.getElementById("hint").textContent = `응답하지 않은 문항이 ${missing.length}개 있어요. 주황색으로 표시된 문항에 답해 주세요.`;
+      app.querySelector(`.q[data-id="${missing[0].id}"]`).scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (p < PAGES - 1) return go("quiz", p + 1);
+    const first = ITEMS.findIndex(i => !isDone(i.id));
+    if (first >= 0) return go("quiz", Math.floor(first / PER_PAGE));
+    go("result");
+  };
+}
+
+// ---------- 채점 ----------
+const BAND = 12;   // 기준선에서 ±12점을 넘으면 높음/낮음
+function level(k, v) {
+  const d = v - DOM[k].ref;
+  return d > BAND ? "hi" : d < -BAND ? "lo" : "mid";
+}
+const LV = { hi: "높음", mid: "중간", lo: "낮음" };
+function score() {
+  const A = state.answers;
+  const facets = {}, domains = {};
+  for (const d of DOMAINS) {
+    facets[d.k] = d.facets.map((_, f) => {
+      const its = ITEMS.filter(i => i.dom === d.k && i.f === f && isDone(i.id));
+      if (!its.length) return 50;
+      const sum = its.reduce((s, it) => s + (it.s > 0 ? A[it.id] : 6 - A[it.id]), 0);   // 1..5
+      return Math.round((sum / its.length - 1) / 4 * 100);
+    });
+    domains[d.k] = Math.round(facets[d.k].reduce((s, x) => s + x, 0) / 6);
+  }
+  return { facets, domains };
+}
+
+// ---------- 결과 ----------
+function renderResult() {
+  const R = score();
+  const est = MBTI_MAP.map(m => { const d = R.domains[m.dom] - DOM[m.dom].ref; return { ...m, d, letter: d >= 0 ? m.hi : m.lo }; });
+  const estType = est.map(e => e.letter).join("");
+  const mbtiOpts = ["ISTJ","ISFJ","INFJ","INTJ","ISTP","ISFP","INFP","INTP","ESTP","ESFP","ENFP","ENTP","ESTJ","ESFJ","ENFJ","ENTJ"]
+    .map(m => `<option value="${m}" ${state.mbti === m ? "selected" : ""}>${m}</option>`).join("");
+  const enOpts = Object.keys(ENNEA).map(t => `<option value="${t}" ${String(state.ennea) === t ? "selected" : ""}>${t}번 ${ENNEA[t].name}</option>`).join("");
+
+  app.innerHTML = `
+    <div class="stack">
+      <section class="card">
+        <p class="eyebrow">나의 5요인 프로필</p>
+        <div class="profile">
+          ${DOMAINS.map(d => { const v = R.domains[d.k], lv = level(d.k, v);
+            return `<div class="col">
+              <div class="well"><span class="fill" style="height:${Math.max(v, 2)}%;background:var(--${d.k.toLowerCase()})"></span><span class="ref" style="bottom:${d.ref}%"></span></div>
+              <span class="val">${v}</span>
+              <span class="letter" style="color:var(--${d.k.toLowerCase()})">${d.k}</span>
+              <span class="nm">${d.name}</span>
+              <span class="lvl ${lv}">${LV[lv]}</span>
+            </div>`; }).join("")}
+        </div>
+        <div class="legend"><span><span class="dash"></span>일반 성인 평균(대략)</span><span>0~100 점수, 평균선보다 ${BAND}점 이상 높거나 낮으면 높음/낮음으로 표시</span></div>
+      </section>
+
+      ${DOMAINS.map(d => { const v = R.domains[d.k], lv = level(d.k, v); const col = `var(--${d.k.toLowerCase()})`;
+        return `<section class="card">
+          <div class="sec-h"><h3><span class="big" style="color:${col}">${d.k}</span>${d.name} · ${LV[lv]}</h3><small>${v}점 · 평균 약 ${d.ref}</small></div>
+          <p class="dom-desc">${d[lv]}</p>
+          <div class="facets">
+            ${d.facets.map((f, i) => `<div class="f">
+              <span class="nm">${f.name}<small>${f.d}</small></span>
+              <div class="track"><i style="width:${Math.max(R.facets[d.k][i], 2)}%;background:${col}"></i></div>
+              <span class="v">${R.facets[d.k][i]}</span>
+            </div>`).join("")}
+          </div>
+        </section>`; }).join("")}
+
+      <section class="card">
+        <div class="sec-h"><h3>MBTI와 비교</h3><small>빅파이브 점수로 추정한 네 글자</small></div>
+        <p class="est">${estType}</p>
+        <p class="note">외향성은 E/I, 개방성은 S/N, 우호성은 T/F, 성실성은 J/P와 가장 강하게 연결됩니다. 평균선보다 높으면 앞 글자, 낮으면 뒤 글자로 추정했습니다.</p>
+        <div class="pick" style="margin-top:14px"><label for="mbti">MBTI 검사 결과</label><select id="mbti"><option value="">선택하세요</option>${mbtiOpts}</select></div>
+        <div id="mbtiCmp"></div>
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><h3>에니어그램과 비교</h3><small>유형별로 자주 보이는 빅파이브 모양</small></div>
+        <div class="pick"><label for="ennea">에니어그램 주유형</label><select id="ennea"><option value="">선택하세요</option>${enOpts}</select></div>
+        <div id="enCmp"></div>
+      </section>
+
+      <section class="card stack">
+        <div class="row">
+          <button class="btn" id="copy">결과 복사</button>
+          <button class="btn ghost" id="review">답변 수정</button>
+          <button class="btn ghost" id="again">다시 검사</button>
+        </div>
+        <p class="toast" id="toast" aria-live="polite"></p>
+        <textarea id="copyText" readonly hidden></textarea>
+        <p class="disclaimer">문항은 공개 문항 풀인 IPIP(International Personality Item Pool)의 IPIP-NEO 120 구조를 따라 한국어로 옮기고 일부를 한국 상황에 맞게 바꾼 것입니다. 공식 번안본이나 표준화된 규준이 아니므로 평균선은 대략적인 참고값입니다. 자기 이해를 위한 참고로만 활용하세요.</p>
+      </section>
+    </div>`;
+
+  const lvTag = (k) => { const lv = level(k, R.domains[k]); return `<span class="tag ${lv === "mid" ? "mid" : ""}">${DOM[k].name} ${LV[lv]}</span>`; };
+
+  const renderMbti = () => {
+    const box = document.getElementById("mbtiCmp"), m = state.mbti;
+    if (!m) { box.innerHTML = `<p class="note">MBTI 검사에서 나온 유형을 고르면 글자별로 빅파이브 결과와 맞는지 보여줍니다.</p>`; return; }
+    const rows = est.map(e => {
+      const mine = m[e.pos], same = mine === e.letter, weak = Math.abs(e.d) <= BAND;
+      const tag = same ? `<span class="tag ok">일치</span>` : weak ? `<span class="tag mid">애매</span>` : `<span class="tag no">다름</span>`;
+      return `<div><b>${e.hi}/${e.lo}</b><span>MBTI ${mine} · 빅파이브 ${DOM[e.dom].name} ${R.domains[e.dom]}점 (평균 대비 ${e.d >= 0 ? "+" : ""}${e.d})</span>${tag}</div>`;
+    }).join("");
+    const ex = R.facets.E, en = DOM.E.facets;
+    const eiNote = `<p class="note"><strong>E/I를 세부 요인으로 보면:</strong> ${en.map((f, i) => `${f.name} ${ex[i]}`).join(", ")}. ` +
+      (ex[1] < 50 && (ex[4] >= 55 || ex[2] >= 55)
+        ? "사람 많은 곳은 싫어하지만 주도하거나 자극을 찾는 성향은 있는 모양입니다. 내향형처럼 보이는 외향 직관형(ENxP)에서 자주 나타납니다."
+        : ex[1] >= 55 ? "많은 사람과 어울리는 걸 즐기는 쪽이라 외향 성향이 분명한 편입니다."
+        : "전반적으로 사람과의 접촉에서 에너지를 얻기보다 조용한 쪽을 편하게 느끼는 모양입니다.") + "</p>";
+    box.innerHTML = `<div class="cmp">${rows}</div>${eiNote}`;
+  };
+  const renderEn = () => {
+    const box = document.getElementById("enCmp"), t = state.ennea;
+    if (!t) { box.innerHTML = `<p class="note">에니어그램 검사에서 나온 주유형을 고르면 그 유형에서 흔한 빅파이브 모양과 비교합니다.</p>`; return; }
+    const exp = ENNEA[t].exp;
+    let hit = 0;
+    const rows = exp.map(([k, dir]) => {
+      const lv = level(k, R.domains[k]);
+      const ok = (dir > 0 && lv === "hi") || (dir < 0 && lv === "lo");
+      const part = lv === "mid";
+      if (ok) hit++;
+      return `<div><b>${k}</b><span>${t}번에서 흔함: ${DOM[k].name} ${dir > 0 ? "높음" : "낮음"} · 내 결과 ${R.domains[k]}점 ${LV[lv]}</span><span class="tag ${ok ? "ok" : part ? "mid" : "no"}">${ok ? "일치" : part ? "애매" : "다름"}</span></div>`;
+    }).join("");
+    box.innerHTML = `<div class="cmp">${rows}</div>
+      <p class="note"><strong>${exp.length}개 중 ${hit}개 일치.</strong> ${hit === exp.length ? `${t}번에서 흔히 보이는 모양과 잘 맞습니다.` : hit ? `일부는 맞고 일부는 다릅니다. 에니어그램은 동기를, 빅파이브는 행동 경향을 재기 때문에 어느 정도 차이는 자연스럽습니다.` : `흔한 모양과는 거리가 있습니다. 에니어그램 1~2위 유형이 붙어 있었다면 2위 유형도 골라서 비교해 보세요.`}</p>`;
+  };
+  renderMbti(); renderEn();
+  document.getElementById("mbti").onchange = e => { state.mbti = e.target.value; save(); renderMbti(); };
+  document.getElementById("ennea").onchange = e => { state.ennea = e.target.value; save(); renderEn(); };
+
+  const summary = `[빅파이브 성격 검사 결과]\n` +
+    DOMAINS.map(d => `${d.name}(${d.k}) ${R.domains[d.k]} ${LV[level(d.k, R.domains[d.k])]} · ` + d.facets.map((f, i) => `${f.name} ${R.facets[d.k][i]}`).join(", ")).join("\n") +
+    `\n빅파이브 기준 MBTI 추정: ${estType}`;
+  document.getElementById("copy").onclick = async () => {
+    const toast = document.getElementById("toast");
+    try { await navigator.clipboard.writeText(summary); toast.textContent = "결과를 클립보드에 복사했어요."; }
+    catch (e) { const ta = document.getElementById("copyText"); ta.hidden = false; ta.value = summary; ta.style.width = "100%"; ta.rows = 7; ta.select(); toast.textContent = "자동 복사가 막혀 있어요. 선택된 텍스트를 직접 복사해 주세요."; }
+  };
+  document.getElementById("review").onclick = () => go("quiz", 0);
+  document.getElementById("again").onclick = () => { state.answers = {}; go("intro", 0); };
+}
+
+render();
+</script>
