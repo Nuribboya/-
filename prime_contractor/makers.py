@@ -370,21 +370,56 @@ def affiliate_names(listed_companies, fetch, min_ratio: float = 0.0) -> list[str
     return list(names.values())
 
 
+#: 안성에서 멀어 영업 범위 밖인 도. 본사가 여기면 공장도 대개 그 지역이라 묻지 않는다.
+#: '광주'는 경기도 광주시와 헷갈리므로 '광주광역시'로만 본다.
+FAR_PROVINCES = ("전라", "전북", "전남", "광주광역시", "강원", "경상", "경북", "경남",
+                 "부산", "대구", "울산", "제주")
+
+
+def in_far_province(address: str) -> bool:
+    return (address or "").strip().startswith(FAR_PROVINCES)
+
+
 def near_first(makers, company, within_km: float):
-    """본사가 거리 안인 제조 상장사를 앞으로. 하루 한도에서 끊겨도 가까운 곳부터 받게."""
+    """제조 상장사를 (본사가 거리 안, 그 밖) 으로 나누고, 본사가 먼 도(FAR_PROVINCES)면 뺀다.
+
+    본사 주소는 묻는 순서와 빼기에만 쓴다 — 목록의 거리는 공장 주소마다 따로 잰다.
+    돌려주는 값: (가까운 곳, 나머지, 뺀 수).
+    """
     from prime_contractor.geo import distance_from_home
 
-    def km(row):
+    near, rest, dropped = [], [], 0
+    scored = []
+    for row in makers:
         try:
-            _region, dist = distance_from_home(company(row[1]).get("adres", ""))
+            address = company(row[1]).get("adres", "")
         except Exception:
-            dist = None
-        return dist if dist is not None else 9999.0
+            address = ""
+        if in_far_province(address):
+            dropped += 1
+            continue
+        _region, dist = distance_from_home(address) if address else ("", None)
+        scored.append((dist if dist is not None else 9999.0, row))
+    for dist, row in sorted(scored, key=lambda x: x[0]):
+        (near if dist <= within_km else rest).append(row)
+    return near, rest, dropped
 
-    scored = [(km(row), row) for row in makers]
-    near = [row for d, row in sorted(scored, key=lambda x: x[0]) if d <= within_km]
-    far = [row for d, row in scored if d > within_km]
-    return near, far
+
+def drop_far_companies(names: list[str], lookup, workers: int = 4) -> tuple[list[str], int]:
+    """본사가 먼 도에 있는 회사 이름을 뺀다. DART 에 없어 모르는 곳은 남긴다."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def far(name):
+        try:
+            info = lookup(name)
+        except Exception:
+            return False
+        return bool(info) and in_far_province(info.get("adres", ""))
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        flags = list(pool.map(far, names))
+    kept = [n for n, f in zip(names, flags) if not f]
+    return kept, len(names) - len(kept)
 
 
 def same_company(record_name: str, query: str) -> bool:

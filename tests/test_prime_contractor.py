@@ -2901,5 +2901,17 @@ def test_factory_queries_skip_minor_and_non_factory_affiliates_and_go_near_first
     names = affiliate_names([("농심", "N1", "004370")], lambda c: stakes.get(c, []), min_ratio=50)
     assert names == ["(주)태경농산"]
     info = {"A": {"adres": "부산광역시 해운대구"}, "B": {"adres": "경기도 평택시 포승읍"}}
-    near, far = near_first([("부산회사", "A", "1"), ("평택회사", "B", "2")], info.get, 70)
-    assert [r[0] for r in near] == ["평택회사"] and [r[0] for r in far] == ["부산회사"]
+    info["C"] = {"adres": "서울특별시 동작구"}
+    info["D"] = {"adres": "경기도 광주시 오포읍"}
+    near, far, dropped = near_first([("부산회사", "A", "1"), ("평택회사", "B", "2"),
+                                     ("서울회사", "C", "3"), ("광주회사", "D", "4")], info.get, 50)
+    assert [r[0] for r in near] == ["평택회사", "광주회사"]   # 가까운 순
+    assert [r[0] for r in far] == ["서울회사"]
+    assert dropped == 1                                   # 부산 본사만 뺀다(경기 광주는 아님)
+
+
+def test_drop_far_companies_keeps_unknown():
+    from prime_contractor.makers import drop_far_companies
+    where = {"대구회사": {"adres": "대구광역시 달서구"}, "천안회사": {"adres": "충청남도 천안시"}}
+    kept, dropped = drop_far_companies(["대구회사", "천안회사", "모르는회사"], where.get, workers=2)
+    assert kept == ["천안회사", "모르는회사"] and dropped == 1
