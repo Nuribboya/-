@@ -231,7 +231,8 @@ def is_affiliate_stake(ratio: float, purpose: str) -> bool:
         w in purpose for w in ("경영", "자회사", "계열", "지배"))
 
 
-def build_group_map(listed_companies, fetch, progress=None, workers: int = 4) -> dict[str, str]:
+def build_group_map(listed_companies, fetch, progress=None, workers: int = 4,
+                    failed: list | None = None) -> dict[str, str]:
     """{정규화 상호: 모회사(상장사) 이름}. fetch(corp_code) → [{name, ratio, purpose}].
 
     상장사마다 한 번씩 물어보므로 처음엔 오래 걸린다(2천여 곳). fetch 쪽이 캐시를 둔다.
@@ -240,6 +241,7 @@ def build_group_map(listed_companies, fetch, progress=None, workers: int = 4) ->
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     companies = [(name, code) for name, code, stock in listed_companies if stock]
+    failed = failed if failed is not None else []
     best: dict[str, tuple[float, str]] = {}
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -247,11 +249,12 @@ def build_group_map(listed_companies, fetch, progress=None, workers: int = 4) ->
         for future in as_completed(futures):
             parent = futures[future]
             done += 1
-            if progress and done % 200 == 0:
+            if progress and (done % 100 == 0 or done == len(companies)):
                 progress(done, len(companies))
             try:
                 rows = future.result()
             except Exception:                    # 한 곳 실패로 전체를 멈추지 않는다
+                failed.append(parent)
                 continue
             for row in rows:
                 if not is_affiliate_stake(row.get("ratio", 0.0), row.get("purpose", "")):
@@ -299,7 +302,11 @@ def is_manufacturer(info: dict) -> bool:
 
 
 def affiliate_names(listed_companies, fetch) -> list[str]:
-    """상장사들이 계열사로 가진 국내 회사 이름(원래 표기). fetch 는 캐시돼 있어 빠르다."""
+    """상장사들이 계열사로 가진 국내 회사 이름(원래 표기).
+
+    fetch 는 인터넷에 다시 묻지 않는 것을 넘긴다 — 앞에서 못 받은 곳을 여기서 한 줄씩
+    다시 물으면 진행 표시 없이 몇십 분 멈춘 것처럼 보인다.
+    """
     names: dict[str, str] = {}
     for _name, code, stock in listed_companies:
         if not stock:

@@ -30,6 +30,8 @@ COMPANY_URL = "https://opendart.fss.or.kr/api/company.json"
 #: 정기보고서 '타법인 출자현황' — 이 회사가 지분을 가진 회사들(자회사·계열사 찾기에 쓴다).
 INVEST_URL = "https://opendart.fss.or.kr/api/otrCprInvstmntSttus.json"
 ANNUAL_REPORT = "11011"
+#: 출자현황 한 번에 기다리는 최대 초. DART 가 느려지면 30초씩 4천 번 기다리게 된다.
+INVEST_TIMEOUT = 10.0
 DEFAULT_CACHE = Path.home() / ".cache" / "prime_contractor"
 
 
@@ -49,12 +51,15 @@ class DartClient:
         self.timeout = timeout
         self.sleep_sec = sleep_sec
         self.session = session or requests.Session()
+        self._shared_session = session is not None       # 밖에서 넘긴 세션(시험용)은 모든 스레드가 쓴다
         self._index: dict[str, str] | None = None
         self._listed: list[tuple[str, str, str]] = []
         self._company_cache: dict[str, dict] = self._load_company_cache()
         self._invest_cache: dict[str, list[dict]] | None = None
         self._invest_lock = threading.Lock()
         self._local = threading.local()
+        #: DART 가 '요청 한도 초과'(020)를 주면 그날은 더 묻지 않는다 — 계속 물어도 막히기만 한다.
+        self.invest_stopped = ""
 
     # --- 고유번호 인덱스 -----------------------------------------------------
 
@@ -179,22 +184,28 @@ class DartClient:
         cache = self._invest()
         if corp_code in cache:
             return cache[corp_code]
+        if self.invest_stopped:
+            raise DartError(self.invest_stopped)
         today = today or date.today()
         session = getattr(self._local, "session", None)
         if session is None:
-            session = self._local.session = (self.session if threading.current_thread()
-                                              is threading.main_thread() else requests.Session())
+            session = self._local.session = (
+                self.session if self._shared_session
+                or threading.current_thread() is threading.main_thread() else requests.Session())
         rows: list[dict] = []
         for year in (today.year - 1, today.year - 2):
             resp = session.get(INVEST_URL, params={
                 "crtfc_key": self.key, "corp_code": corp_code, "bsns_year": str(year),
-                "reprt_code": ANNUAL_REPORT}, timeout=self.timeout)
+                "reprt_code": ANNUAL_REPORT}, timeout=min(self.timeout, INVEST_TIMEOUT))
             resp.raise_for_status()
             time.sleep(self.sleep_sec)
             data = resp.json()
             status = data.get("status")
             if status == "013":                 # 그 해 자료 없음 → 그 전 해
                 continue
+            if status == "020":
+                self.invest_stopped = "DART 하루 요청 한도를 넘었습니다 — 내일 다시 누르면 이어서 확인합니다."
+                raise DartError(self.invest_stopped)
             if status != "000":
                 raise DartError(f"{corp_code}: {status} {data.get('message')}")
             for item in data.get("list") or []:
@@ -207,6 +218,10 @@ class DartClient:
         with self._invest_lock:
             cache[corp_code] = rows
         return rows
+
+    def cached_investments(self, corp_code: str) -> list[dict]:
+        """이미 받아 둔 출자현황만 — 인터넷에 묻지 않는다(못 받은 곳은 빈 목록)."""
+        return self._invest().get(corp_code, [])
 
     def save_investment_cache(self) -> None:
         with self._invest_lock:

@@ -868,12 +868,17 @@ class App:
                     self.say(f"  업종 확인 {i}/{len(listed)}")
             dart.save_company_cache()
             self.say(f"제조업 상장사 {len(makers)}곳. 계열사를 확인합니다…")
+            failed: list[str] = []
             group_map = build_group_map(
-                listed, dart.investments,
+                listed, dart.investments, failed=failed,
                 progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
             dart.save_investment_cache()
+            if dart.invest_stopped:
+                self.say(f"⚠ {dart.invest_stopped}")
+            elif failed:
+                self.say(f"  {len(failed)}곳은 DART 응답이 없어 건너뜀 — 다음에 누르면 다시 확인합니다.")
             queries = list(dict.fromkeys([name for name, _c, _s in makers]
-                                         + affiliate_names(makers, dart.investments)))
+                                         + affiliate_names(makers, dart.cached_investments)))
             fresh = sum(1 for q in queries if not api.cached(q))
             self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
                      + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))

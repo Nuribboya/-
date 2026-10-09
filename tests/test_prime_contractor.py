@@ -2675,6 +2675,38 @@ def test_dart_investments_reads_last_annual_report_and_caches(tmp_path):
     assert calls == ["2025", "2024"]                      # 두 번째는 캐시
 
 
+def test_dart_investments_stop_asking_after_daily_limit(tmp_path):
+    import pytest
+    from prime_contractor.makers import build_group_map
+    from prime_contractor.sources.dart import DartClient, DartError
+
+    calls = []
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"status": "020", "message": "요청 제한을 초과하였습니다."}
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            calls.append(timeout)
+            return Resp()
+
+    client = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
+    failed = []
+    listed = [("가", "A", "1"), ("나", "B", "2"), ("다", "C", "3")]
+    seen = []
+    assert build_group_map(listed, client.investments, failed=failed, workers=1,
+                           progress=lambda d, t: seen.append((d, t))) == {}
+    assert len(calls) == 1 and calls[0] <= 10            # 한도 넘으면 더 묻지 않는다
+    assert len(failed) == 3 and "한도" in client.invest_stopped
+    assert seen[-1] == (3, 3)                             # 끝 줄은 꼭 보여 준다
+    assert client.cached_investments("A") == []          # 캐시만 보고 인터넷엔 안 묻는다
+    with pytest.raises(DartError):
+        client.investments("A")
+
+
 # --- 파일 없이 인증키로 공장 찾기 (공장등록 생산정보 API) ----------------------------
 
 class _ApiResp:
