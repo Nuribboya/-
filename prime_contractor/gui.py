@@ -793,6 +793,8 @@ class App:
             target = self._load_factories
             args = (path, cfg)
         else:
+            self.say("시작합니다 — 저장해 둔 상장사 목록을 읽는 중입니다 (처음이면 DART 에서 받느라 "
+                     "1분쯤 걸립니다)…")
             target = self._load_factories_by_key
             args = (self.data_key.get().strip(), cfg)
         threading.Thread(target=target, args=args, daemon=True).start()
