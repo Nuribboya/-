@@ -111,7 +111,7 @@ def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
             text="영업 대응 — 일감이 줄고 있습니다",
             reason=f"최근 {TREND_WINDOW}개월 매출 평균이 그 이전 {TREND_WINDOW}개월보다 줄었습니다. "
                    "인력이 넘쳐서가 아니라 원청 발주량 자체가 준 것일 가능성이 큽니다. "
-                   "원청에 물량부터 확인하고, 필요하면 '① 일감 줄 회사 찾기'로 새 원청 후보를 넓히세요.",
+                   "원청에 물량부터 확인하고, 필요하면 '① 공장 찾기'로 새 거래처를 넓히세요.",
             severity="medium",
         ))
 
@@ -135,7 +135,7 @@ def _rank(diag: Diagnosis, cost: CostModel | None) -> list[Priority]:
         items.append(Priority(
             text="영업 확대 — 원청 후보 늘리기",
             reason="지금 숫자만 보면 특별히 위험한 신호는 없습니다. "
-                   "'① 일감 줄 회사 찾기'로 새 원청 후보를 넓히는 데 집중해도 됩니다.",
+                   "'① 공장 찾기'로 새 거래처를 넓히는 데 집중해도 됩니다.",
             severity="low",
         ))
 

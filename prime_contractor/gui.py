@@ -1,6 +1,6 @@
 """원청 찾기 데스크톱 앱 (tkinter).
 
-터미널 없이 쓰기 위한 화면이다. 탐색 로직은 전부 pipeline 쪽에 있고, 여기서는
+터미널 없이 쓰기 위한 화면이다. 공장 찾기 로직은 makers 쪽에 있고, 여기서는
 입력을 받아 넘기고 결과를 보여 주기만 한다.
 
     python -m prime_contractor.gui
@@ -27,27 +27,21 @@ except ImportError:                     # 소스에서 바로 실행할 때 설�
     _HAS_BOOTSTRAP = False
 
 from prime_contractor.app_settings import (
-    DISTANCE_CHOICES, OVERLAP_CHOICES, SECTOR_ALL, apply_target, build_config, load_settings, save_settings,
-    sector_names,
+    DISTANCE_CHOICES, apply_target, build_config, load_settings, save_settings,
 )
 from prime_contractor.help_text import HELP_TEXT
-from prime_contractor.config import load_config
-from prime_contractor.pipeline import filter_sector, run_screen
-from prime_contractor.report import write_xlsx
 from prime_contractor.sales import load_sales
 from prime_contractor.textutil import redact_secrets
 from prime_contractor.updater import check_for_update
 from prime_contractor import __version__
 from prime_contractor.build_info import label, should_check_updates
 
-COLUMNS = (("순위", 45), ("등급", 45), ("회사 이름", 235), ("어떤 곳", 70), ("하는 일", 125),
-           ("지역", 65), ("안성에서", 70), ("한 달 판넬(어림)", 110), ("점수", 55))
 SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
 REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
                   ("판정", 520))
-#: 엑셀로 저장할 때 이 점수 '이하'는 뺀다. 다 넣으면 수백 곳이라 연락할 곳을 고르기 어렵다.
-EXPORT_MIN_SCORE = 70
+FACTORY_COLUMNS = (("#", 40), ("회사", 175), ("그룹", 125), ("분야", 115), ("경기", 55),
+                   ("규모", 95), ("생산품", 190), ("지역", 55), ("거리", 50), ("전화", 100))
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
 AUTOSAVE_MS = 60_000
 
@@ -86,9 +80,11 @@ class App:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.messages: queue.Queue[str] = queue.Queue()
-        self.result = None
+        self.factories: list = []       # 공장 찾기 결과 (거르기 전)
+        self.shown: list = []           # 지금 표에 보이는 것
         self.running = False
         saved = load_settings()
+        self._saved = saved             # 화면에 없는 예전 설정(나라장터 키 등)은 지우지 않는다
 
         root.title(f"원청 찾기 — 자동제어 판넬  ({label()})")
         root.geometry("1060x740")
@@ -113,14 +109,12 @@ class App:
         help_tab = ttk.Frame(self.tabs)
         goal_tab = ttk.Frame(self.tabs)
         self.tabs.add(goal_tab, text="  ★ 최우선 목표  ")
-        self.tabs.add(find_tab, text="  ① 일감 줄 회사 찾기  ")
+        self.tabs.add(find_tab, text="  ① 공장 찾기  ")
         self.tabs.add(sales_tab, text="  ② 매출 보고 채우기  ")
         self.tabs.add(help_tab, text="  도움말  ")
 
         self.find_tab, self.sales_tab, self.goal_tab = find_tab, sales_tab, goal_tab
-        self._build_inputs(find_tab, saved)
-        self._build_table(find_tab)
-        self._build_log(find_tab)
+        self._build_find(find_tab, saved)
         self._build_sales(sales_tab, saved)
         self._build_help(help_tab)
         self._build_goal(goal_tab, saved)
@@ -136,122 +130,79 @@ class App:
     def _autosave(self) -> None:
         """입력 칸을 조용히 저장한다. 실패해도 화면은 계속 써야 하니 그냥 넘어간다."""
         try:
-            save_settings(self.current_options())
+            save_settings({**self._saved, **self.current_options()})
         except OSError:
             pass
         self.root.after(AUTOSAVE_MS, self._autosave)
 
     def on_close(self) -> None:
         try:
-            save_settings(self.current_options())
+            save_settings({**self._saved, **self.current_options()})
         except OSError:
             pass
         self.root.destroy()
 
     # --- 화면 구성 -----------------------------------------------------------
 
-    def _build_inputs(self, root, saved: dict) -> None:
+    def _build_find(self, root, saved: dict) -> None:
+        """① 공장 찾기: 등록공장 파일 → 거리 안의 공장 → 상장사·계열사·규모로 거르기.
+
+        나라장터(공사를 따낸 회사)는 뺐다. 그중엔 판넬을 직접 만드는 경쟁사가 섞이고,
+        판넬을 실제로 쓰는 쪽은 공장이다 — 특히 규모 있는 상장사·계열사 공장.
+        """
         box = ttk.LabelFrame(root, text="찾을 조건", padding=10)
         box.pack(fill=X, padx=10, pady=(10, 5))
 
-        def remembered(key: str, choices, fallback: str) -> str:
-            """저장된 값이 지금 목록에 없으면(문구를 다듬었다면) 기본값으로 돌린다."""
-            value = saved.get(key)
-            return value if value in choices else fallback
-
-        self.g2b_key = StringVar(value=saved.get("g2b_key", ""))
+        self.factory_file = StringVar(value=saved.get("factory_file", ""))
         self.dart_key = StringVar(value=saved.get("dart_key", ""))
-        self.nts_key = StringVar(value=saved.get("nts_key", ""))
-        self.days = StringVar(value=str(saved.get("days", 90)))
-        self.distance = StringVar(
-            value=remembered("distance", DISTANCE_CHOICES, _label_for(DISTANCE_CHOICES, 70.0)))
-        self.overlap = StringVar(
-            value=remembered("overlap", OVERLAP_CHOICES, list(OVERLAP_CHOICES)[0]))
-        self.sector = StringVar(value=saved.get("sector", SECTOR_ALL))
-        self.include_orgs = BooleanVar(value=saved.get("include_demand_orgs", True))
-        # 매출이 줄었을 때는 큰 한 방보다 작아도 자주 나오는 일이 낫다 — 기본으로 켠다.
-        self.prefer_small = BooleanVar(value=saved.get("prefer_small", True))
-        self.fresh = BooleanVar(value=False)
+        value = saved.get("distance")
+        self.distance = StringVar(value=value if value in DISTANCE_CHOICES
+                                  else _label_for(DISTANCE_CHOICES, 70.0))
 
-        # '어디서 찾을까요'(상장사 목록 훑기·연습용 가짜 자료)는 뺐다. 상장사는 대기업이라
-        # '작고 꾸준한 곳'과 반대고, 연습용은 인증키를 받은 뒤로 쓸 일이 없다.
-        ttk.Label(box, text="최근 며칠치").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(box, textvariable=self.days, width=10).grid(row=0, column=1, sticky=W, pady=4)
-
-        ttk.Label(box, text="나라장터 인증키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(box, textvariable=self.g2b_key, width=46, show="•").grid(
-            row=1, column=1, columnspan=2, sticky=W, pady=4)
-
-        ttk.Label(box, text="기업정보 인증키").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="공장 목록 파일").grid(row=0, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.factory_file, width=60).grid(
+            row=0, column=1, columnspan=2, sticky=W, pady=4)
+        ttk.Button(box, text="파일 찾기", command=self.on_pick_factory_file).grid(
+            row=0, column=3, sticky=W, padx=6)
+        ttk.Label(box, text="기업정보 인증키").grid(row=1, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Entry(box, textvariable=self.dart_key, width=46, show="•").grid(
-            row=2, column=1, columnspan=2, sticky=W, pady=4)
-
-        ttk.Label(box, text="폐업조회 인증키").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(box, textvariable=self.nts_key, width=46, show="•").grid(
-            row=3, column=1, columnspan=2, sticky=W, pady=4)
-        ttk.Label(box, text="없어도 됩니다", foreground="#666").grid(row=3, column=3, sticky=W)
-
-        ttk.Label(box, text="안성에서 얼마나").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
+            row=1, column=1, sticky=W, pady=4)
+        ttk.Label(box, text="상장사·계열사 확인에 씁니다", foreground="#666").grid(
+            row=1, column=2, sticky=W, padx=6)
+        ttk.Label(box, text="안성에서 얼마나").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
-                     state="readonly", width=18).grid(row=4, column=1, sticky=W, pady=4)
-
-        ttk.Label(box, text="업종 고르기").grid(row=4, column=2, sticky=W, padx=(20, 8))
-        self.sector_box = ttk.Combobox(box, textvariable=self.sector,
-                                       values=sector_names(load_config()),
-                                       state="readonly", width=22)
-        self.sector_box.grid(row=4, column=3, sticky=W)
-
-        ttk.Label(box, text="케이씨그룹과 겹치면").grid(row=5, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Combobox(box, textvariable=self.overlap, values=list(OVERLAP_CHOICES),
-                     state="readonly", width=30).grid(row=5, column=1, columnspan=2,
-                                                      sticky=W, pady=4)
-
-        ttk.Checkbutton(box, text="관공서·공공기관도 같이 보기",
-                        variable=self.include_orgs).grid(row=5, column=3, sticky=W)
-        ttk.Checkbutton(box, text="작고 꾸준한 곳 위주 (우리 월매출의 3~20% 크기 · 경기 덜 타는 업종)",
-                        variable=self.prefer_small).grid(row=6, column=1, columnspan=3, sticky=W)
-        ttk.Checkbutton(box, text="저장해 둔 결과 무시하고 전부 새로 받기 (느림)",
-                        variable=self.fresh).grid(row=7, column=1, columnspan=3, sticky=W)
-
-        # 제안서에만 쓰는 우리 회사 정보. 화면에 늘 펼쳐 둘 필요가 없어서
-        # [제안서 만들기]를 누를 때 뜨는 작은 창에서 받는다(값은 자동저장된다).
-        self.profile_name = StringVar(value=saved.get("profile_name", ""))
-        self.profile_founded = StringVar(value=saved.get("profile_founded", ""))
-        self.profile_certs = StringVar(value=saved.get("profile_certs", ""))
-        self.profile_track = StringVar(value=saved.get("profile_track", ""))
-        self.profile_contact = StringVar(value=saved.get("profile_contact", ""))
-        self.profile_phone = StringVar(value=saved.get("profile_phone", ""))
+                     state="readonly", width=18).grid(row=2, column=1, sticky=W, pady=4)
+        ttk.Label(box, foreground="#666", justify=LEFT, text=(
+            "공장 목록 파일: 공공데이터포털(data.go.kr)에서 '전국등록공장현황'을 검색해 받은 CSV "
+            "(팩토리온 엑셀도 됩니다).")).grid(row=3, column=0, columnspan=4, sticky=W, pady=(4, 0))
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
-        self.run_button = _Button(buttons, text="  후보 찾기  ", command=self.on_run,
-                                   bootstyle="primary")
+        self.run_button = _Button(buttons, text="  공장 찾기  ", command=self.on_find_factories,
+                                  bootstyle="primary")
         self.run_button.pack(side=LEFT)
-        self.save_button = _Button(buttons, text="엑셀로 저장",
-                                    command=self.on_save, state="disabled",
-                                    bootstyle="success-outline")
-        self.save_button.pack(side=LEFT, padx=6)
-        _Button(buttons, text="영업 목록에 넣기",
-                command=self.on_add_to_leads,
-                bootstyle="info-outline").pack(side=LEFT, padx=6)
-        self.proposal_button = _Button(buttons, text="제안서 만들기",
-                                       command=self.on_make_proposal,
-                                       bootstyle="info-outline")
-        self.proposal_button.pack(side=LEFT, padx=6)
-        self.market_button = ttk.Button(buttons, text="관공서 판넬 시장", state="disabled",
-                                        command=self.on_show_market)
-        self.market_button.pack(side=LEFT)
-        _Button(buttons, text="공장 찾기", command=self.on_find_factories,
-                bootstyle="primary-outline").pack(side=LEFT)
-        self.factory_file = StringVar(value=saved.get("factory_file", ""))
+        self.only_listed = BooleanVar(value=True)       # 상장사 + 그 계열사
+        self.only_big = BooleanVar(value=False)
+        self.only_machines = BooleanVar(value=False)
+        from prime_contractor.makers import MIN_AREA_M2, MIN_EMPLOYEES
+        self.filter_boxes = [
+            ttk.Checkbutton(buttons, variable=self.only_listed, text="상장사·계열사 공장만"),
+            ttk.Checkbutton(buttons, variable=self.only_big,
+                            text=f"규모 있는 곳만 (직원 {MIN_EMPLOYEES}명+·{MIN_AREA_M2:,}㎡+·금감원 등록)"),
+            ttk.Checkbutton(buttons, variable=self.only_machines, text="기계·장비 만드는 공장만"),
+        ]
+        for box_ in self.filter_boxes:
+            box_.pack(side=LEFT, padx=(14, 0))
+            box_.configure(state="disabled")
+        for var in (self.only_listed, self.only_big, self.only_machines):
+            var.trace_add("write", lambda *_a: self._refresh_factories())
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
-    def _build_table(self, root) -> None:
         frame = ttk.Frame(root)
-        frame.pack(fill=BOTH, expand=True, padx=10, pady=8)
-        self.tree = ttk.Treeview(frame, columns=[c for c, _ in COLUMNS], show="headings")
-        for name, width in COLUMNS:
+        frame.pack(fill=BOTH, expand=True, padx=10, pady=(8, 4))
+        self.tree = ttk.Treeview(frame, columns=[c for c, _ in FACTORY_COLUMNS], show="headings")
+        for name, width in FACTORY_COLUMNS:
             self.tree.heading(name, text=name)
             self.tree.column(name, width=width, anchor=W)
         bar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
@@ -259,10 +210,21 @@ class App:
         self.tree.pack(side=LEFT, fill=BOTH, expand=True)
         bar.pack(side=RIGHT, fill=Y)
 
-    def _build_log(self, root) -> None:
-        box = ttk.LabelFrame(root, text="진행 상황 (여기에 설명이 나옵니다)", padding=6)
-        box.pack(fill=X, padx=10, pady=(0, 10))
-        self.log = scrolledtext.ScrolledText(box, height=7, state="disabled")
+        act = ttk.Frame(root)
+        act.pack(fill=X, padx=10)
+        self.lead_add_button = _Button(act, text="고른 회사를 영업 목록에 넣기",
+                                       command=self.on_add_to_leads, state="disabled",
+                                       bootstyle="info-outline")
+        self.lead_add_button.pack(side=LEFT)
+        self.save_button = _Button(act, text="엑셀로 저장 (보이는 것만)", command=self.on_save,
+                                   state="disabled", bootstyle="success-outline")
+        self.save_button.pack(side=LEFT, padx=6)
+        self.factory_info = ttk.Label(act, text="", foreground="#333", wraplength=700, justify=LEFT)
+        self.factory_info.pack(side=LEFT, padx=10)
+
+        logbox = ttk.LabelFrame(root, text="진행 상황 (여기에 설명이 나옵니다)", padding=6)
+        logbox.pack(fill=X, padx=10, pady=(6, 10))
+        self.log = scrolledtext.ScrolledText(logbox, height=5, state="disabled")
         self.log.pack(fill=X)
 
     def _build_help(self, root) -> None:
@@ -623,22 +585,9 @@ class App:
 
     def current_options(self) -> dict:
         return {
-            "g2b_key": self.g2b_key.get(),
             "dart_key": self.dart_key.get(),
-            "nts_key": self.nts_key.get(),
-            "days": self.days.get(),
             "distance": self.distance.get(),
-            "overlap": self.overlap.get(),
-            "sector": self.sector.get(),
-            "include_demand_orgs": self.include_orgs.get(),
-            "prefer_small": self.prefer_small.get(),
             "factory_file": self.factory_file.get(),
-            "profile_name": self.profile_name.get(),
-            "profile_founded": self.profile_founded.get(),
-            "profile_certs": self.profile_certs.get(),
-            "profile_track": self.profile_track.get(),
-            "profile_contact": self.profile_contact.get(),
-            "profile_phone": self.profile_phone.get(),
             "sales_path": self.sales_path.get(),
             "sales_vat_included": self.sales_vat_included.get(),
             "fixed_cost": self.fixed_cost.get(),
@@ -653,125 +602,6 @@ class App:
             "goal_per_client": self.goal_per_client.get(),
             "goal_cash": self.goal_cash.get(),
         }
-
-    def on_run(self) -> None:
-        if self.running:
-            return
-        options = self.current_options()
-        if not options["g2b_key"].strip():
-            messagebox.showwarning(
-                "인증키가 필요합니다",
-                "'나라장터 인증키' 칸을 채워주세요.\n\n"
-                "키 받는 곳은 도움말 탭에 적어두었습니다.")
-            return
-
-        self.running = True
-        self.run_button.configure(state="disabled")
-        self.save_button.configure(state="disabled")
-        self.status.configure(text="찾는 중…")
-        self.tree.delete(*self.tree.get_children())
-        threading.Thread(target=self._work, args=(options,), daemon=True).start()
-
-    def _work(self, options: dict) -> None:
-        handler = QueueLogHandler(self.messages)
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        root_log = logging.getLogger("prime_contractor")
-        root_log.addHandler(handler)
-        root_log.setLevel(logging.INFO)
-        try:
-            result = self._screen(options)
-            self.root.after(0, self._done, result)
-        except Exception as exc:                       # 화면이 통째로 죽는 것만은 막는다
-            self.say(f"오류: {redact_secrets(exc)}")
-            self.root.after(0, self._failed, exc)
-        finally:
-            root_log.removeHandler(handler)
-
-    def _screen(self, options: dict):
-        cfg = build_config(options)
-        if not self.book and options.get("sales_path"):
-            # ② 탭에서 [계산하기]를 안 눌렀어도 저장된 매출 장부가 있으면 읽어 둔다.
-            # 우리 월매출을 모르면 '클수록 좋다'로 점수를 매겨, 직원 6명 회사가 감당 못 할
-            # 큰 곳이 1등에 오른다.
-            try:
-                self.book = load_sales(options["sales_path"])
-            except (OSError, ValueError):
-                self.book = None
-        if self.book and self.book.average_revenue():
-            from dataclasses import replace
-            ours = self.book.average_revenue()
-            cfg = replace(cfg, our_monthly_revenue=ours)
-            if cfg.prefer_small:
-                self.say(f"작고 꾸준한 곳 위주: 한 달 판넬이 우리 월매출({ours / 1e4:,.0f}만원)의 "
-                         f"3~20%({ours * 0.03 / 1e4:,.0f}~{ours * 0.2 / 1e4:,.0f}만원)인 곳을 "
-                         "가장 좋게 보고, 경기를 덜 타는 업종에 점수를 더 줍니다.")
-            else:
-                self.say(f"우리 월매출 {ours / 1e4:,.0f}만원 기준으로, 너무 작거나 너무 큰 곳은 "
-                         f"점수를 낮춥니다.")
-        else:
-            self.say("② 탭에서 매출 장부를 불러오면 '우리 크기에 맞는 곳'으로 점수를 매깁니다.")
-        result = self._fetch(cfg)
-
-        sector = options.get("sector")
-        if sector and sector != SECTOR_ALL:
-            filter_sector(result, sector)
-        return result
-
-    def _fetch(self, cfg):
-        """나라장터에서 받아 후보를 만든다. 시험할 때는 이것만 바꿔 끼우면 된다."""
-        from prime_contractor.sources.g2b import G2BClient, default_cache_dir
-        self.say(f"나라장터에서 최근 {cfg.lookback_days}일치 공사를 찾아봅니다…")
-        dart = nts = None
-        if cfg.dart_api_key:
-            from prime_contractor.sources.dart import DartClient
-            dart = DartClient(cfg.dart_api_key)
-        if cfg.nts_service_key:
-            from prime_contractor.sources.nts import NtsClient
-            nts = NtsClient(cfg.nts_service_key)
-            self.say("폐업한 회사는 국세청에 확인해서 빼겠습니다.")
-        g2b = G2BClient(cfg.g2b_service_key, cache_dir=default_cache_dir())
-        if self.fresh.get() and g2b.cache:
-            self.say(f"저장해 둔 조회 결과 {g2b.cache.clear()}건을 지우고 새로 받습니다.")
-        return run_screen(cfg, g2b_client=g2b, dart_client=dart, nts_client=nts)
-
-    def _done(self, result) -> None:
-        self.result = result
-        for i, c in enumerate(result.passed, 1):
-            dist = f"{c.distance_km:.0f}km" if c.distance_km is not None else "미상"
-            # 조회 기간 전체 합계(수십억)는 '한 달에 우리한테 올 일'로 오해하기 쉬워
-            # 한 달치로 나눠 보인다.
-            month = getattr(c.fitness, "monthly_panel_amount", 0)
-            self.tree.insert("", END, values=(
-                i, c.grade or "-", c.name, "원청" if c.kind == "contractor" else "발주처",
-                c.sector or "미분류", c.region or "미상", dist,
-                _money(month), f"{c.score:.1f}"),
-                tags=(c.grade,))
-        for grade, color in (("A", "#e8f5e9"), ("B", "#f1f8e9")):
-            self.tree.tag_configure(grade, background=color)
-        self.tree.bind("<Double-1>", self._show_detail)
-        for note in result.notes:
-            self.say(note)
-        stats = " / ".join(f"{k} {v}" for k, v in result.stats.items())
-        self.say(f"완료 — {stats}")
-        grades = {}
-        for c in result.passed:
-            grades[c.grade] = grades.get(c.grade, 0) + 1
-        summary = " ".join(f"{g}등급 {grades[g]}곳" for g in "ABCD" if g in grades)
-        self.say("찾은 회사: " + (summary or "없음"))
-        self.say("A등급부터 연락해 보세요. B등급까지는 연락할 만합니다.")
-        self.say("회사 이름을 두 번 클릭하면 왜 그 점수인지 자세히 나옵니다.")
-        self.status.configure(text=f"{len(result.passed)}곳 찾음")
-        self.save_button.configure(
-            state="normal" if result.passed else "disabled")
-        self.market_button.configure(state="normal" if result.market else "disabled")
-        if not result.passed:
-            messagebox.showinfo("찾은 곳이 없습니다",
-                                "조건에 맞는 회사가 없습니다.\n\n"
-                                "이렇게 해보세요\n"
-                                "  · '최근 며칠치' 를 180 이나 365 로 늘리기\n"
-                                "  · '안성에서 얼마나' 를 100km 로 넓히기\n"
-                                "  · '업종 고르기' 를 '업종 안 가림' 으로 두기")
-        self._finish()
 
     # --- 최우선 목표 탭 ---------------------------------------------------------
 
@@ -919,131 +749,37 @@ class App:
             messagebox.showerror("저장하지 못했습니다", str(exc))
         self._render_leads()
 
-    def on_add_to_leads(self) -> None:
-        if not self.result:
-            messagebox.showinfo("먼저 찾아 주세요", "[후보 찾기]로 회사를 찾은 뒤 표에서 골라 주세요.")
-            return
-        picked = self.tree.selection() or ((self.tree.focus(),) if self.tree.focus() else ())
-        if not picked:
-            messagebox.showinfo("회사를 고르세요",
-                                "표에서 회사를 클릭해 고르세요.\n"
-                                "Ctrl 을 누른 채 클릭하면 여러 곳을 한 번에 고를 수 있습니다.")
-            return
-        added = 0
-        for item in picked:
-            try:
-                cand = self.result.passed[int(self.tree.item(item, "values")[0]) - 1]
-            except (ValueError, IndexError):
-                continue
-            _, created = self.lead_book.add_candidate(cand)
-            added += created
-        self._save_leads()
-        self.say(f"영업 목록에 {added}곳 넣었습니다. ★ 최우선 목표 탭에서 진행을 기록하세요.")
-
-    def _current_profile(self):
-        from prime_contractor.proposal import CompanyProfile
-        return CompanyProfile(
-            name=self.profile_name.get().strip(),
-            founded_year=self.profile_founded.get().strip(),
-            certifications=self.profile_certs.get().strip(),
-            track_record=self.profile_track.get().strip(),
-            contact_name=self.profile_contact.get().strip(),
-            contact_phone=self.profile_phone.get().strip(),
-        )
-
-    def on_make_proposal(self) -> None:
-        if not self.result:
-            messagebox.showinfo("먼저 찾아 주세요", "[후보 찾기]로 회사를 찾은 뒤 표에서 골라 주세요.")
-            return
-        picked = self.tree.selection() or ((self.tree.focus(),) if self.tree.focus() else ())
-        if not picked:
-            messagebox.showinfo("회사를 고르세요",
-                                "표에서 회사를 클릭해 고르세요.\n"
-                                "Ctrl 을 누른 채 클릭하면 여러 곳을 한 번에 고를 수 있습니다.")
-            return
-        candidates = []
-        for item in picked:
-            try:
-                candidates.append(self.result.passed[int(self.tree.item(item, "values")[0]) - 1])
-            except (ValueError, IndexError):
-                continue
-        if not candidates:
-            return
-        if not self._ask_profile(len(candidates)):
-            return
-        folder = filedialog.askdirectory(title="제안서를 저장할 폴더를 고르세요")
-        if not folder:
-            return
-        from prime_contractor.proposal import build_proposal
-        profile = self._current_profile()
-        made = []
-        try:
-            for cand in candidates:
-                text = build_proposal(cand, profile)
-                safe_name = re.sub(r'[\\/*?:"<>|]', "_", cand.name).strip() or "회사"
-                path = Path(folder) / f"제안서_{safe_name}.txt"
-                path.write_text(text, encoding="utf-8")
-                made.append(path.name)
-        except OSError as exc:
-            messagebox.showerror("저장하지 못했습니다", str(exc))
-            return
-        self.say(f"제안서 {len(made)}개를 만들었습니다: {folder}")
-        messagebox.showinfo("만들었습니다",
-                            f"{len(made)}개 파일을 저장했습니다 — 보내기 전에 한 번 읽어보세요.\n\n{folder}")
-
-    def on_show_market(self) -> None:
-        """관공서가 판넬을 물품으로 직접 산 계약 — 조달 등록하면 우리가 팔 수 있는 시장."""
-        from tkinter import Toplevel
-        market = self.result.market if self.result else []
-        if not market:
-            messagebox.showinfo("관공서 판넬 시장", "이번 조회 기간에 관공서가 판넬을 물품으로 산 기록이 "
-                                               "없습니다.")
-            return
-        win = Toplevel(self.root)
-        win.title("관공서 판넬 시장 — 관공서가 판넬을 직접 산 계약")
-        win.geometry("980x560")
-        body = ttk.Frame(win, padding=10)
-        body.pack(fill=BOTH, expand=True)
-        ttk.Label(body, text=_market_summary(market), justify=LEFT, wraplength=940).pack(
-            fill=X, pady=(0, 8))
-        cols = (("날짜", 90), ("사는 기관", 200), ("무엇을 샀나 (공고명)", 380),
-                ("납품한 업체", 170), ("금액", 100))
-        frame = ttk.Frame(body)
-        frame.pack(fill=BOTH, expand=True)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
-        for name, width in cols:
-            tree.heading(name, text=name)
-            tree.column(name, width=width, anchor=W)
-        bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=bar.set)
-        tree.pack(side=LEFT, fill=BOTH, expand=True)
-        bar.pack(side=RIGHT, fill=Y)
-        for a in market:
-            tree.insert("", END, values=((a.opening_dt or "")[:10], a.demand_org, a.title,
-                                         a.winner_name, _money(a.amount)))
-        ttk.Label(body, foreground="#666", justify=LEFT, wraplength=940, text=(
-            "관공서는 판넬을 '직접생산확인증명서'가 있는 중소기업한테서만 삽니다. 우리가 조달청에 "
-            "등록하고 확인증을 받으면 이 계약들에 직접 들어갈 수 있습니다. 납품한 업체는 그 시장의 "
-            "경쟁사이고, 금액은 단가를 가늠하는 데 쓰세요. 엑셀로 저장하면 같은 목록이 "
-            "'관공서 판넬 시장' 시트에 들어갑니다.")).pack(fill=X, pady=(8, 0))
-
     # --- 공장 찾기 -----------------------------------------------------------------
 
-    def on_find_factories(self) -> None:
-        """등록공장 파일에서 근처 공장을 고른다 — 판넬을 실제로 쓰는 곳."""
+    def on_pick_factory_file(self) -> None:
         start = Path(self.factory_file.get()).parent if self.factory_file.get() else None
         path = filedialog.askopenfilename(
             title="전국 등록공장 현황 파일을 고르세요 (공공데이터포털·팩토리온)",
             initialdir=str(start) if start and start.exists() else None,
             filetypes=[("공장 목록", "*.csv *.xlsx"), ("모든 파일", "*.*")])
+        if path:
+            self.factory_file.set(path)
+
+    def on_find_factories(self) -> None:
+        """등록공장 파일에서 근처 공장을 고른다 — 판넬을 실제로 쓰는 곳."""
+        if self.running:
+            return
+        if not self.factory_file.get().strip():
+            self.on_pick_factory_file()
+        path = self.factory_file.get().strip()
         if not path:
             return
-        self.factory_file.set(path)
+        if not Path(path).exists():
+            messagebox.showwarning("파일이 없습니다", f"{path}\n\n공장 목록 파일을 다시 골라 주세요.")
+            return
         cfg = build_config(self.current_options())
+        self.running = True
+        self.run_button.configure(state="disabled")
+        self.status.configure(text="찾는 중…")
         self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
-        threading.Thread(target=self._load_makers, args=(path, cfg), daemon=True).start()
+        threading.Thread(target=self._load_factories, args=(path, cfg), daemon=True).start()
 
-    def _load_makers(self, path: str, cfg) -> None:
+    def _load_factories(self, path: str, cfg) -> None:
         from prime_contractor.makers import (
             build_group_map, find_factories, has_size_columns, listed_names,
             mark_dart_registered, mark_groups, read_factory_file)
@@ -1051,7 +787,7 @@ class App:
             records = read_factory_file(path)
             factories = find_factories(records, within_km=cfg.within_km)
         except (OSError, ValueError) as exc:
-            self.root.after(0, messagebox.showerror, "공장 목록을 읽지 못했습니다", str(exc))
+            self.root.after(0, self._factories_failed, str(exc))
             return
         sized = has_size_columns(records)
         knows_listed = False
@@ -1084,164 +820,98 @@ class App:
                 self.say(f"DART 확인 실패(목록은 그대로): {redact_secrets(exc)}")
         else:
             self.say("'기업정보 인증키'가 없어 상장사인지 확인하지 못했습니다. 키를 넣으면 "
-                     "상장사 공장만 골라 볼 수 있습니다.")
-        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외).")
-        self.root.after(0, self._show_makers, factories, cfg.within_km,
+                     "상장사·계열사 공장만 골라 볼 수 있습니다.")
+        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외). "
+                 "연락은 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 하세요.")
+        self.root.after(0, self._factories_loaded, factories, cfg.within_km,
                         sized or knows_listed, knows_listed)
 
-    def _show_makers(self, factories, within, can_size: bool = True,
-                     knows_listed: bool = False) -> None:
-        from collections import Counter
-        from tkinter import Toplevel
-        from prime_contractor.makers import (
-            MIN_AREA_M2, MIN_EMPLOYEES, is_sizable, size_text, steady_text)
+    def _factories_failed(self, message: str) -> None:
+        self.running = False
+        self.run_button.configure(state="normal")
+        self.status.configure(text="실패")
+        messagebox.showerror("공장 목록을 읽지 못했습니다", message)
+
+    def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool) -> None:
+        self.running = False
+        self.run_button.configure(state="normal")
+        # 경기를 덜 타는 분야 먼저, 같으면 가까운 순.
+        self.factories = sorted(factories, key=lambda c: (-c.sector_weight, c.distance_km))
+        self.factory_within = within
+        self.filter_boxes[0].configure(state="normal" if knows_listed else "disabled")
+        self.filter_boxes[1].configure(state="normal" if can_size else "disabled")
+        self.filter_boxes[2].configure(state="normal")
+        # 작은 공장은 수작업이 많아 판넬 수요가 적다 — 상장사·계열사 공장을 기본으로 본다.
+        self.only_listed.set(knows_listed)
+        self.only_big.set(can_size and not knows_listed)
+        self._refresh_factories()
         if not factories:
             messagebox.showinfo("공장 찾기", "거리 안에서 공장을 찾지 못했습니다.\n"
                                           "'안성에서 얼마나'를 넓혀 보세요.")
+
+    def _filter_rule(self) -> str:
+        bits = []
+        if self.only_listed.get():
+            bits.append("상장사·계열사 공장만")
+        if self.only_big.get():
+            bits.append("규모 있는 곳만")
+        if self.only_machines.get():
+            bits.append("기계·장비 만드는 공장만")
+        return ", ".join(bits)
+
+    def _refresh_factories(self) -> None:
+        from collections import Counter
+        from prime_contractor.makers import is_sizable, size_text, steady_text
+        self.shown = [c for c in self.factories
+                      if (not self.only_listed.get() or c.stock_code or c.group)
+                      and (not self.only_big.get() or is_sizable(c))
+                      and (not self.only_machines.get() or c.kind == "maker")]
+        self.tree.delete(*self.tree.get_children())
+        for i, c in enumerate(self.shown, 1):
+            self.tree.insert("", END, iid=str(i), values=(
+                i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
+                c.products, c.region, f"{c.distance_km:.0f}km", c.phone or "-"))
+        if not self.factories:
+            self.status.configure(text="준비됨")
             return
-        ordered = sorted(factories, key=lambda c: (-c.sector_weight, c.distance_km))
-        win = Toplevel(self.root)
-        win.geometry("1080x620")
-        body = ttk.Frame(win, padding=10)
-        body.pack(fill=BOTH, expand=True)
-        info = ttk.Label(body, justify=LEFT, wraplength=1040)
-        info.pack(fill=X, pady=(0, 6))
-        opts = ttk.Frame(body)
-        opts.pack(fill=X, pady=(0, 6))
-        # 작은 공장은 수작업이 많아 판넬 수요가 적다. 상장사 공장을 기본으로 본다.
-        only_listed = BooleanVar(value=knows_listed)        # 상장사 + 그 계열사
-        only_big = BooleanVar(value=can_size and not knows_listed)
-        only_machines = BooleanVar(value=False)
-        ttk.Checkbutton(opts, variable=only_listed, text="상장사·계열사 공장만",
-                        state="normal" if knows_listed else "disabled").pack(side=LEFT)
-        ttk.Checkbutton(opts, variable=only_big,
-                        text=f"규모 있는 곳만 (직원 {MIN_EMPLOYEES}명+ · 면적 {MIN_AREA_M2:,}㎡+ · "
-                             "금감원 등록 회사)",
-                        state="normal" if can_size else "disabled").pack(side=LEFT, padx=16)
-        ttk.Checkbutton(opts, variable=only_machines,
-                        text="기계·장비 만드는 공장만").pack(side=LEFT)
-        cols = (("#", 40), ("회사", 170), ("그룹", 130), ("분야", 115), ("경기", 55),
-                ("규모", 95), ("생산품", 190), ("지역", 55), ("거리", 50), ("전화", 100))
-        frame = ttk.Frame(body)
-        frame.pack(fill=BOTH, expand=True)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
-        for name, width in cols:
-            tree.heading(name, text=name)
-            tree.column(name, width=width, anchor=W)
-        bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=bar.set)
-        tree.pack(side=LEFT, fill=BOTH, expand=True)
-        bar.pack(side=RIGHT, fill=Y)
-        shown: list = []
+        self.status.configure(text=f"{len(self.factories)}곳 중 {len(self.shown)}곳")
+        fields = Counter(c.sector for c in self.shown).most_common(4)
+        self.factory_info.configure(text=(
+            "많은 분야: " + (", ".join(f"{f} {n}" for f, n in fields) or "-")))
+        state = "normal" if self.shown else "disabled"
+        self.save_button.configure(state=state)
+        self.lead_add_button.configure(state=state)
 
-        def rule_text() -> str:
-            bits = []
-            if only_listed.get():
-                bits.append("상장사·계열사 공장만")
-            if only_big.get():
-                bits.append("규모 있는 곳만")
-            if only_machines.get():
-                bits.append("기계·장비 만드는 공장만")
-            return ", ".join(bits)
+    def on_add_to_leads(self) -> None:
+        picked = self.tree.selection()
+        if not picked:
+            messagebox.showinfo("회사를 고르세요", "표에서 회사를 클릭해 고르세요 (Ctrl+클릭으로 여러 곳).")
+            return
+        added = sum(self.lead_book.add_candidate(self.shown[int(i) - 1])[1] for i in picked)
+        self._save_leads()
+        self.say(f"영업 목록에 {added}곳 넣었습니다. ★ 최우선 목표 탭에서 진행을 기록하세요.")
 
-        def refresh(*_a) -> None:
-            shown[:] = [c for c in ordered
-                        if (not only_listed.get() or c.stock_code or c.group)
-                        and (not only_big.get() or is_sizable(c))
-                        and (not only_machines.get() or c.kind == "maker")]
-            tree.delete(*tree.get_children())
-            for i, c in enumerate(shown, 1):
-                tree.insert("", END, iid=str(i), values=(
-                    i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
-                    c.products, c.region, f"{c.distance_km:.0f}km", c.phone or "-"))
-            fields = Counter(c.sector for c in shown).most_common(6)
-            win.title(f"공장 찾기 — {len(shown)}곳")
-            info.configure(text=(
-                f"거리 안의 공장 {len(ordered)}곳 중 {len(shown)}곳"
-                + (f" ({rule_text()})" if rule_text() else "") + ". 경기 덜 타는 분야 먼저, 가까운 순.\n"
-                "많은 분야: " + (", ".join(f"{f} {n}" for f, n in fields) or "-") + "\n"
-                "연락은 본사 구매팀보다 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 "
-                "'판넬 교체·라인 개조 때 견적 낼 수 있게 해 달라'고 하세요."
-                + ("" if knows_listed else "\n※ '기업정보 인증키'가 없어 상장사인지 모릅니다 — "
-                                           "키를 넣고 다시 찾으면 상장사 공장만 볼 수 있습니다.")))
-
-        only_listed.trace_add("write", refresh)
-        only_big.trace_add("write", refresh)
-        only_machines.trace_add("write", refresh)
-        refresh()
-
-        def add_picked() -> None:
-            picked = tree.selection()
-            if not picked:
-                messagebox.showinfo("회사를 고르세요", "목록에서 회사를 클릭해 고르세요 (Ctrl+클릭으로 여러 곳).",
-                                    parent=win)
-                return
-            added = sum(self.lead_book.add_candidate(shown[int(i) - 1])[1] for i in picked)
-            self._save_leads()
-            messagebox.showinfo("넣었습니다", f"영업 목록에 {added}곳 넣었습니다.", parent=win)
-
-        def save() -> None:
-            from datetime import date
-            from prime_contractor.report import write_factories_xlsx
-            path = filedialog.asksaveasfilename(
-                parent=win, defaultextension=".xlsx",
-                initialfile=f"공장목록_{date.today():%Y%m%d}.xlsx", filetypes=[("엑셀", "*.xlsx")])
-            if not path:
-                return
-            try:
-                write_factories_xlsx(shown, path, within_km=within, rule=rule_text())
-            except OSError as exc:
-                messagebox.showerror("저장하지 못했습니다", f"{exc}\n\n같은 이름의 파일이 엑셀에 "
-                                     "열려 있으면 닫고 다시 해주세요.", parent=win)
-                return
-            if messagebox.askyesno("저장 완료", f"{path}\n\n지금 보이는 {len(shown)}곳을 "
-                                   "저장했습니다. 폴더를 열까요?", parent=win):
-                _open_folder(Path(path).parent)
-
-        row = ttk.Frame(body)
-        row.pack(fill=X, pady=(8, 0))
-        _Button(row, text="고른 회사를 영업 목록에 넣기", command=add_picked,
-                bootstyle="info-outline").pack(side=LEFT)
-        _Button(row, text="엑셀로 저장 (보이는 것만)", command=save,
-                bootstyle="success-outline").pack(side=LEFT, padx=6)
-
-    def _ask_profile(self, count: int) -> bool:
-        """제안서에 넣을 우리 회사 정보를 작은 창에서 확인받는다. [만들기]를 누르면 True."""
-        from tkinter import Toplevel
-        win = Toplevel(self.root)
-        win.title("제안서에 넣을 우리 회사 정보")
-        win.transient(self.root)
-        win.resizable(False, False)
-        body = ttk.Frame(win, padding=14)
-        body.pack(fill=BOTH, expand=True)
-
-        fields = (("회사명", self.profile_name, 24), ("설립연도", self.profile_founded, 8),
-                  ("보유 인증", self.profile_certs, 24), ("대표 실적", self.profile_track, 24),
-                  ("담당자", self.profile_contact, 12), ("연락처", self.profile_phone, 18))
-        for i, (label, var, width) in enumerate(fields):
-            row, col = divmod(i, 2)
-            ttk.Label(body, text=label).grid(row=row, column=col * 2, sticky=W,
-                                             padx=(0 if col == 0 else 16, 6), pady=4)
-            ttk.Entry(body, textvariable=var, width=width).grid(
-                row=row, column=col * 2 + 1, sticky=W, pady=4)
-        ttk.Label(body, text="비워 둔 항목은 제안서에서 빠집니다. 적은 내용은 다음에도 그대로 남습니다.",
-                  foreground="#666").grid(row=3, column=0, columnspan=4, sticky=W, pady=(8, 0))
-
-        confirmed = BooleanVar(value=False)
-
-        def go() -> None:
-            confirmed.set(True)
-            win.destroy()
-
-        row = ttk.Frame(body)
-        row.grid(row=4, column=0, columnspan=4, sticky="e", pady=(12, 0))
-        ttk.Button(row, text="취소", command=win.destroy).pack(side=RIGHT)
-        _Button(row, text=f"  {count}곳 제안서 만들기  ", command=go,
-                bootstyle="primary").pack(side=RIGHT, padx=6)
-
-        win.grab_set()
-        self.root.wait_window(win)
-        return confirmed.get()
+    def on_save(self) -> None:
+        from datetime import date
+        from prime_contractor.makers import write_factories_xlsx
+        if not self.shown:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", initialfile=f"공장목록_{date.today():%Y%m%d}.xlsx",
+            filetypes=[("엑셀", "*.xlsx")])
+        if not path:
+            return
+        try:
+            write_factories_xlsx(self.shown, path, within_km=self.factory_within,
+                                 rule=self._filter_rule())
+        except OSError as exc:
+            # 같은 이름 파일이 엑셀에 열려 있으면 윈도우가 덮어쓰기를 막는다.
+            messagebox.showerror("저장하지 못했습니다",
+                                 f"{exc}\n\n같은 이름의 파일이 엑셀에 열려 있으면 닫고 다시 해주세요.")
+            return
+        if messagebox.askyesno("저장 완료", f"{path}\n\n지금 보이는 {len(self.shown)}곳을 "
+                               "저장했습니다. 폴더를 열까요?"):
+            _open_folder(Path(path).parent)
 
     def on_lead_move(self) -> None:
         lead = self._selected_lead()
@@ -1287,88 +957,6 @@ class App:
         if lead and messagebox.askyesno("빼기", f"{lead.name} 을(를) 영업 목록에서 뺄까요?"):
             self.lead_book.remove(lead.key)
             self._save_leads()
-
-    def _show_detail(self, _event=None) -> None:
-        """줄을 더블클릭하면 그 후보의 점수 내역을 띄운다."""
-        selected = self.tree.focus()
-        if not selected or not self.result:
-            return
-        rank = self.tree.item(selected, "values")[0]
-        try:
-            cand = self.result.passed[int(rank) - 1]
-        except (ValueError, IndexError):
-            return
-        text = cand.fitness.explain() if cand.fitness else "계산 내역이 없습니다."
-        if cand.awards:
-            text += "\n\n수주 내역:\n" + "\n".join(
-                f"  [{a.category}] {a.title} / {a.demand_org} / {a.amount / 1e8:.2f}억"
-                for a in cand.awards[:8])
-        messagebox.showinfo(cand.name, text)
-
-    def _failed(self, exc: Exception) -> None:
-        messagebox.showerror(
-            "잘 안 됐습니다",
-            f"{redact_secrets(exc)}\n\n아래 '진행 상황' 칸에 자세한 내용이 적혀 있습니다.\n"
-            "인증키가 맞는지, 인터넷이 되는지 먼저 확인해 보세요.")
-        self.status.configure(text="실패")
-        self._finish()
-
-    def _finish(self) -> None:
-        self.running = False
-        self.run_button.configure(state="normal")
-
-    def on_save(self) -> None:
-        if not self.result:
-            return
-        kept = sum(1 for c in self.result.passed if c.score > EXPORT_MIN_SCORE)
-        if not kept:
-            messagebox.showinfo(
-                "저장할 곳이 없습니다",
-                f"{EXPORT_MIN_SCORE}점을 넘는 곳이 없습니다 (전체 {len(self.result.passed)}곳).\n"
-                "조건(거리·업종·며칠치)을 넓혀서 다시 찾아보세요."
-                + ("\n'작고 꾸준한 곳 위주'를 끄면 큰 곳도 점수가 올라갑니다."
-                   if self.prefer_small.get() else ""))
-            return
-        from datetime import date
-        path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx", initialfile=f"원청후보_{date.today():%Y%m%d}.xlsx",
-            filetypes=[("엑셀", "*.xlsx")])
-        if not path:
-            return
-        try:
-            write_xlsx(self.result, path, min_score=EXPORT_MIN_SCORE)
-        except OSError as exc:
-            # 같은 이름 파일이 엑셀에 열려 있으면 윈도우가 덮어쓰기를 막는다.
-            messagebox.showerror("저장하지 못했습니다",
-                                 f"{exc}\n\n같은 이름의 파일이 엑셀에 열려 있으면 닫고 다시 해주세요.")
-            return
-        if messagebox.askyesno(
-                "저장 완료",
-                f"{path}\n\n전체 {len(self.result.passed)}곳 중 {EXPORT_MIN_SCORE}점을 넘는 "
-                f"{kept}곳만 저장했습니다.\n\n폴더를 열까요?"):
-            _open_folder(Path(path).parent)
-
-
-def _market_summary(market) -> str:
-    """관공서 판넬 구매 기록 요약: 몇 건·얼마, 많이 산 기관, 많이 판 업체."""
-    from collections import Counter
-    total = sum(a.amount for a in market)
-    buyers = Counter(a.demand_org for a in market if a.demand_org).most_common(5)
-    sellers = Counter(a.winner_name for a in market if a.winner_name).most_common(5)
-    lines = [f"관공서가 판넬·전기기기를 물품으로 산 계약 {len(market)}건, 합계 {_money(total)}원"]
-    if buyers:
-        lines.append("많이 산 기관: " + ", ".join(f"{n}({c}건)" for n, c in buyers))
-    if sellers:
-        lines.append("많이 판 업체(경쟁사): " + ", ".join(f"{n}({c}건)" for n, c in sellers))
-    return "\n".join(lines)
-
-
-def _money(won: int) -> str:
-    """1억 넘으면 '1.2억', 아래면 '3,400만'."""
-    if not won:
-        return "-"
-    return f"{won / 1e8:.1f}억" if won >= 1e8 else f"{won / 1e4:,.0f}만"
-
 
 def _open_folder(folder: Path) -> None:
     try:

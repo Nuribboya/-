@@ -47,7 +47,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=ttkbootstrap_datas,
-    hiddenimports=['prime_contractor.sources.g2b', 'prime_contractor.sources.dart'],
+    hiddenimports=['prime_contractor.sources.dart'],
     hookspath=[],
     runtime_hooks=[],
     # 쓰지 않는 무거운 것들을 빼서 용량을 줄인다. PIL 은 ttkbootstrap 이 위젯을 그리는 데

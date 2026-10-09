@@ -350,3 +350,45 @@ def _xlsx_rows(path: Path) -> list[list[str]]:
         width = max(cells) + 1
         rows.append([cells.get(i, "") for i in range(width)])
     return rows
+
+
+def write_factories_xlsx(factories, path: str | Path, within_km: float | None = None,
+                        rule: str = "") -> Path:
+    """공장 찾기 결과를 인쇄용 엑셀로. 분야·경기·규모로 필터해 볼 수 있다."""
+    from collections import Counter
+    from datetime import date
+
+    from prime_contractor.xlsx_writer import (
+        CENTER, DECIMAL, TEXT, WRAP, Column, Sheet, write_workbook)
+
+    main = Sheet("공장", [
+        Column("순위", 5, CENTER), Column("회사 이름", 18, WRAP), Column("그룹", 14, WRAP),
+        Column("분야", 11, WRAP), Column("경기", 6, CENTER), Column("규모", 10, WRAP),
+        Column("생산품", 20, WRAP), Column("지역", 6, CENTER), Column("거리(km)", 7, DECIMAL),
+        Column("대표자", 7, CENTER), Column("전화", 12, CENTER), Column("주소", 24, WRAP),
+    ], rows=[[i, c.name, c.group, c.sector, steady_text(c.sector_weight), size_text(c),
+              c.products, c.region, c.distance_km, c.ceo, c.phone, c.address]
+             for i, c in enumerate(factories, 1)])
+    fields = Counter(c.sector for c in factories).most_common()
+    limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
+    guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 80, WRAP)], rows=[
+        ["만든 날", date.today().isoformat()],
+        ["담은 곳", f"안성에서 {limit} 공장 {len(factories)}곳{(' — ' + rule) if rule else ''}. "
+                  "경기를 덜 타는 분야 먼저, 같으면 가까운 순."],
+        ["분야별", ", ".join(f"{f} {n}곳" for f, n in fields)],
+        ["왜 공장인가", "판넬을 실제로 쓰는 곳입니다. 라인 증설·개조·교체 때 제어반이 들어가고, "
+                     "기계·장비를 만드는 공장은 기계마다 제어반을 반복해서 밖에 맡깁니다."],
+        ["규모", "종업원 수·면적은 공장등록 자료에 있을 때만 나옵니다. '외감(DART)'은 금감원 "
+               "공시에 등록된 회사 — 외부감사를 받는 규모(대략 자산 100억 이상)입니다."],
+        ["그룹", "상장사면 그 회사 이름, 상장사가 지분 30% 넘게(경영참여 목적이면 15% 넘게) "
+               "가진 회사면 'OO 계열'입니다(금감원 사업보고서의 타법인 출자현황). 한 그룹에 "
+               "들어가면 같은 그룹 회사로 넓히기 쉽습니다."],
+        ["경기", "덜 탐 = 식품·제약·환경처럼 불황에도 돌아가는 분야, 많이 탐 = 반도체·자동차·"
+               "철강처럼 경기가 꺾이면 투자부터 끊는 분야."],
+        ["뺀 곳", "판넬을 만드는 곳(경쟁사), 주소를 모르거나 거리 밖인 곳."],
+        ["연락할 때", "본사 구매팀보다 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 "
+                    "'판넬 교체·라인 개조 때 견적 낼 수 있게 해 달라'고 하세요."],
+        ["출처", "한국산업단지공단 전국 등록공장 현황(공공데이터포털·팩토리온). 생산품은 공장 "
+               "등록 때 적은 것이라 지금과 다를 수 있습니다."],
+    ], landscape=False)
+    return write_workbook(path, [main, guide])

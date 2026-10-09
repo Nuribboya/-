@@ -439,7 +439,7 @@ def test_saved_settings_from_an_older_wording_fall_back_to_defaults():
 
 def test_help_text_covers_what_a_beginner_asks_first():
     from prime_contractor.help_text import HELP_TEXT
-    for topic in ("인증키", "data.go.kr", "원청", "발주처", "등급", "매출.csv", "어림짐작"):
+    for topic in ("인증키", "data.go.kr", "전국등록공장현황", "상장사", "계열", "매출.csv", "어림짐작"):
         assert topic in HELP_TEXT, topic
 
 
@@ -2560,7 +2560,7 @@ def test_factory_xlsx_is_read_too(tmp_path):
 
 def test_factories_excel_and_leads_keep_the_phone(tmp_path):
     from prime_contractor.leads import LeadBook
-    from prime_contractor.report import write_factories_xlsx
+    from prime_contractor.makers import write_factories_xlsx
     from prime_contractor.xlsx import read_sheets
     factories = _factories(tmp_path, encoding="utf-8")
     sheets = read_sheets(write_factories_xlsx(factories, tmp_path / "m.xlsx", within_km=70.0,
