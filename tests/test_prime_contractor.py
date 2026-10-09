@@ -2488,3 +2488,67 @@ def test_factories_go_to_their_own_excel_sheet_without_the_score_cutoff(tmp_path
     assert {rows[(r, "B")] for r in range(2, len(result.factories) + 2)} == {
         c.name for c in result.factories}
     assert rows[(2, "D")] in ("덜 탐", "보통", "많이 탐")
+
+
+# --- 기계·장비 제작사 (등록공장 파일) ---------------------------------------------
+
+_FACTORY_CSV = """순번,회사명,단지명,대표자,전화번호,생산품,공장주소
+1,(주)한결포장기계,,김가나,031-000-0001,식품포장기계 제조,경기도 안성시 공도읍 1
+2,대명컨베이어,,이다라,031-000-0002,컨베이어 이송장치,경기도 평택시 포승읍 2
+3,안성판넬,,박마바,031-000-0003,배전반 분전반 제조,경기도 안성시 대덕면 3
+4,정밀부품(주),,최사아,031-000-0004,자동차부품,경기도 안성시 미양면 4
+5,먼기계(주),,정자차,051-000-0005,산업용 보일러,부산광역시 강서구 5
+6,청정환경,,한카타,041-000-0006,"집진기, 송풍기",충청남도 천안시 서북구 6
+6,청정환경,,한카타,041-000-0006,"집진기, 송풍기",충청남도 천안시 서북구 6
+7,주소없는기계,,,,,
+"""
+
+
+def test_factory_csv_in_cp949_is_read_and_filtered(tmp_path):
+    from prime_contractor.makers import find_makers, read_factory_file
+    path = tmp_path / "전국등록공장현황.csv"
+    path.write_bytes(_FACTORY_CSV.encode("cp949"))          # 공공데이터포털 CSV 는 대개 CP949
+    records = read_factory_file(path)
+    assert records[0]["name"] == "(주)한결포장기계" and records[0]["phone"] == "031-000-0001"
+    makers = find_makers(records, within_km=70.0)
+    names = [c.name for c in makers]
+    assert names == ["(주)한결포장기계", "대명컨베이어", "청정환경"]   # 가까운 순, 중복 한 번
+    assert "안성판넬" not in names          # 판넬 업체 = 경쟁사
+    assert "정밀부품(주)" not in names      # 부품만
+    assert "먼기계(주)" not in names        # 거리 밖
+    assert makers[0].sector == "포장·충진기계" and makers[1].sector == "컨베이어·물류설비"
+    assert makers[2].sector == "환경·수처리설비"
+
+
+def test_factory_file_without_headers_is_a_clear_error(tmp_path):
+    from prime_contractor.makers import read_factory_file
+    path = tmp_path / "x.csv"
+    path.write_text("a,b,c\n1,2,3\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="회사명"):
+        read_factory_file(path)
+
+
+def test_factory_xlsx_is_read_too(tmp_path):
+    from prime_contractor.makers import find_makers, read_factory_file
+    from prime_contractor.xlsx_writer import TEXT, Column, Sheet, write_workbook
+    path = tmp_path / "공장.xlsx"
+    write_workbook(path, [Sheet("등록공장", [Column(h, 10, TEXT) for h in ("회사명", "생산품", "공장주소")],
+                                rows=[["로봇자동화(주)", "공장자동화 로봇", "경기도 용인시 처인구"]])])
+    makers = find_makers(read_factory_file(path), within_km=70.0)
+    assert [(c.name, c.sector) for c in makers] == [("로봇자동화(주)", "자동화·로봇")]
+
+
+def test_makers_excel_and_leads_keep_the_phone(tmp_path, monkeypatch):
+    from prime_contractor.leads import LeadBook
+    from prime_contractor.makers import find_makers, read_factory_file
+    from prime_contractor.report import write_makers_xlsx
+    from prime_contractor.xlsx import read_sheets
+    path = tmp_path / "f.csv"
+    path.write_text(_FACTORY_CSV, encoding="utf-8")
+    makers = find_makers(read_factory_file(path), within_km=70.0)
+    sheets = read_sheets(write_makers_xlsx(makers, tmp_path / "m.xlsx", within_km=70.0))
+    assert list(sheets) == ["기계 제작사", "읽는 법"]
+    assert sheets["기계 제작사"][(2, "H")] == "031-000-0001"
+    book = LeadBook(path=tmp_path / "leads.json")
+    lead, created = book.add_candidate(makers[0])
+    assert created and lead.phone == "031-000-0001"

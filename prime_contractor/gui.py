@@ -232,11 +232,11 @@ class App:
         self.run_button = _Button(buttons, text="  후보 찾기  ", command=self.on_run,
                                    bootstyle="primary")
         self.run_button.pack(side=LEFT)
-        self.save_button = _Button(buttons, text=f"엑셀로 저장 ({EXPORT_MIN_SCORE}점 넘는 곳만)",
+        self.save_button = _Button(buttons, text="엑셀로 저장",
                                     command=self.on_save, state="disabled",
                                     bootstyle="success-outline")
         self.save_button.pack(side=LEFT, padx=6)
-        _Button(buttons, text="고른 회사를 영업 목록에 넣기",
+        _Button(buttons, text="영업 목록에 넣기",
                 command=self.on_add_to_leads,
                 bootstyle="info-outline").pack(side=LEFT, padx=6)
         self.proposal_button = _Button(buttons, text="제안서 만들기",
@@ -249,6 +249,9 @@ class App:
         self.factory_button = ttk.Button(buttons, text="근처 공장 목록", state="disabled",
                                          command=self.on_show_factories)
         self.factory_button.pack(side=LEFT, padx=6)
+        _Button(buttons, text="기계 제작사 찾기", command=self.on_find_makers,
+                bootstyle="primary-outline").pack(side=LEFT)
+        self.factory_file = StringVar(value=saved.get("factory_file", ""))
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
 
@@ -638,6 +641,7 @@ class App:
             "include_demand_orgs": self.include_orgs.get(),
             "prefer_small": self.prefer_small.get(),
             "with_factories": self.with_factories.get(),
+            "factory_file": self.factory_file.get(),
             "profile_name": self.profile_name.get(),
             "profile_founded": self.profile_founded.get(),
             "profile_certs": self.profile_certs.get(),
@@ -840,8 +844,8 @@ class App:
         leads_box = ttk.LabelFrame(root, text="영업 진행 — ① 탭에서 회사를 골라 넣으세요",
                                    padding=6)
         leads_box.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
-        cols = (("회사", 200), ("등급", 45), ("단계", 75), ("다음 할 일", 230),
-                ("날짜", 90), ("결제조건", 150))
+        cols = (("회사", 190), ("등급", 45), ("단계", 75), ("다음 할 일", 210),
+                ("날짜", 90), ("결제조건", 130), ("전화", 105))
         self.lead_tree = ttk.Treeview(leads_box, columns=[c for c, _ in cols],
                                       show="headings", height=8)
         for name, width in cols:
@@ -926,7 +930,7 @@ class App:
             tag = "won" if lead.stage == "첫수주" else ("late" if lead.is_overdue() else "")
             self.lead_tree.insert("", END, iid=lead.key, values=(
                 lead.name, lead.grade or "-", lead.stage, lead.next_action or "-",
-                lead.next_date or "-", lead.payment_terms or "-"),
+                lead.next_date or "-", lead.payment_terms or "-", lead.phone or "-"),
                 tags=(tag,) if tag else ())
         if self.goal_plan is not None:
             self._render_goal_text()
@@ -1107,6 +1111,103 @@ class App:
                 bootstyle="info-outline").pack(side=LEFT)
         ttk.Label(row, foreground="#666", text="엑셀로 저장하면 '근처 공장' 시트에도 들어갑니다.").pack(
             side=LEFT, padx=10)
+
+    # --- 기계·장비 제작사 ---------------------------------------------------------
+
+    def on_find_makers(self) -> None:
+        """등록공장 파일에서 근처 기계·장비 제작사를 고른다 — 제어반이 원래 계속 필요한 곳."""
+        start = Path(self.factory_file.get()).parent if self.factory_file.get() else None
+        path = filedialog.askopenfilename(
+            title="전국 등록공장 현황 파일을 고르세요 (공공데이터포털·팩토리온)",
+            initialdir=str(start) if start and start.exists() else None,
+            filetypes=[("공장 목록", "*.csv *.xlsx"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        self.factory_file.set(path)
+        within = build_config(self.current_options()).within_km
+        self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
+        threading.Thread(target=self._load_makers, args=(path, within), daemon=True).start()
+
+    def _load_makers(self, path: str, within) -> None:
+        from prime_contractor.makers import find_makers, read_factory_file
+        try:
+            records = read_factory_file(path)
+            makers = find_makers(records, within_km=within)
+        except (OSError, ValueError) as exc:
+            self.root.after(0, messagebox.showerror, "공장 목록을 읽지 못했습니다", str(exc))
+            return
+        self.say(f"공장 {len(records):,}곳 중 근처 기계·장비 제작사 {len(makers)}곳을 골랐습니다.")
+        self.root.after(0, self._show_makers, makers, within)
+
+    def _show_makers(self, makers, within) -> None:
+        from collections import Counter
+        from tkinter import Toplevel
+        if not makers:
+            messagebox.showinfo("기계 제작사", "거리 안에서 기계·장비 제작사를 찾지 못했습니다.\n"
+                                            "'안성에서 얼마나'를 넓혀 보세요.")
+            return
+        self.makers = makers
+        win = Toplevel(self.root)
+        win.title(f"기계·장비 제작사 — {len(makers)}곳")
+        win.geometry("1040x600")
+        body = ttk.Frame(win, padding=10)
+        body.pack(fill=BOTH, expand=True)
+        fields = Counter(c.sector for c in makers).most_common()
+        ttk.Label(body, justify=LEFT, wraplength=1000, text=(
+            "기계 하나마다 제어반이 들어가고 같은 사양을 반복해서 맡기는 곳들입니다. 가까운 순.\n"
+            "분야: " + ", ".join(f"{f} {n}" for f, n in fields) + "\n"
+            "연락할 땐 '기계에 들어가는 제어반을 밖에 맡기시는지'부터 물어보세요 — 설계팀·"
+            "생산팀·대표가 정하는 경우가 많습니다.")).pack(fill=X, pady=(0, 8))
+        cols = (("#", 40), ("회사", 190), ("분야", 120), ("생산품", 260), ("지역", 60),
+                ("거리", 55), ("대표자", 70), ("전화", 110))
+        frame = ttk.Frame(body)
+        frame.pack(fill=BOTH, expand=True)
+        tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
+        for name, width in cols:
+            tree.heading(name, text=name)
+            tree.column(name, width=width, anchor=W)
+        bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=bar.set)
+        tree.pack(side=LEFT, fill=BOTH, expand=True)
+        bar.pack(side=RIGHT, fill=Y)
+        for i, c in enumerate(makers, 1):
+            tree.insert("", END, iid=str(i), values=(
+                i, c.name, c.sector, c.products, c.region, f"{c.distance_km:.0f}km",
+                c.ceo or "-", c.phone or "-"))
+
+        def add_picked() -> None:
+            picked = tree.selection()
+            if not picked:
+                messagebox.showinfo("회사를 고르세요", "목록에서 회사를 클릭해 고르세요 (Ctrl+클릭으로 여러 곳).",
+                                    parent=win)
+                return
+            added = sum(self.lead_book.add_candidate(makers[int(i) - 1])[1] for i in picked)
+            self._save_leads()
+            messagebox.showinfo("넣었습니다", f"영업 목록에 {added}곳 넣었습니다.", parent=win)
+
+        def save() -> None:
+            from datetime import date
+            from prime_contractor.report import write_makers_xlsx
+            path = filedialog.asksaveasfilename(
+                parent=win, defaultextension=".xlsx",
+                initialfile=f"기계제작사_{date.today():%Y%m%d}.xlsx", filetypes=[("엑셀", "*.xlsx")])
+            if not path:
+                return
+            try:
+                write_makers_xlsx(makers, path, within_km=within)
+            except OSError as exc:
+                messagebox.showerror("저장하지 못했습니다", f"{exc}\n\n같은 이름의 파일이 엑셀에 "
+                                     "열려 있으면 닫고 다시 해주세요.", parent=win)
+                return
+            if messagebox.askyesno("저장 완료", f"{path}\n\n폴더를 열까요?", parent=win):
+                _open_folder(Path(path).parent)
+
+        row = ttk.Frame(body)
+        row.pack(fill=X, pady=(8, 0))
+        _Button(row, text="고른 회사를 영업 목록에 넣기", command=add_picked,
+                bootstyle="info-outline").pack(side=LEFT)
+        _Button(row, text="엑셀로 저장", command=save,
+                bootstyle="success-outline").pack(side=LEFT, padx=6)
 
     def _ask_profile(self, count: int) -> bool:
         """제안서에 넣을 우리 회사 정보를 작은 창에서 확인받는다. [만들기]를 누르면 True."""

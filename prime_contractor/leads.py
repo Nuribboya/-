@@ -38,6 +38,7 @@ class Lead:
     sector: str = ""
     region: str = ""
     monthly_revenue: int = 0             # 첫 수주 뒤 실제로 나오는 월 발주
+    phone: str = ""                      # 공장등록 자료에 있으면 (기계 제작사)
 
     @property
     def key(self) -> str:
@@ -117,7 +118,8 @@ class LeadBook:
     def add_candidate(self, cand, today: date | None = None) -> tuple[Lead, bool]:
         """원청 찾기 결과의 후보를 그대로 넣는다."""
         return self.add(Lead(name=cand.name, bizno=cand.bizno, grade=cand.grade,
-                             sector=cand.sector, region=cand.region), today)
+                             sector=cand.sector, region=cand.region,
+                             phone=getattr(cand, "phone", "")), today)
 
     def move(self, key: str, stage: str, today: date | None = None,
              next_action: str = "", next_date: str = "") -> Lead:

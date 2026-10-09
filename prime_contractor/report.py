@@ -334,3 +334,35 @@ def _steady_text(steady: float) -> str:
 
 def _axis(fit, key: str):
     return fit.axis(key) if fit else None
+
+
+def write_makers_xlsx(makers, path: str | Path, within_km: float | None = None) -> Path:
+    """기계·장비 제작사 목록을 인쇄용 엑셀로. 분야로 필터해 볼 수 있다."""
+    from datetime import date
+    from collections import Counter
+
+    from prime_contractor.xlsx_writer import (
+        CENTER, DECIMAL, TEXT, WRAP, Column, Sheet, write_workbook)
+
+    main = Sheet("기계 제작사", [
+        Column("순위", 5, CENTER), Column("회사 이름", 20, WRAP), Column("분야", 13, WRAP),
+        Column("생산품", 30, WRAP), Column("지역", 7, CENTER), Column("거리(km)", 7, DECIMAL),
+        Column("대표자", 8, CENTER), Column("전화", 13, CENTER), Column("주소", 30, WRAP),
+    ], rows=[[i, c.name, c.sector, c.products, c.region, c.distance_km, c.ceo, c.phone,
+              c.address] for i, c in enumerate(makers, 1)])
+    fields = Counter(c.sector for c in makers).most_common()
+    limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
+    guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 80, WRAP)], rows=[
+        ["만든 날", date.today().isoformat()],
+        ["담은 곳", f"안성에서 {limit}, 생산품이 기계·장비인 공장 {len(makers)}곳 (가까운 순)"],
+        ["분야별", ", ".join(f"{f} {n}곳" for f, n in fields)],
+        ["왜 이 회사들인가", "기계 하나마다 제어반이 하나씩 들어가고 같은 사양을 반복해서 밖에 "
+                       "맡기는 곳이 많습니다. 작고 꾸준한 일이 나오는 고객입니다."],
+        ["뺀 곳", "판넬을 만드는 곳(경쟁사), 부품·소재만 만드는 곳, 주소를 모르는 곳."],
+        ["연락할 때", "'기계에 들어가는 제어반을 밖에 맡기시는지, 맡기신다면 견적 한번 내 보고 "
+                    "싶다'로 시작하세요. 설계팀·생산팀·대표가 정하는 경우가 많습니다."],
+        ["출처", "한국산업단지공단 전국 등록공장 현황(공공데이터포털·팩토리온). 생산품은 공장 "
+               "등록 때 적은 것이라 지금과 다를 수 있습니다."],
+    ], landscape=False)
+    return write_workbook(path, [main, guide])
+

@@ -59,6 +59,8 @@ class Candidate:
     status_note: str = ""
     homepage: str = ""
     established: str = ""
+    phone: str = ""               # 공장등록 자료에 있으면 (기계 제작사 찾기)
+    products: str = ""            # 생산품 (공장등록 자료)
     corp_code: str = ""           # DART 고유번호
     region: str = ""              # 주소에서 뽑은 시군구
     distance_km: float | None = None
