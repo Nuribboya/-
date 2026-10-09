@@ -604,3 +604,38 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
                "등록 때 적은 것이라 지금과 다를 수 있습니다."],
     ], landscape=False)
     return write_workbook(path, [main, guide])
+
+
+# --- 지난 결과 남기기 (앱을 껐다 켜도 표가 그대로) ------------------------------------
+
+_SAVED_FIELDS = ("name", "kind", "address", "ceo", "phone", "products", "employees", "area_m2",
+                 "stock_code", "group", "corp_code", "region", "distance_km", "sector",
+                 "sector_weight", "industry_name")
+
+
+def save_last_factories(path, factories: list[Candidate], **meta) -> None:
+    import json
+    from datetime import datetime
+    from pathlib import Path
+    rows = [{f: getattr(c, f) for f in _SAVED_FIELDS} for c in factories]
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"saved_at": datetime.now().strftime("%m-%d %H:%M"), **meta,
+                               "factories": rows}, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(target)
+
+
+def load_last_factories(path) -> tuple[list[Candidate], dict]:
+    """(공장들, 저장할 때 같이 둔 값들). 없거나 깨졌으면 ([], {})."""
+    import json
+    from pathlib import Path
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        factories = [Candidate(**{k: v for k, v in row.items() if k in _SAVED_FIELDS})
+                     for row in data.pop("factories")]
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], {}
+    for c in factories:
+        c.sources = {"공장등록"}
+    return factories, data

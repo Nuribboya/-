@@ -2941,3 +2941,15 @@ def test_same_name_companies_are_told_apart_by_ceo_and_offices_dropped():
     for products in ("부동산 임대", "플랫폼S/W", "광고대행", "교육용 모바일게임", "경영컨설팅"):
         assert classify(products)[0] == "", products
     assert classify("사출성형")[0]
+
+
+def test_last_factories_survive_restart(tmp_path):
+    from prime_contractor.makers import load_last_factories, save_last_factories
+    from prime_contractor.models import Candidate
+    c = Candidate(name="(주)농심 안성공장", kind="plant", address="경기도 안성시", distance_km=3.2,
+                  employees=500, stock_code="004370", group="농심", sector="식품·음료")
+    save_last_factories(tmp_path / "last.json", [c], within=70, can_size=True, knows_listed=True)
+    back, meta = load_last_factories(tmp_path / "last.json")
+    assert back[0].name == c.name and back[0].distance_km == 3.2 and back[0].stock_code == "004370"
+    assert meta["within"] == 70 and meta["knows_listed"] is True
+    assert load_last_factories(tmp_path / "없음.json") == ([], {})

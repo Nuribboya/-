@@ -72,6 +72,8 @@ def _ceo(company, code: str) -> str:
 
 
 RUN_LOG = Path.home() / ".cache" / "prime_contractor" / "run_log.txt"
+#: 마지막으로 찾은 공장 표 — 다음에 켤 때 그대로 다시 띄운다.
+LAST_FACTORIES = Path.home() / ".cache" / "prime_contractor" / "last_factories.json"
 
 
 def _write_run_log(text: str) -> None:
@@ -145,6 +147,18 @@ class App:
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(AUTOSAVE_MS, self._autosave)
+        self.root.after(200, self._restore_last_factories)
+
+    def _restore_last_factories(self) -> None:
+        """지난번 찾은 공장 표를 다시 띄운다 — 앱을 껐다 켜도 처음부터 안 찾게."""
+        from prime_contractor.makers import load_last_factories
+        factories, meta = load_last_factories(LAST_FACTORIES)
+        if not factories:
+            return
+        self._factories_loaded(factories, meta.get("within"), meta.get("can_size", True),
+                               meta.get("knows_listed", True), save=False)
+        self.say(f"지난번({meta.get('saved_at', '')})에 찾은 공장 {len(factories)}곳을 불러왔습니다. "
+                 "새로 찾으려면 [공장 찾기]를 누르세요.")
 
     # --- 자동저장 -------------------------------------------------------------
 
@@ -987,9 +1001,17 @@ class App:
         self.status.configure(text="실패")
         messagebox.showerror("공장 목록을 읽지 못했습니다", message)
 
-    def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool) -> None:
+    def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool,
+                          save: bool = True) -> None:
         self.running = False
         self.run_button.configure(state="normal")
+        if save:
+            from prime_contractor.makers import save_last_factories
+            try:
+                save_last_factories(LAST_FACTORIES, factories, within=within,
+                                    can_size=can_size, knows_listed=knows_listed)
+            except OSError:
+                pass
         # 가까운 순. 적합도 점수는 아직 없다 — 거리로만 줄 세운다.
         self.factories = sorted(factories, key=lambda c: (c.distance_km, c.name))
         self.factory_within = within
