@@ -2717,7 +2717,7 @@ class _ApiResp:
 
     def json(self):
         if self._payload is None:
-            raise ValueError("not json")
+            return __import__("json").loads(self.text)   # 진짜 requests 처럼 글에서 읽는다
         return self._payload
 
     def raise_for_status(self):
@@ -2837,3 +2837,54 @@ def test_sort_listed_keeps_makers_and_holdings_for_group_check():
     assert [r[0] for r in makers] == ["A"]
     assert [r[0] for r in heads] == ["A", "B", "D"]      # 유통(C)·실패(E)는 계열사 확인을 건너뛴다
     assert seen[-1] == 5
+
+
+def test_factory_api_check_stops_before_wasting_quota(tmp_path):
+    from prime_contractor.sources.factory_api import FactoryApi, FactoryApiError
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=_ApiSession({}))
+    with pytest.raises(FactoryApiError, match="시험 조회"):
+        api.check()                                       # 삼성전자도 0곳 → 멈춘다
+    assert api.factories_of("농심") == [] and not api.cached("농심")   # 못 믿는 0곳은 안 남긴다
+
+    session = _ApiSession({"삼성전자": [{"cmpnyNm": "삼성전자(주) 온양사업장",
+                                         "fctryAdres": "충청남도 아산시"}]})
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=session)
+    assert api.check() == 1 and api.verified
+    assert api.factories_of("없는회사") == [] and api.cached("없는회사")
+
+
+def test_factory_api_reads_xml_and_reports_result_codes(tmp_path):
+    from prime_contractor.sources.factory_api import FactoryApi, FactoryApiError
+
+    class XmlSession(_ApiSession):
+        def get(self, url, params=None, timeout=None):
+            if url.endswith("getFctryPrdctnService"):
+                return _ApiResp(200, text="<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR"
+                                          "</errMsg><returnAuthMsg>NO_OPENAPI_SERVICE_ERROR</returnAuthMsg>"
+                                          "</cmmMsgHeader></OpenAPI_ServiceResponse>")
+            if self.fail:
+                return _ApiResp(200, text=self.fail)
+            return _ApiResp(200, text=(
+                "<response><header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg>"
+                "</header><body><items><item><cmpnyNm>삼성전자(주) 온양사업장</cmpnyNm>"
+                "<fctryAdres>충청남도 아산시 배방읍</fctryAdres></item></items>"
+                "<totalCount>1</totalCount></body></response>"))
+
+    api = FactoryApi("k", cache_dir=tmp_path, sleep_sec=0, session=XmlSession({}))
+    assert api.check() == 1 and api.operation == "getFctryRegistPrdctnService"
+    assert api.factories_of("삼성전자")[0]["address"] == "충청남도 아산시 배방읍"
+
+    bad = XmlSession({}, fail='{"response": {"header": {"resultCode": "30", "resultMsg": "KEY ERROR"}}}')
+    api = FactoryApi("k", cache_dir=tmp_path / "b", sleep_sec=0, session=bad)
+    with pytest.raises(FactoryApiError, match="30 KEY ERROR"):
+        api.check()
+
+
+def test_collect_by_name_reports_unexpected_errors():
+    from prime_contractor.makers import collect_by_name
+
+    def fetch(name):
+        raise ConnectionError("연결 끊김")
+
+    records, stopped = collect_by_name(["가", "나"], fetch, workers=1)
+    assert records == [] and "2곳 조회 실패" in stopped and "연결 끊김" in stopped

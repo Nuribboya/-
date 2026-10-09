@@ -20,6 +20,7 @@ import re
 import threading
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -49,7 +50,13 @@ COLUMN_KEYS = {
 
 _QUOTA = "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR"
 _NOT_REGISTERED = ("SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "SERVICE ACCESS DENIED",
-                   "SERVICE_ACCESS_DENIED_ERROR")
+                   "SERVICE_ACCESS_DENIED_ERROR", "PERMISSION_DENIED", "SERVICE_KEY_IS_NULL",
+                   "UNREGISTERED_IP_ERROR")
+#: 오퍼레이션 이름이 틀렸을 때 포털이 주는 말 — 다음 이름으로 넘어간다.
+_WRONG_OPERATION = ("API not found", "Unexpected errors", "NO_OPENAPI_SERVICE_ERROR",
+                    "HTTP ROUTING ERROR", "HTTP_ROUTING_ERROR")
+#: 정상 결과 코드. 그 밖의 resultCode 는 무엇이 틀렸는지 그대로 보여 준다.
+_OK_CODES = ("00", "0", "000", "INFO-000", "INFO-0")
 
 
 class FactoryApiError(RuntimeError):
@@ -74,9 +81,12 @@ class FactoryApi:
         self._local = threading.local()
         self.operation: str | None = None
         self.cache_path = Path(cache_dir or Path.home() / ".cache" / "prime_contractor") \
-            / "factory_api.json"
+            / "factory_api_v2.json"
         self._lock = threading.Lock()
         self._cache = self._load_cache()
+        #: 시험 조회(삼성전자)에서 공장을 실제로 읽었는가. 안 읽혔으면 빈 결과를 남기지 않는다
+        #: — 잘못 읽은 '0곳'을 60일 동안 믿으면 안 된다.
+        self.verified = False
         #: 처음 받은 응답 한 줄의 칸 이름 — 칸을 못 읽을 때 진행 상황에 보여 고치려고.
         self.sample_keys: list[str] = []
 
@@ -98,32 +108,61 @@ class FactoryApi:
         time.sleep(self.sleep_sec)
         text = resp.text or ""
         if _QUOTA in text:
-            raise QuotaExceeded("공공데이터포털 하루 호출 한도를 넘었습니다.")
+            raise QuotaExceeded("공공데이터포털 하루 호출 한도를 넘었습니다 (개발계정은 하루 1,000번).")
         if any(code in text for code in _NOT_REGISTERED):
             raise FactoryApiError(
                 "공공데이터포털에서 '한국산업단지공단_공장등록생산정보조회서비스'를 활용신청해야 "
-                "합니다(나라장터 때 쓰던 같은 계정·같은 키면 됩니다).")
-        if resp.status_code == 404 or "API not found" in text or "Unexpected errors" in text:
-            raise LookupError(operation)
-        resp.raise_for_status()
+                "합니다(나라장터 때 쓰던 같은 계정·같은 키면 됩니다). 신청 직후면 1~2시간 뒤에 "
+                f"다시 해 보세요. 받은 답: {_snippet(text)}")
+        if resp.status_code in (404, 500) or any(w in text for w in _WRONG_OPERATION):
+            raise LookupError(f"{operation}: HTTP {resp.status_code} {_snippet(text)}")
+        if resp.status_code >= 400:
+            raise FactoryApiError(f"HTTP {resp.status_code}: {_snippet(text)}")
         try:
             payload = resp.json()
-        except ValueError as exc:
-            raise FactoryApiError(f"응답을 읽지 못했습니다: {text[:120]}") from exc
+        except ValueError:
+            payload = _xml_payload(text)
+            if payload is None:
+                raise FactoryApiError(f"응답을 읽지 못했습니다: {_snippet(text)}") from None
+        code, message = _result(payload)
+        if code and code not in _OK_CODES and code not in ("03",):     # 03 = 자료 없음
+            raise FactoryApiError(f"공공데이터포털 오류 {code} {message}".strip())
         return _items(payload), _total(payload)
 
     def _resolve(self) -> str:
         if self.operation:
             return self.operation
+        tried = []
         for op in OPERATIONS:
             try:
                 self._call(op, PROBE_NAME)
-            except LookupError:
+            except LookupError as exc:
+                tried.append(str(exc))
                 continue
             self.operation = op
             log.info("공장 조회 오퍼레이션: %s", op)
             return op
-        raise FactoryApiError("공장등록 조회 API 주소를 찾지 못했습니다. 화면을 캡처해 보내 주세요.")
+        raise FactoryApiError("공장등록 조회 API 주소를 찾지 못했습니다. 화면을 캡처해 보내 주세요.\n"
+                              + "\n".join(tried))
+
+    def check(self) -> int:
+        """본격적으로 묻기 전에 '삼성전자'로 한 번 시험한다. 읽은 공장 수.
+
+        0곳이면 키·주소·응답 모양 중 무언가가 틀린 것 — 수천 번 헛물어 하루 한도를 쓰기
+        전에 받은 답을 그대로 보여 주고 멈춘다.
+        """
+        op = self._resolve()
+        resp_items, _total_count = self._call(op, PROBE_NAME)
+        if resp_items and not self.sample_keys:
+            self.sample_keys = sorted(resp_items[0])
+        found = [r for r in (_record(i) for i in resp_items) if r.get("name")]
+        if not found:
+            keys = ", ".join(self.sample_keys) or "없음"
+            raise FactoryApiError(
+                f"시험 조회('{PROBE_NAME}')에서 공장을 하나도 못 읽었습니다 (오퍼레이션 {op}, "
+                f"받은 칸: {keys}). 이 창을 캡처해 보내 주세요.")
+        self.verified = True
+        return len(found)
 
     # --- 회사 이름으로 공장 찾기 -------------------------------------------------
 
@@ -146,8 +185,9 @@ class FactoryApi:
                 break
             page += 1
         rows = [r for r in rows if r.get("name")]
-        with self._lock:
-            self._cache[company] = {"at": today.isoformat(), "rows": rows}
+        if rows or self.verified:
+            with self._lock:
+                self._cache[company] = {"at": today.isoformat(), "rows": rows}
         return rows
 
     def save_cache(self) -> None:
@@ -189,6 +229,37 @@ def _items(payload) -> list[dict]:
             if found:
                 return found
     return []
+
+
+def _snippet(text: str, size: int = 200) -> str:
+    """오류 화면에 보일 응답 앞부분 — 키가 들어 있으면 가린다."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    text = re.sub(r"(?i)(servicekey=)[^&\s\"'<]+", r"\1***", text)
+    return text[:size] or "(빈 응답)"
+
+
+def _xml_payload(text: str):
+    """JSON 대신 XML 로 온 답을 {'items': [...], 'totalCount': n, 'resultCode': …} 로."""
+    try:
+        root = ET.fromstring(text.strip().encode("utf-8"))
+    except ET.ParseError:
+        return None
+    items = [{child.tag: (child.text or "").strip() for child in item}
+             for item in root.iter("item")]
+    payload: dict = {"items": items}
+    for tag in ("totalCount", "resultCode", "resultMsg", "returnReasonCode", "returnAuthMsg"):
+        node = next(root.iter(tag), None)
+        if node is not None:
+            payload[tag] = (node.text or "").strip()
+    return payload
+
+
+def _result(payload) -> tuple[str, str]:
+    """응답 머리의 결과 코드·문구. 없으면 ('', '')."""
+    text = json.dumps(payload, ensure_ascii=False)
+    code = re.search(r'"resultCode"\s*:\s*"?([\w-]+)', text)
+    msg = re.search(r'"resultMsg"\s*:\s*"([^"]*)', text)
+    return (code.group(1) if code else "", msg.group(1) if msg else "")
 
 
 def _flat(d: dict) -> bool:

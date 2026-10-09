@@ -880,8 +880,14 @@ class App:
             queries = list(dict.fromkeys([name for name, _c, _s in makers]
                                          + affiliate_names(heads, dart.cached_investments)))
             fresh = sum(1 for q in queries if not api.cached(q))
+            if fresh:
+                self.say("공장 조회 API 를 시험합니다…")
+                self.say(f"  시험 조회 성공 — 삼성전자 공장 {api.check()}곳을 읽었습니다.")
             self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
                      + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))
+            if fresh > 900:
+                self.say("  공공데이터포털 개발계정은 하루 1,000번까지라 며칠에 나눠 받습니다 — "
+                         "받은 건 저장되니 다음 날 다시 누르면 이어서 받습니다.")
             records, stopped = collect_by_name(
                 queries, api.factories_of,
                 progress=lambda done, total: self.say(f"  공장 조회 {done}/{total}"))
@@ -890,6 +896,8 @@ class App:
                 self.say(f"⚠ {stopped} 받은 데까지만 보여 줍니다 — 내일 다시 누르면 이어서 받습니다.")
             if not records and api.sample_keys:
                 self.say("공장 칸을 못 읽었습니다. 받은 칸 이름: " + ", ".join(api.sample_keys))
+            if not records and not stopped:
+                raise RuntimeError("공장을 하나도 받지 못했습니다. 이 창과 진행 기록을 캡처해 보내 주세요.")
             factories = find_factories(records, within_km=cfg.within_km)
             registered, on_market = mark_dart_registered(
                 factories, dart.corp_index, listed_names(listed))

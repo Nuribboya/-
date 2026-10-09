@@ -371,6 +371,7 @@ def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4) 
 
     records: list[dict[str, str]] = []
     stopped = ""
+    other_errors: list[str] = []
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {pool.submit(fetch, q): q for q in queries}
@@ -384,8 +385,12 @@ def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4) 
             except Exception as exc:           # 한도 초과·키 오류는 이유를 남기고 계속 모은다
                 if not stopped and type(exc).__name__ in ("QuotaExceeded", "FactoryApiError"):
                     stopped = str(exc)
+                elif type(exc).__name__ not in ("QuotaExceeded", "FactoryApiError"):
+                    other_errors.append(f"{type(exc).__name__}: {exc}")
                 continue
             records += [r for r in rows if same_company(r.get("name", ""), query)]
+    if other_errors and not stopped:        # 조용히 넘기면 '0곳'만 보고 이유를 모른다
+        stopped = f"{len(other_errors)}곳 조회 실패 — 첫 오류: {other_errors[0][:200]}"
     return records, stopped
 
 
