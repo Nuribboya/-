@@ -2974,3 +2974,15 @@ def test_factory_api_after_quota_uses_saved_rows_only(tmp_path):
     with pytest.raises(QuotaExceeded):
         again.factories_of("삼양")                          # 한도 뒤엔 묻지도 않는다
     assert len(quota.calls) == calls
+
+
+def test_fields_from_real_listing_mistakes():
+    from prime_contractor.makers import classify
+    assert classify("차량용스프링,철도용스프링")[0] != "식품·음료"
+    assert classify("인쇄회로기판, 인쇄회로기판")[0] == "전자·반도체"
+    assert classify("인쇄회로기판,식품첨가물향료")[0] == "전자·반도체"
+    assert classify("돼지지육,포장육,소지육")[0] == "식품·음료"
+    assert classify("전기자동차충전기")[0] != "포장·충진기계"
+    assert classify("화장품 충전기계, 포장기")[0] == "포장·충진기계"
+    assert classify("보일러, 온수기, 전기오븐")[0] == "열·공조설비"
+    assert classify("창고")[0] == ""
