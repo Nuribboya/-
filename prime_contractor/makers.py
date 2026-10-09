@@ -1,4 +1,4 @@
-"""공장 찾기 — 판넬을 실제로 쓰는 '규모 있는 공장' 자체를 찾는다.
+"""공장 찾기 — 판넬을 실제로 쓰는 '규모 있는 공장', 특히 상장사 공장을 찾는다.
 
 나라장터는 '판넬 일감이 나온 곳'(공사를 따낸 회사)을 보여 주는데, 그중엔 판넬을
 직접 만드는 경쟁사도 섞인다. 판넬을 실제로 쓰는 쪽은 공장이다 — 라인 증설·개조·
@@ -45,7 +45,10 @@ GENERIC_MACHINE = ("기타 기계·장비", ("기계", "장비", "설비", "장�
 #: 이런 공장은 라인 증설·개조·유지보수 때 판넬이 들어간다.
 PLANT_FIELDS: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("식품·음료", ("식품", "음료", "제과", "제빵", "육가공", "유가공", "김치", "소스", "주류",
-                 "사료", "떡", "면류", "냉동식품", "커피", "두부", "장류", "도시락"), 0.9),
+                 "사료", "떡", "면류", "냉동식품", "커피", "두부", "장류", "도시락", "라면", "스낵",
+                 "과자", "빵", "햄", "소시지", "만두", "즉석", "간편식", "조미", "식용유", "설탕",
+                 "밀가루", "전분", "생수", "맥주", "소주", "우유", "치즈", "아이스크림", "수산",
+                 "축산물", "통조림", "건강식품"), 0.9),
     ("제약·바이오·화장품", ("의약", "제약", "바이오", "화장품", "건강기능", "백신", "원료의약",
                        "의료기기"), 0.9),
     ("환경·재활용", ("재활용", "폐기물", "재생원료", "재생"), 0.9),
@@ -167,16 +170,45 @@ def find_factories(records: list[dict[str, str]],
     return sorted(found, key=lambda c: c.distance_km)
 
 
-def mark_dart_registered(factories: list[Candidate], corp_index: dict[str, str]) -> int:
-    """DART 에 등록된 회사(외부감사 대상 — 규모 있는 회사)면 corp_code 를 채운다. 몇 곳인지."""
-    hits = 0
+#: 등록공장 회사명엔 공장 이름이 붙기도 한다: '(주)농심 안성공장', '오뚜기 제2공장'.
+#: 띄어 쓴 마지막 낱말이 공장 이름이면 뗀다('안성공장', '인천1공장', '제2공장').
+_PLANT_WORD = re.compile(r"\s+\S*(공장|사업장|지점|센터|캠퍼스)\s*$")
+#: 붙여 쓴 번호 공장('오뚜기제2공장')만 뗀다. 지명까지 붙여 쓴 건 상호와 구분이 안 된다.
+_PLANT_NUMBER = re.compile(r"제?\d+공장\s*$")
+
+
+def company_key(name: str) -> str:
+    """공장 이름을 뗀 회사 이름 — DART 상호와 맞춰 보는 열쇠."""
+    base = _PLANT_NUMBER.sub("", _PLANT_WORD.sub("", (name or "").strip()))
+    return normalize_name(base) or normalize_name(name)
+
+
+def mark_dart_registered(factories: list[Candidate], corp_index: dict[str, str],
+                         listed: dict[str, str] | None = None) -> tuple[int, int]:
+    """금감원(DART) 등록 회사면 corp_code, 상장사면 stock_code 를 채운다. (등록, 상장) 수.
+
+    DART 등록 = 외부감사 받는 규모(대략 자산 100억 이상). 상장사 = 코스피·코스닥.
+    본사 주소가 아니라 이 파일의 '공장 주소'로 거리를 쟀으니, 본사가 서울인 회사의
+    안성 공장도 잡힌다(농심처럼).
+    """
+    registered = on_market = 0
     for c in factories:
-        code = corp_index.get(normalize_name(c.name))
+        keys = {normalize_name(c.name), company_key(c.name)}
+        code = next((corp_index[k] for k in keys if k in corp_index), "")
+        stock = next((listed[k] for k in keys if listed and k in listed), "")
         if code:
             c.corp_code = code
             c.sources.add("DART")
-            hits += 1
-    return hits
+            registered += 1
+        if stock:
+            c.stock_code = stock
+            on_market += 1
+    return registered, on_market
+
+
+def listed_names(listed_companies) -> dict[str, str]:
+    """DART 상장사 목록 [(상호, 고유번호, 종목코드)] → {정규화 상호: 종목코드}."""
+    return {normalize_name(name): stock for name, _code, stock in listed_companies if stock}
 
 
 def is_sizable(c: Candidate) -> bool:
@@ -190,7 +222,9 @@ def size_text(c: Candidate) -> str:
         bits.append(f"{c.employees}명")
     if c.area_m2:
         bits.append(f"{c.area_m2:,}㎡")
-    if c.corp_code:
+    if c.stock_code:
+        bits.append("상장")
+    elif c.corp_code:
         bits.append("외감(DART)")
     return " · ".join(bits) or "-"
 

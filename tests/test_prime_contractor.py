@@ -2534,8 +2534,9 @@ def test_sizable_by_employees_area_or_dart(tmp_path):
     assert is_sizable(by["(주)한결포장기계"])      # 45명
     assert is_sizable(by["청정식품"])              # 4,500㎡
     assert not is_sizable(by["작은식품"]) and not is_sizable(by["대명컨베이어"])
-    hits = mark_dart_registered(list(by.values()), {normalize_name("대명컨베이어"): "00123"})
-    assert hits == 1 and is_sizable(by["대명컨베이어"])
+    registered, on_market = mark_dart_registered(
+        list(by.values()), {normalize_name("대명컨베이어"): "00123"})
+    assert (registered, on_market) == (1, 0) and is_sizable(by["대명컨베이어"])
     assert "외감" in size_text(by["대명컨베이어"]) and "500㎡" in size_text(by["대명컨베이어"])
 
 
@@ -2571,3 +2572,36 @@ def test_factories_excel_and_leads_keep_the_phone(tmp_path):
     book = LeadBook(path=tmp_path / "leads.json")
     lead, created = book.add_candidate(next(c for c in factories if c.phone))
     assert created and lead.phone.startswith("031-")
+
+
+def test_listed_company_plant_is_found_by_plant_address_not_hq():
+    """농심처럼 본사는 서울이고 공장은 안성인 상장사 — 공장 주소로 잡혀야 한다."""
+    from prime_contractor.industry import normalize_name
+    from prime_contractor.makers import (
+        find_factories, listed_names, mark_dart_registered, size_text)
+    records = [
+        {"name": "(주)농심 안성공장", "products": "라면, 스낵", "address": "경기도 안성시 공도읍"},
+        {"name": "오뚜기 제2공장", "products": "소스류", "address": "경기도 평택시 포승읍"},
+        {"name": "동네떡집", "products": "떡", "address": "경기도 안성시 대덕면"},
+        {"name": "(주)농심 구미공장", "products": "라면", "address": "경상북도 구미시"},
+    ]
+    factories = find_factories(records, within_km=70.0)
+    listed = listed_names([("농심", "00111", "004370"), ("오뚜기", "00222", "007310"),
+                           ("비상장", "00333", "")])
+    corp_index = {normalize_name("농심"): "00111", normalize_name("오뚜기"): "00222"}
+    registered, on_market = mark_dart_registered(factories, corp_index, listed)
+    by = {c.name: c for c in factories}
+    assert "(주)농심 구미공장" not in by                       # 공장이 멀면 빠진다
+    assert by["(주)농심 안성공장"].stock_code == "004370"
+    assert by["오뚜기 제2공장"].stock_code == "007310"
+    assert not by["동네떡집"].stock_code and (registered, on_market) == (2, 2)
+    assert size_text(by["(주)농심 안성공장"]) == "상장"
+    assert by["(주)농심 안성공장"].sector == "식품·음료"
+
+
+def test_company_key_strips_only_the_plant_name():
+    from prime_contractor.makers import company_key
+    assert company_key("(주)농심 안성공장") == company_key("농심")
+    assert company_key("삼양사 인천1공장") == company_key("삼양사")
+    assert company_key("오뚜기제2공장") == company_key("오뚜기")
+    assert company_key("행복센터") == company_key("행복센터")       # 이름 전체면 그대로
