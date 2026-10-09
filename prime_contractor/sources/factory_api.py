@@ -31,7 +31,12 @@ log = logging.getLogger(__name__)
 BASE = "http://apis.data.go.kr/B550624/fctryRegistPrdctnInfo"
 #: 문서로 확인하지 못해 차례로 시도한다. 형제 서비스(필지정보)는 getFctryLndpclService.
 OPERATIONS = ("getFctryPrdctnService", "getFctryRegistPrdctnService",
-              "getFctryRegistPrdctnInfo", "getFctryPrdctnInfo", "getFctryPrdctnInfoService")
+              "getFctryRegistPrdctnInfo", "getFctryPrdctnInfo", "getFctryPrdctnInfoService",
+              "getFctryRegistPrdctnInfoService", "getFctryPrdctService", "getFctryPrdlstService",
+              "getFctryPrductService", "getFctryProductService", "getFctryInfoService",
+              "getFctryRegistInfoService", "getFctryIndutyPrdctnService", "getFctryService",
+              "getFctryPrdctnList", "getFctryPrdctnInfoList", "getFctryRegistPrdctnList",
+              "getPrdctnInfoService", "getRegistPrdctnInfo", "fctryRegistPrdctnInfo")
 PROBE_NAME = "삼성전자"
 CACHE_DAYS = 60
 PAGE_SIZE = 100
@@ -142,8 +147,10 @@ class FactoryApi:
             self.operation = op
             log.info("공장 조회 오퍼레이션: %s", op)
             return op
-        raise FactoryApiError("공장등록 조회 API 주소를 찾지 못했습니다. 화면을 캡처해 보내 주세요.\n"
-                              + "\n".join(tried))
+        raise FactoryApiError(
+            f"공장등록 조회 API 주소를 찾지 못했습니다 ({len(tried)}가지 시도). "
+            "공공데이터포털 → 마이페이지 → 활용신청 현황 → 공장등록생산정보조회서비스 에 "
+            "나온 '요청주소'를 캡처해 보내 주세요.\n첫 답: " + (tried[0] if tried else ""))
 
     def check(self) -> int:
         """본격적으로 묻기 전에 '삼성전자'로 한 번 시험한다. 읽은 공장 수.
