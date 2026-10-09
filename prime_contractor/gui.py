@@ -64,6 +64,20 @@ def _label_for(choices: dict, value) -> str:
     return next((k for k, v in choices.items() if v == value), list(choices)[0])
 
 
+RUN_LOG = Path.home() / ".cache" / "prime_contractor" / "run_log.txt"
+
+
+def _write_run_log(text: str) -> None:
+    """진행 상황을 파일에도 남긴다 — 화면이 멈춰 보일 때 어디까지 갔는지 알 수 있게."""
+    import time
+    try:
+        RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with RUN_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%m-%d %H:%M:%S')} {redact_secrets(text)}\n")
+    except OSError:
+        pass
+
+
 class QueueLogHandler(logging.Handler):
     """백그라운드 스레드의 로그를 화면 큐로 보낸다."""
 
@@ -577,19 +591,24 @@ class App:
 
     def say(self, text: str) -> None:
         self.messages.put(text)
+        _write_run_log(text)
 
     def _pump_messages(self) -> None:
         """백그라운드에서 온 메시지를 화면에 붙인다 (tkinter 는 메인 스레드 전용)."""
-        while True:
-            try:
-                line = self.messages.get_nowait()
-            except queue.Empty:
-                break
-            self.log.configure(state="normal")
-            self.log.insert(END, line + "\n")
-            self.log.see(END)
-            self.log.configure(state="disabled")
-        self.root.after(150, self._pump_messages)
+        try:
+            while True:
+                try:
+                    line = self.messages.get_nowait()
+                except queue.Empty:
+                    break
+                self.log.configure(state="normal")
+                self.log.insert(END, line + "\n")
+                self.log.see(END)
+                self.log.configure(state="disabled")
+        except Exception:                      # 한 줄 못 붙여도 다음 줄은 계속 보여 준다
+            logging.getLogger(__name__).exception("진행 상황 표시 실패")
+        finally:
+            self.root.after(150, self._pump_messages)
 
     def current_options(self) -> dict:
         return {
@@ -797,7 +816,33 @@ class App:
                      "1분쯤 걸립니다)…")
             target = self._load_factories_by_key
             args = (self.data_key.get().strip(), cfg)
-        threading.Thread(target=target, args=args, daemon=True).start()
+        worker = threading.Thread(target=self._guarded, args=(target, *args), daemon=True)
+        worker.start()
+        self._watch(worker, __import__("time").monotonic())
+
+    def _guarded(self, target, *args) -> None:
+        """작업 스레드가 예상 못 한 오류로 죽어도 화면이 '찾는 중'에 멈춰 있지 않게."""
+        try:
+            target(*args)
+        except BaseException as exc:          # noqa: BLE001 — 무엇이든 사용자에게 보여야 한다
+            logging.getLogger(__name__).exception("공장 찾기 실패")
+            _write_run_log(f"오류: {exc!r}")
+            self.root.after(0, self._factories_failed, redact_secrets(f"{type(exc).__name__}: {exc}"))
+
+    def _watch(self, worker, started: float, dead_ticks: int = 0) -> None:
+        """찾는 동안 걸린 시간을 상태 칸에 보여 준다 — 멈췄는지 도는 중인지 알 수 있게."""
+        if not self.running:
+            return
+        seconds = int(__import__("time").monotonic() - started)
+        self.status.configure(text=f"찾는 중… {seconds // 60}분 {seconds % 60:02d}초")
+        if not worker.is_alive():
+            # 정상으로 끝났으면 결과 표시가 곧 running 을 끈다. 몇 초 지나도 그대로면 멈춘 것.
+            if dead_ticks >= 3:
+                self._factories_failed("작업이 중간에 멈췄습니다. 기록 파일을 보내 주세요:\n"
+                                       f"{RUN_LOG}")
+                return
+            dead_ticks += 1
+        self.root.after(1000, self._watch, worker, started, dead_ticks)
 
     def _load_factories(self, path: str, cfg) -> None:
         from prime_contractor.makers import (
@@ -854,8 +899,11 @@ class App:
         from prime_contractor.sources.dart import DartClient
         from prime_contractor.sources.factory_api import FactoryApi
         try:
+            _write_run_log("DART 준비")
             dart = DartClient(cfg.dart_api_key)
+            _write_run_log("공장 API 준비")
             api = FactoryApi(data_key, cache_dir=dart.cache_dir)
+            _write_run_log("상장사 목록 읽기")
             listed = [row for row in dart.listed_companies if row[2]]
             self.say(f"상장사 {len(listed)}곳 중 제조업만 고릅니다 — 처음 한 번은 몇 분 걸리고, "
                      "다음부터는 저장해 둔 걸 씁니다…")
