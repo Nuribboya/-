@@ -73,22 +73,34 @@ button:focus-visible, .lk input:focus-visible + span { outline: 3px solid var(--
 .lk label { flex: 0 0 auto; display: grid; place-items: center; cursor: pointer; }
 .lk input { position: absolute; opacity: 0; pointer-events: none; }
 .lk span { display: block; border-radius: 50%; border: 2px solid var(--line); transition: background .15s, border-color .15s, transform .1s; }
-.lk label:nth-child(1) span, .lk label:nth-child(7) span { width: 38px; height: 38px; }
-.lk label:nth-child(2) span, .lk label:nth-child(6) span { width: 32px; height: 32px; }
-.lk label:nth-child(3) span, .lk label:nth-child(5) span { width: 26px; height: 26px; }
-.lk label:nth-child(4) span { width: 20px; height: 20px; }
-.lk label:nth-child(-n+3) span { border-color: color-mix(in srgb, var(--pole-b) 55%, var(--line)); }
-.lk label:nth-child(n+5) span { border-color: color-mix(in srgb, var(--pole-a) 55%, var(--line)); }
-.lk label:nth-child(-n+3) input:checked + span { background: var(--pole-b); border-color: var(--pole-b); }
-.lk label:nth-child(n+5) input:checked + span { background: var(--pole-a); border-color: var(--pole-a); }
-.lk label:nth-child(4) input:checked + span { background: var(--muted); border-color: var(--muted); }
+.lk7 label:nth-child(1) span, .lk7 label:nth-child(7) span { width: 38px; height: 38px; }
+.lk7 label:nth-child(2) span, .lk7 label:nth-child(6) span { width: 32px; height: 32px; }
+.lk7 label:nth-child(3) span, .lk7 label:nth-child(5) span { width: 26px; height: 26px; }
+.lk7 label:nth-child(4) span { width: 20px; height: 20px; }
+.lk7 label:nth-child(-n+3) span { border-color: color-mix(in srgb, var(--pole-b) 55%, var(--line)); }
+.lk7 label:nth-child(n+5) span { border-color: color-mix(in srgb, var(--pole-a) 55%, var(--line)); }
+.lk7 label:nth-child(-n+3) input:checked + span { background: var(--pole-b); border-color: var(--pole-b); }
+.lk7 label:nth-child(n+5) input:checked + span { background: var(--pole-a); border-color: var(--pole-a); }
+.lk7 label:nth-child(4) input:checked + span { background: var(--muted); border-color: var(--muted); }
 .lk label:hover span { transform: scale(1.08); }
+.lk4 { justify-content: space-around; }
+.lk4 label span { width: 30px; height: 30px; border-color: color-mix(in srgb, var(--ink) 35%, var(--line)); }
+.lk4 label:nth-child(1) span, .lk4 label:nth-child(4) span { width: 38px; height: 38px; }
+.lk4 label input:checked + span { background: var(--ink); border-color: var(--ink); }
+.fc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.fc p { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; display: flex; gap: 8px; align-items: baseline; }
+.fc b { font-family: var(--mono); font-weight: 500; color: var(--muted); }
+@media (max-width: 480px) { .fc { grid-template-columns: 1fr; } }
+.amb { display: flex; flex-wrap: wrap; gap: 8px; }
+.amb div { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; }
+.amb b { font-family: var(--mono); font-weight: 500; }
+.amb span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .q.missing .q-text { color: var(--warn); }
 @media (max-width: 480px) {
   .scale { grid-template-columns: 1fr 1fr; }
   .scale .lk { grid-column: 1 / -1; grid-row: 1; }
   .scale .end.r { text-align: right; }
-  .lk label:nth-child(1) span, .lk label:nth-child(7) span { width: 34px; height: 34px; }
+  .lk7 label:nth-child(1) span, .lk7 label:nth-child(7) span { width: 34px; height: 34px; }
 }
 .nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
 .hint { font-size: 13px; color: var(--warn); min-height: 1.4em; margin-top: 8px; text-align: right; }
@@ -167,7 +179,7 @@ button:focus-visible, .lk input:focus-visible + span { outline: 3px solid var(--
 <div class="wrap">
   <header class="mast">
     <h1>MBTI 심층 성향 검사</h1>
-    <span class="meta">72문항 · 4지표 + 8인지기능</span>
+    <span class="meta">108문항 + 확인 문항 · 4지표 + 8인지기능</span>
   </header>
   <main id="app"></main>
 </div>
@@ -195,6 +207,9 @@ const AXIS_ITEMS = {
     ["관심사가 생기면 누구와 얘기하기보다 혼자 파고드는 게 먼저다.", -1],
     ["갑작스러운 약속 제안이 오면 반갑다.", 1],
     ["전화보다 문자가 훨씬 편하다.", -1],
+    ["하루 종일 혼자 있으면 답답해서 누구라도 만나고 싶어진다.", 1],
+    ["모임에서 대화의 중심에 서기보다 한두 명과 깊게 얘기하는 자리가 좋다.", -1],
+    ["새로운 사람을 만나는 일 자체가 설렌다.", 1],
   ],
   SN: [
     ["설명을 들을 때 구체적인 예시와 사실이 있어야 이해가 된다.", 1],
@@ -209,6 +224,9 @@ const AXIS_ITEMS = {
     ["아직 존재하지 않는 것을 상상하는 시간이 즐겁다.", -1],
     ["맛, 촉감, 풍경 같은 감각적인 경험을 생생하게 즐긴다.", 1],
     ["같은 일을 같은 방식으로 반복하면 금방 지루해져서 방식을 바꿔본다.", -1],
+    ["일할 때 정해진 절차와 순서를 따라가는 게 편하다.", 1],
+    ["사람들에게 내 말이 \"추상적이다\"라는 얘기를 들을 때가 있다.", -1],
+    ["먼 미래 계획보다 당장 이번 주에 할 일이 더 실감 난다.", 1],
   ],
   TF: [
     ["결정할 때는 감정보다 논리적으로 맞는지가 우선이다.", 1],
@@ -223,6 +241,9 @@ const AXIS_ITEMS = {
     ["효율적이어도 내 가치관에 어긋나는 일은 하기 싫다.", -1],
     ["문제를 분석해서 원인을 찾아내는 과정 자체가 재밌다.", 1],
     ["고마움이나 칭찬을 말로 표현하는 게 자연스럽다.", -1],
+    ["친한 사람의 의견이라도 논리가 약하면 반박한다.", 1],
+    ["누가 옳은지보다 서로 마음이 상하지 않는 게 더 중요할 때가 많다.", -1],
+    ["감정적인 호소보다 근거와 수치에 더 설득된다.", 1],
   ],
   JP: [
     ["여행 가기 전에 일정과 동선을 미리 짜둔다.", 1],
@@ -237,8 +258,13 @@ const AXIS_ITEMS = {
     ["규칙은 상황에 따라 유연하게 적용하면 된다고 생각한다.", -1],
     ["일을 시작하기 전에 어떻게 마무리할지부터 정한다.", 1],
     ["계획 없이 그날 기분대로 보내는 하루가 좋다.", -1],
+    ["미리 정해둔 계획대로 하루가 흘러가면 뿌듯하다.", 1],
+    ["여러 일을 동시에 벌여놓고 왔다 갔다 하며 진행하는 편이다.", -1],
+    ["결론이 안 난 채로 남아 있는 일이 있으면 계속 신경이 쓰인다.", 1],
   ],
 };
+const AXIS_LIKERT = 15;
+const FUNC_LIKERT = 4;
 const FUNCS = {
   Se: { name: "외향 감각", short: "지금 이 순간의 현실", desc: "눈앞의 상황을 빠르게 포착하고 몸으로 즉시 반응하는 힘." },
   Si: { name: "내향 감각", short: "경험과 기억의 기준", desc: "과거 경험과 몸의 감각을 기준 삼아 안정적으로 판단하는 힘." },
@@ -250,14 +276,95 @@ const FUNCS = {
   Fi: { name: "내향 감정", short: "내면의 가치", desc: "자기만의 가치 기준으로 진정성 있게 판단하는 힘." },
 };
 const FUNC_ITEMS = {
-  Se: ["주변에서 일어나는 작은 변화를 남들보다 빨리 알아챈다.", "몸을 쓰는 활동이나 즉각적인 경험을 할 때 살아있다고 느낀다.", "기회가 오면 생각보다 몸이 먼저 움직인다."],
-  Si: ["지금 상황을 과거에 겪은 비슷한 경험과 비교해서 판단한다.", "익숙한 루틴이 깨지면 컨디션이 쉽게 흐트러진다.", "피로, 허기, 온도 같은 내 몸 상태 변화를 세심하게 알아챈다."],
-  Ne: ["아이디어 하나에서 여러 가능성이 줄줄이 떠오른다.", "서로 관계없어 보이는 것들 사이의 연결고리를 잘 발견한다.", "브레인스토밍을 시작하면 멈추기가 어렵다."],
-  Ni: ["이유를 설명하진 못해도 일이 어떻게 흘러갈지에 대한 직감이 잘 맞는다.", "여러 정보를 하나의 핵심 통찰로 정리하는 걸 좋아한다.", "장기적인 비전 하나를 오랫동안 붙잡고 있는다."],
-  Te: ["일이 비효율적으로 돌아가면 구조를 바로잡고 싶어진다.", "목표, 기한, 담당자를 정해서 일을 실행시키는 걸 잘한다.", "객관적인 데이터와 결과로 판단하는 게 맞다고 본다."],
-  Ti: ["다들 맞다고 해도 내가 원리를 이해해야 납득이 된다.", "개념의 정확한 정의와 논리적 일관성을 따지는 걸 좋아한다.", "머릿속으로 체계를 만들고 다듬는 시간이 즐겁다."],
-  Fe: ["모임에서 분위기를 읽고 조화를 맞추는 역할을 자주 맡는다.", "다른 사람의 감정이 나에게 쉽게 전해진다.", "사람들이 함께 지키는 예의와 정서적인 배려를 중요하게 여긴다."],
-  Fi: ["남들이 뭐라 해도 내 안의 가치 기준은 확고하다.", "내 진짜 감정이 무엇인지 스스로 깊이 들여다보는 편이다.", "진정성 없는 말이나 행동을 견디기 어렵다."],
+  Se: ["주변에서 일어나는 작은 변화를 남들보다 빨리 알아챈다.", "몸을 쓰는 활동이나 즉각적인 경험을 할 때 살아있다고 느낀다.", "기회가 오면 생각보다 몸이 먼저 움직인다.", "새로운 장소에 가면 색, 소리, 냄새 같은 분위기가 먼저 들어온다."],
+  Si: ["지금 상황을 과거에 겪은 비슷한 경험과 비교해서 판단한다.", "익숙한 루틴이 깨지면 컨디션이 쉽게 흐트러진다.", "피로, 허기, 온도 같은 내 몸 상태 변화를 세심하게 알아챈다.", "좋아하는 음식이나 장소가 생기면 계속 그것만 찾는다."],
+  Ne: ["아이디어 하나에서 여러 가능성이 줄줄이 떠오른다.", "서로 관계없어 보이는 것들 사이의 연결고리를 잘 발견한다.", "브레인스토밍을 시작하면 멈추기가 어렵다.", "대화 중에 \"만약에 ~라면?\" 같은 가정을 던지는 걸 좋아한다."],
+  Ni: ["이유를 설명하진 못해도 일이 어떻게 흘러갈지에 대한 직감이 잘 맞는다.", "여러 정보를 하나의 핵심 통찰로 정리하는 걸 좋아한다.", "장기적인 비전 하나를 오랫동안 붙잡고 있는다.", "일이 벌어지기 전에 \"이건 이렇게 되겠구나\" 하는 그림이 먼저 보인다."],
+  Te: ["일이 비효율적으로 돌아가면 구조를 바로잡고 싶어진다.", "목표, 기한, 담당자를 정해서 일을 실행시키는 걸 잘한다.", "객관적인 데이터와 결과로 판단하는 게 맞다고 본다.", "회의가 결론 없이 길어지면 정리해서 결정을 내리고 싶다."],
+  Ti: ["다들 맞다고 해도 내가 원리를 이해해야 납득이 된다.", "개념의 정확한 정의와 논리적 일관성을 따지는 걸 좋아한다.", "머릿속으로 체계를 만들고 다듬는 시간이 즐겁다.", "남이 쓴 설명에서 앞뒤가 안 맞는 부분이 바로 눈에 걸린다."],
+  Fe: ["모임에서 분위기를 읽고 조화를 맞추는 역할을 자주 맡는다.", "다른 사람의 감정이 나에게 쉽게 전해진다.", "사람들이 함께 지키는 예의와 정서적인 배려를 중요하게 여긴다.", "상대 기분이 안 좋으면 나도 모르게 거기에 맞춰 행동이 바뀐다."],
+  Fi: ["남들이 뭐라 해도 내 안의 가치 기준은 확고하다.", "내 진짜 감정이 무엇인지 스스로 깊이 들여다보는 편이다.", "진정성 없는 말이나 행동을 견디기 어렵다.", "남들이 다 좋다고 해도 내 마음이 끌리지 않으면 하지 않는다."],
+};
+
+// 양자택일 문항: [A쪽 극, A 문장, B 문장]. 앞 2개는 기본 문항, 나머지는 결과가 애매할 때만 추가로 묻는 확인 문항
+const FC_BASE = 2;
+const FC_AXIS = {
+  EI: [
+    ["E", "금요일 저녁에 갑자기 시간이 비면 친구들에게 연락해서 나간다.", "금요일 저녁에 갑자기 시간이 비면 집에서 혼자 하고 싶던 걸 한다."],
+    ["I", "회의에서는 생각을 다 정리한 뒤에 의견을 말한다.", "회의에서는 떠오르는 대로 말하면서 생각을 다듬는다."],
+    ["E", "힘든 하루 끝에는 누군가와 수다를 떨어야 풀린다.", "힘든 하루 끝에는 조용히 혼자 있어야 풀린다."],
+    ["I", "파티에서는 아는 사람 한두 명 곁에 오래 머문다.", "파티에서는 여러 무리를 오가며 다양한 사람과 이야기한다."],
+    ["E", "일할 때 동료와 수시로 이야기하며 진행하는 게 좋다.", "일할 때 방해받지 않고 혼자 몰입하는 시간이 길어야 좋다."],
+    ["I", "처음 만난 사람과는 시간이 좀 지나야 편해진다.", "처음 만난 사람과도 금방 편해진다."],
+    ["E", "주말 이틀 모두 약속이 있어도 괜찮다.", "주말 중 하루는 꼭 비워둬야 한다."],
+    ["I", "내 이야기는 친한 사람에게만 천천히 꺼낸다.", "내 이야기를 비교적 쉽게 꺼내는 편이다."],
+  ],
+  SN: [
+    ["S", "요리할 때 레시피의 계량을 정확히 따른다.", "요리할 때 대충 감으로 응용하며 만든다."],
+    ["N", "영화를 보고 나면 숨은 의미와 해석이 궁금하다.", "영화를 보고 나면 장면과 연기, 연출이 기억에 남는다."],
+    ["S", "길을 알려줄 때 \"편의점 지나서 두 번째 골목\"처럼 구체적으로 말한다.", "길을 알려줄 때 \"역에서 북쪽 방향\"처럼 큰 방향으로 말한다."],
+    ["N", "새 프로젝트에서는 '왜 하는지, 뭘 바꿀 수 있는지'에 끌린다.", "새 프로젝트에서는 '구체적으로 뭘 어떻게 하는지'에 끌린다."],
+    ["S", "직접 겪어본 것을 더 믿는다.", "아직 증명되지 않았어도 가능성 있는 아이디어에 끌린다."],
+    ["N", "멍하니 있을 때 상상 속 시나리오가 펼쳐진다.", "멍하니 있을 때 주변 소리나 풍경을 그냥 느낀다."],
+    ["S", "\"꼼꼼하고 정확하다\"는 칭찬이 더 기분 좋다.", "\"아이디어가 독창적이다\"는 칭찬이 더 기분 좋다."],
+    ["N", "대화할 때 비유나 가정을 자주 쓴다.", "대화할 때 실제로 있었던 사례와 경험을 자주 꺼낸다."],
+  ],
+  TF: [
+    ["T", "친구가 고민을 털어놓으면 원인과 해결책을 같이 찾아준다.", "친구가 고민을 털어놓으면 감정을 먼저 들어주고 공감한다."],
+    ["F", "팀원이 실수하면 먼저 사정을 묻고 마음을 살핀다.", "팀원이 실수하면 무엇이 잘못됐고 어떻게 막을지부터 짚는다."],
+    ["T", "\"넌 참 공정해\"라는 말이 더 좋다.", "\"넌 참 따뜻해\"라는 말이 더 좋다."],
+    ["F", "맞는 결정이라도 누군가 크게 상처받는다면 다시 생각한다.", "맞는 결정이라면 상처받는 사람이 있어도 밀고 간다."],
+    ["T", "영화에서 설정의 허점이 보이면 몰입이 깨진다.", "영화에서 인물의 감정선이 어색하면 몰입이 깨진다."],
+    ["F", "갈등이 생기면 관계를 회복하는 게 먼저다.", "갈등이 생기면 누가 맞는지 정리하는 게 먼저다."],
+    ["T", "피드백할 때 고칠 점을 직설적으로 말한다.", "피드백할 때 좋은 점부터 말하고 조심스럽게 꺼낸다."],
+    ["F", "선택할 때 '이게 나와 사람들에게 의미가 있나'를 따진다.", "선택할 때 '이게 합리적이고 효율적인가'를 따진다."],
+  ],
+  JP: [
+    ["J", "과제는 미리 나눠서 조금씩 끝낸다.", "과제는 마감이 가까워지면 몰아서 한다."],
+    ["P", "여행은 숙소만 정하고 나머지는 가서 정한다.", "여행은 시간대별로 갈 곳을 정해둔다."],
+    ["J", "결정을 내리고 나면 후련하다.", "결정을 내리고 나면 다른 선택지가 아쉽다."],
+    ["P", "책상이 어수선해도 어디에 뭐가 있는지 안다.", "책상이 정리돼 있어야 일이 손에 잡힌다."],
+    ["J", "쇼핑은 살 것을 정해놓고 간다.", "쇼핑은 둘러보다가 마음에 드는 걸 산다."],
+    ["P", "갑자기 일정이 비면 신난다.", "갑자기 일정이 바뀌면 다시 짜느라 피곤하다."],
+    ["J", "일은 시작할 때보다 마무리할 때가 즐겁다.", "일은 마무리할 때보다 시작할 때가 즐겁다."],
+    ["P", "규칙은 참고용 가이드라고 생각한다.", "규칙은 지키라고 있는 거라고 생각한다."],
+  ],
+};
+// 인지기능 쌍: 같은 기능의 내향/외향 방향을 직접 비교
+const PAIRS = [["Ti", "Te"], ["Fi", "Fe"], ["Ni", "Ne"], ["Si", "Se"]];
+const FC_PAIR = {
+  "Ti-Te": [
+    ["Ti", "결과가 잘 나와도 원리를 이해하지 못하면 찜찜하다.", "원리를 다 몰라도 결과가 잘 나오면 충분하다."],
+    ["Te", "일을 시작하면 일정, 역할, 목표 수치부터 정리한다.", "일을 시작하면 문제의 구조와 개념부터 정확히 정리한다."],
+    ["Ti", "용어는 정확하게 정의해서 써야 마음이 놓인다.", "용어는 서로 뜻이 통하기만 하면 충분하다."],
+    ["Te", "주장할 때 검증된 자료나 공인된 기준을 근거로 든다.", "주장할 때 내가 직접 따져본 논리를 근거로 든다."],
+    ["Ti", "혼자 생각을 정교하게 다듬는 일이 더 맞는다.", "사람과 자원을 조직해 일을 추진하는 일이 더 맞는다."],
+    ["Te", "긴 설명을 들으면 \"그래서 결론이 뭐야?\"가 먼저 떠오른다.", "긴 설명을 들으면 \"그게 정말 맞는 말이야?\"가 먼저 떠오른다."],
+  ],
+  "Fi-Fe": [
+    ["Fi", "다들 좋아해도 내 마음이 아니면 따르지 않는다.", "내가 덜 좋아도 모두가 좋아하면 맞춰준다."],
+    ["Fe", "내 기분보다 지금 이 자리의 분위기가 먼저 신경 쓰인다.", "분위기보다 내가 느끼는 감정이 더 선명하게 느껴진다."],
+    ["Fi", "감정은 혼자 정리한 다음에 꺼낸다.", "감정은 사람들과 나누면서 정리된다."],
+    ["Fe", "예의와 배려 같은 함께 지키는 규범이 중요하다.", "형식적인 예의보다 진심이 담겼는지가 중요하다."],
+    ["Fi", "상대가 서운해하는 것보다 내가 진심 아닌 말을 하는 게 더 불편하다.", "내가 빈말을 하는 것보다 상대가 서운해하는 게 더 불편하다."],
+    ["Fe", "주변 사람의 감정에 쉽게 물든다.", "주변 사람의 감정과 내 감정이 잘 분리된다."],
+  ],
+  "Ni-Ne": [
+    ["Ni", "생각할 때 하나의 결론으로 좁혀가는 게 좋다.", "생각할 때 여러 가능성을 펼쳐두는 게 좋다."],
+    ["Ne", "관심사가 여러 갈래로 자주 바뀐다.", "관심 있는 몇 가지 주제를 오래 깊게 판다."],
+    ["Ni", "예감이 \"이렇게 될 거다\"라는 하나의 그림으로 온다.", "예감이 \"이럴 수도, 저럴 수도\" 여러 갈래로 온다."],
+    ["Ne", "브레인스토밍에서는 아이디어를 쏟아내는 쪽이다.", "브레인스토밍에서는 쏟아진 아이디어 중 핵심을 골라내는 쪽이다."],
+    ["Ni", "장기 목표 하나를 정하면 웬만해선 바꾸지 않는다.", "새로운 기회가 보이면 방향을 쉽게 바꾼다."],
+    ["Ne", "대화가 사방으로 튀는 게 재밌다.", "한 주제를 깊게 파고드는 대화가 재밌다."],
+  ],
+  "Si-Se": [
+    ["Si", "외식할 때 늘 가던 단골집이 좋다.", "외식할 때 안 가본 새로운 곳이 좋다."],
+    ["Se", "상황이 생기면 눈앞의 상황에 바로 반응한다.", "상황이 생기면 비슷했던 과거 경험에 비춰 신중하게 반응한다."],
+    ["Si", "여행지에서도 평소 루틴을 어느 정도 지킨다.", "여행지에 가면 그곳 리듬에 바로 몸을 맡긴다."],
+    ["Se", "즉흥적인 운동이나 액티비티에 바로 끼어든다.", "익숙하고 편안한 활동을 고른다."],
+    ["Si", "오래전 일도 그때의 느낌까지 생생하게 기억난다.", "지나간 일보다 지금 이 순간의 감각이 더 생생하다."],
+    ["Se", "주변 분위기가 바뀌는 걸 먼저 알아챈다.", "내 몸 컨디션이 바뀌는 걸 먼저 알아챈다."],
+  ],
 };
 
 // ---------- 16유형 ----------
@@ -376,47 +483,73 @@ const TYPES = {
     work: "경영, 전략 컨설팅, 창업, 투자, 법조, 프로젝트 리딩처럼 큰 결정과 조직이 필요한 일." },
 };
 
-// ---------- 문항 섞기 (고정 순서: 지표와 기능 문항을 고르게 배치) ----------
+// ---------- 문항 구성 ----------
+// 본 검사: 지표 리커트 60 + 기능 리커트 32 + 양자택일 16 = 108문항
+// 확인 문항: 지표별 6개, 기능 쌍별 4개. 결과가 애매한 부분만 골라서 추가로 묻는다
 function buildItems() {
-  const ax = [], fn = [];
-  for (let i = 0; i < 12; i++) for (const a of AXES) {
+  const ax = [], fn = [], fc = [], extra = [];
+  for (let i = 0; i < AXIS_LIKERT; i++) for (const a of AXES) {
     const [text, s] = AXIS_ITEMS[a.id][i];
     ax.push({ id: `${a.id}${i}`, kind: "axis", axis: a.id, s, text });
   }
-  for (let i = 0; i < 3; i++) for (const f of Object.keys(FUNC_ITEMS)) {
+  for (let i = 0; i < FUNC_LIKERT; i++) for (const f of Object.keys(FUNC_ITEMS)) {
     fn.push({ id: `${f}${i}`, kind: "fn", fn: f, text: FUNC_ITEMS[f][i] });
   }
-  // 지표 2개 : 기능 1개 비율로 섞음 (48 + 24 = 72)
-  const out = [];
-  while (ax.length || fn.length) {
-    if (ax.length) out.push(ax.shift());
-    if (ax.length) out.push(ax.shift());
-    if (fn.length) out.push(fn.shift());
+  const groups = [
+    ...AXES.map(a => [a.id, FC_AXIS[a.id]]),
+    ...PAIRS.map(([x, y]) => [`${x}-${y}`, FC_PAIR[`${x}-${y}`]]),
+  ];
+  const maxLen = Math.max(...groups.map(g => g[1].length));
+  for (let i = 0; i < maxLen; i++) for (const [dim, list] of groups) {
+    if (!list[i]) continue;
+    const [pole, ta, tb] = list[i];
+    (i < FC_BASE ? fc : extra).push({ id: `fc-${dim}${i}`, kind: "fc", dim, pole, ta, tb });
   }
-  return out;
+  // 지표 4 : 기능 2 : 양자택일 1 비율로 고르게 섞음
+  const pattern = [ax, ax, fn, ax, fc, ax, fn];
+  const main = [];
+  while (ax.length || fn.length || fc.length) {
+    for (const src of pattern) if (src.length) main.push(src.shift());
+  }
+  return { main, extra };
 }
-const ITEMS = buildItems();
-const PER_PAGE = 8;
-const PAGES = Math.ceil(ITEMS.length / PER_PAGE);
+const { main: MAIN, extra: EXTRA } = buildItems();
+const BY_ID = Object.fromEntries([...MAIN, ...EXTRA].map(it => [it.id, it]));
+const PER_PAGE = 10;
+const FC_LEAN = { 1: 2, 2: 1, 3: -1, 4: -2 };   // A 확실 / A 쪽 / B 쪽 / B 확실
 
 // ---------- 상태 ----------
 const KEY = "mbti-deep-v1";
-let state = { answers: {}, page: 0, view: "intro" };
-try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.answers) state = s; } catch (e) {}
+let state = { answers: {}, page: 0, view: "intro", queue: [] };
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.answers) state = Object.assign(state, s); } catch (e) {}
+if (!Array.isArray(state.queue) || !state.queue.length) state.queue = MAIN.map(i => i.id);
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 
 const app = document.getElementById("app");
-const answeredCount = () => Object.keys(state.answers).length;
+const isDone = id => state.answers[id] != null;
+const mainDone = () => MAIN.filter(i => isDone(i.id)).length;
+const extraDone = () => EXTRA.filter(i => isDone(i.id)).length;
+
+function startQueue(ids) {
+  state.queue = ids; state.page = 0; state.view = "quiz";
+  save(); render(); scrollTo(0, 0);
+}
+function resumeMain() {
+  const left = MAIN.filter(i => !isDone(i.id)).map(i => i.id);
+  startQueue(left.length ? left : MAIN.map(i => i.id));
+}
 
 // ---------- 화면 ----------
 function render() {
   if (state.view === "quiz") return renderQuiz();
+  if (state.view === "check") return renderCheck();
   if (state.view === "result") return renderResult();
   renderIntro();
 }
 
 function renderIntro() {
-  const n = answeredCount();
+  const n = mainDone();
+  const total = MAIN.length;
   app.innerHTML = `
     <section class="card intro stack">
       <div>
@@ -424,54 +557,79 @@ function renderIntro() {
         <p>일반적인 MBTI 검사는 E/I, S/N, T/F, J/P 네 글자만 알려줍니다. 이 검사는 각 지표가 얼마나 뚜렷한지, 그리고 융(Jung)의 인지기능 8가지 중 무엇을 주로 쓰는지까지 측정해서 두 결과가 서로 맞아떨어지는지 교차 확인합니다.</p>
       </div>
       <ul>
-        <li>총 ${ITEMS.length}문항, 한 페이지에 ${PER_PAGE}문항씩 ${PAGES}페이지. 10~15분 정도 걸립니다.</li>
-        <li>'되고 싶은 나'가 아니라 편하게 있을 때의 평소 모습으로 답해 주세요.</li>
-        <li>애매하면 가운데를 고르기보다 조금이라도 기우는 쪽을 고르는 편이 결과가 정확합니다.</li>
+        <li>기본 ${total}문항, 한 페이지에 ${PER_PAGE}문항씩. 15~20분 정도 걸립니다.</li>
+        <li>동의 정도를 고르는 문항과, 두 문장 중 더 가까운 쪽을 고르는 문항이 섞여 있습니다.</li>
+        <li>결과가 50:50에 가까운 지표나 인지기능이 있으면 그 부분만 확인 문항을 몇 개 더 묻습니다.</li>
+        <li>'되고 싶은 나'가 아니라 편하게 있을 때의 평소 모습으로 답해 주세요. 애매하면 조금이라도 기우는 쪽을 고르면 결과가 정확해집니다.</li>
         <li>답변은 이 브라우저에만 저장되고 다른 곳으로 전송되지 않습니다.</li>
       </ul>
       <div class="row">
-        <button class="btn" id="start">${n ? `이어서 하기 (${n}/${ITEMS.length})` : "검사 시작"}</button>
+        <button class="btn" id="start">${n === total ? "답변 처음부터 보기" : n ? `이어서 하기 (${n}/${total})` : "검사 시작"}</button>
+        ${n === total ? `<button class="btn ghost" id="toResult">결과 보기</button>` : ""}
         ${n ? `<button class="btn ghost" id="reset">처음부터 다시</button>` : ""}
-        ${n === ITEMS.length ? `<button class="btn ghost" id="toResult">결과 보기</button>` : ""}
       </div>
     </section>`;
-  document.getElementById("start").onclick = () => { state.view = "quiz"; save(); render(); scrollTo(0, 0); };
+  document.getElementById("start").onclick = resumeMain;
   const r = document.getElementById("reset");
-  if (r) r.onclick = () => { state = { answers: {}, page: 0, view: "quiz" }; save(); render(); };
+  if (r) r.onclick = () => { state.answers = {}; startQueue(MAIN.map(i => i.id)); };
   const t = document.getElementById("toResult");
   if (t) t.onclick = () => { state.view = "result"; save(); render(); };
 }
 
+const LIKERT_LABELS = ["전혀 아니다", "아니다", "약간 아니다", "보통", "약간 그렇다", "그렇다", "매우 그렇다"];
+const FC_LABELS = ["A에 확실히 가깝다", "A에 조금 더 가깝다", "B에 조금 더 가깝다", "B에 확실히 가깝다"];
+function itemHTML(it, idx) {
+  const v = state.answers[it.id];
+  const n = `<span class="n">${String(idx).padStart(2, "0")}</span>`;
+  if (it.kind === "fc") {
+    return `<div class="q" data-id="${it.id}">
+      <p class="q-text">${n}둘 중 평소의 나에 더 가까운 쪽은?</p>
+      <div class="fc"><p><b>A</b>${it.ta}</p><p><b>B</b>${it.tb}</p></div>
+      <div class="scale">
+        <span class="end">A</span>
+        <div class="lk lk4" role="radiogroup" aria-label="${idx}번 문항">
+          ${[1,2,3,4].map(k => `<label title="${FC_LABELS[k-1]}"><input type="radio" id="q-${it.id}-${k}" name="${it.id}" value="${k}" ${v === k ? "checked" : ""} aria-label="${FC_LABELS[k-1]}"><span></span></label>`).join("")}
+        </div>
+        <span class="end r">B</span>
+      </div>
+    </div>`;
+  }
+  return `<div class="q" data-id="${it.id}">
+    <p class="q-text">${n}${it.text}</p>
+    <div class="scale">
+      <span class="end">아니다</span>
+      <div class="lk lk7" role="radiogroup" aria-label="${idx}번 문항">
+        ${[1,2,3,4,5,6,7].map(k => `<label title="${LIKERT_LABELS[k-1]}"><input type="radio" id="q-${it.id}-${k}" name="${it.id}" value="${k}" ${v === k ? "checked" : ""} aria-label="${LIKERT_LABELS[k-1]}"><span></span></label>`).join("")}
+      </div>
+      <span class="end r">그렇다</span>
+    </div>
+  </div>`;
+}
+
 function renderQuiz() {
-  const p = state.page;
-  const items = ITEMS.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
-  const labels = ["전혀 아니다", "아니다", "약간 아니다", "보통", "약간 그렇다", "그렇다", "매우 그렇다"];
+  const Q = state.queue.filter(id => BY_ID[id]);
+  const pages = Math.max(1, Math.ceil(Q.length / PER_PAGE));
+  const p = Math.min(state.page, pages - 1);
+  const items = Q.slice(p * PER_PAGE, (p + 1) * PER_PAGE).map(id => BY_ID[id]);
+  const isExtra = items.length && items.every(it => EXTRA.includes(it));
   app.innerHTML = `
     <div class="prog">
-      <div class="prog-top"><span>${p + 1} / ${PAGES} 페이지</span><span id="cnt">${answeredCount()} / ${ITEMS.length} 응답</span></div>
+      <div class="prog-top"><span>${isExtra ? "확인 문항 · " : ""}${p + 1} / ${pages} 페이지</span><span id="cnt"></span></div>
       <div class="bar"><i id="barfill"></i></div>
     </div>
     <section class="card">
-      ${items.map((it, i) => {
-        const idx = p * PER_PAGE + i + 1;
-        const v = state.answers[it.id];
-        return `<div class="q" data-id="${it.id}">
-          <p class="q-text"><span class="n">${String(idx).padStart(2, "0")}</span>${it.text}</p>
-          <div class="scale">
-            <span class="end">아니다</span>
-            <div class="lk" role="radiogroup" aria-label="${idx}번 문항">
-              ${[1,2,3,4,5,6,7].map(k => `<label title="${labels[k-1]}"><input type="radio" id="q-${it.id}-${k}" name="${it.id}" value="${k}" ${v === k ? "checked" : ""} aria-label="${labels[k-1]}"><span></span></label>`).join("")}
-            </div>
-            <span class="end r">그렇다</span>
-          </div>
-        </div>`;
-      }).join("")}
+      ${items.map((it, i) => itemHTML(it, p * PER_PAGE + i + 1)).join("")}
       <div class="nav">
         <button class="btn ghost" id="prev">${p === 0 ? "처음으로" : "이전"}</button>
-        <button class="btn" id="next">${p === PAGES - 1 ? "결과 보기" : "다음"}</button>
+        <button class="btn" id="next">${p === pages - 1 ? "결과 보기" : "다음"}</button>
       </div>
       <p class="hint" id="hint"></p>
     </section>`;
+  const updateProgress = () => {
+    const n = Q.filter(isDone).length;
+    document.getElementById("barfill").style.width = (n / Q.length * 100) + "%";
+    document.getElementById("cnt").textContent = `${n} / ${Q.length} 응답`;
+  };
   updateProgress();
   app.querySelectorAll(".lk input").forEach(inp => inp.addEventListener("change", e => {
     state.answers[e.target.name] = +e.target.value; save(); updateProgress();
@@ -483,48 +641,95 @@ function renderQuiz() {
     }
   }));
   document.getElementById("prev").onclick = () => {
-    if (p === 0) state.view = "intro"; else state.page--;
+    if (p === 0) state.view = "intro"; else state.page = p - 1;
     save(); render(); scrollTo(0, 0);
   };
   document.getElementById("next").onclick = () => {
-    const missing = items.filter(it => !state.answers[it.id]);
+    const missing = items.filter(it => !isDone(it.id));
     if (missing.length) {
       missing.forEach(it => app.querySelector(`.q[data-id="${it.id}"]`).classList.add("missing"));
       document.getElementById("hint").textContent = `응답하지 않은 문항이 ${missing.length}개 있어요. 주황색으로 표시된 문항에 답해 주세요.`;
       app.querySelector(`.q[data-id="${missing[0].id}"]`).scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (p === PAGES - 1) {
-      const allMissing = ITEMS.findIndex(it => !state.answers[it.id]);
-      if (allMissing >= 0) { state.page = Math.floor(allMissing / PER_PAGE); save(); render(); return; }
-      state.view = "result";
-    } else state.page++;
+    if (p === pages - 1) {
+      const firstMissing = Q.findIndex(id => !isDone(id));
+      if (firstMissing >= 0) { state.page = Math.floor(firstMissing / PER_PAGE); save(); render(); return; }
+      if (MAIN.some(i => !isDone(i.id))) return resumeMain();
+      state.view = ambiguous(score()).length ? "check" : "result";
+    } else state.page = p + 1;
     save(); render(); scrollTo(0, 0);
   };
 }
-function updateProgress() {
-  const n = answeredCount();
-  const f = document.getElementById("barfill"); if (f) f.style.width = (n / ITEMS.length * 100) + "%";
-  const c = document.getElementById("cnt"); if (c) c.textContent = `${n} / ${ITEMS.length} 응답`;
+
+// ---------- 애매한 부분 확인 ----------
+const AMBIG_GAP = 10;      // 지표: 50±10% 이내, 기능 쌍: 점수 차 10점 미만
+const PER_ROUND = 3;       // 한 번에 묻는 확인 문항 수 (차원별)
+function ambiguous(R) {
+  const out = [];
+  for (const a of AXES) {
+    if (Math.abs(R.axes[a.id].pctA - 50) < AMBIG_GAP) out.push({ dim: a.id, label: `${a.a} / ${a.b}`, why: `${a.a} ${R.axes[a.id].pctA}% · ${a.b} ${R.axes[a.id].pctB}%` });
+  }
+  for (const [x, y] of PAIRS) {
+    if (Math.abs(R.funcs[x] - R.funcs[y]) < AMBIG_GAP) out.push({ dim: `${x}-${y}`, label: `${x} / ${y}`, why: `${x} ${R.funcs[x]} · ${y} ${R.funcs[y]}` });
+  }
+  return out
+    .map(d => ({ ...d, ids: EXTRA.filter(i => i.dim === d.dim && !isDone(i.id)).slice(0, PER_ROUND).map(i => i.id) }))
+    .filter(d => d.ids.length);
+}
+function renderCheck() {
+  const amb = ambiguous(score());
+  if (!amb.length) { state.view = "result"; save(); return render(); }
+  const ids = amb.flatMap(d => d.ids);
+  // 차원이 번갈아 나오도록 섞기
+  const mixed = [];
+  for (let i = 0; i < PER_ROUND; i++) for (const d of amb) if (d.ids[i]) mixed.push(d.ids[i]);
+  app.innerHTML = `
+    <section class="card stack">
+      <div>
+        <p class="eyebrow">거의 다 왔어요</p>
+        <h2 style="font-size:20px;margin-top:4px">아래 항목이 50:50에 가깝게 나왔어요</h2>
+      </div>
+      <div class="amb">${amb.map(d => `<div><b>${d.label}</b><span>${d.why}</span></div>`).join("")}</div>
+      <p>비슷한 두 성향을 직접 비교하는 확인 문항 ${ids.length}개를 더 풀면 이 부분을 더 정확하게 가를 수 있어요. 두 문장 중 평소의 나에 더 가까운 쪽을 골라 주세요.</p>
+      <div class="row">
+        <button class="btn" id="more">확인 문항 ${ids.length}개 풀기</button>
+        <button class="btn ghost" id="skip">지금 결과 보기</button>
+      </div>
+    </section>`;
+  document.getElementById("more").onclick = () => startQueue(mixed);
+  document.getElementById("skip").onclick = () => { state.view = "result"; save(); render(); scrollTo(0, 0); };
 }
 
 // ---------- 채점 ----------
 function score() {
   const A = state.answers;
+  const all = [...MAIN, ...EXTRA].filter(it => isDone(it.id));
   const axes = {};
   for (const a of AXES) {
-    const its = ITEMS.filter(i => i.kind === "axis" && i.axis === a.id);
-    let sum = 0;
-    for (const it of its) sum += ((A[it.id] || 4) - 4) * it.s;   // -3..+3
-    const max = its.length * 3;
-    const pctA = Math.round(50 + (sum / max) * 50);               // 첫 글자 쪽 비율
-    axes[a.id] = { pctA, pctB: 100 - pctA, letter: pctA >= 50 ? a.a : a.b, tie: pctA === 50 };
+    let sum = 0, max = 0;
+    for (const it of all) {
+      if (it.kind === "axis" && it.axis === a.id) { sum += (A[it.id] - 4) * it.s; max += 3; }          // -3..+3
+      if (it.kind === "fc" && it.dim === a.id) { sum += FC_LEAN[A[it.id]] * 1.5 * (it.pole === a.a ? 1 : -1); max += 3; }
+    }
+    const pctA = max ? Math.round(50 + (sum / max) * 50) : 50;   // 첫 글자 쪽 비율
+    axes[a.id] = { pctA, pctB: 100 - pctA, letter: pctA >= 50 ? a.a : a.b };
+  }
+  const vals = Object.fromEntries(Object.keys(FUNCS).map(f => [f, []]));
+  for (const it of all) {
+    if (it.kind === "fn") vals[it.fn].push((A[it.id] - 1) / 6 * 100);
+    if (it.kind === "fc" && it.dim.includes("-")) {
+      const [x, y] = it.dim.split("-");
+      const other = it.pole === x ? y : x;
+      const lean = FC_LEAN[A[it.id]];
+      vals[it.pole].push(50 + lean * 25);
+      vals[other].push(50 - lean * 25);
+    }
   }
   const funcs = {};
   for (const f of Object.keys(FUNCS)) {
-    const its = ITEMS.filter(i => i.kind === "fn" && i.fn === f);
-    const mean = its.reduce((s, it) => s + (A[it.id] || 4), 0) / its.length; // 1..7
-    funcs[f] = Math.round((mean - 1) / 6 * 100);
+    const v = vals[f];
+    funcs[f] = v.length ? Math.round(v.reduce((s, x) => s + x, 0) / v.length) : 50;
   }
   const type = AXES.map(a => axes[a.id].letter).join("");
   // 기능 프로파일 매칭: 유형별 기대 프로필과 사용자 점수의 상관계수
@@ -569,8 +774,23 @@ function renderResult() {
   else if (myRank <= 3) consistency = `<strong>대체로 일치합니다.</strong> 인지기능 기준으로는 ${R.type}가 ${myRank}순위입니다. 1순위로 나온 ${top3[0].t}의 설명도 함께 읽어보고 더 와닿는 쪽을 참고하세요.`;
   else consistency = `<strong>지표와 인지기능 결과가 다르게 나왔습니다.</strong> 인지기능 기준 1순위는 ${top3[0].t}입니다. 상황에 따라 다르게 행동하거나, 되고 싶은 모습으로 답했을 가능성이 있어요. 두 유형 설명을 비교해 보는 걸 추천합니다.`;
 
+  const leftMain = MAIN.filter(i => !isDone(i.id)).length;
+  const amb = leftMain ? [] : ambiguous(R);
+  const ambIds = [];
+  for (let i = 0; i < PER_ROUND; i++) for (const d of amb) if (d.ids[i]) ambIds.push(d.ids[i]);
+  const banner = leftMain
+    ? `<section class="card stack"><div class="sec-h"><h3>새 문항 ${leftMain}개가 추가됐어요</h3><small>기존 답변은 그대로 유지</small></div>
+        <p>애매하게 나오던 지표를 더 정확히 가르기 위해 문항을 늘렸어요. 아래 결과는 지금까지의 답변만으로 계산한 거라, 새 문항까지 풀면 더 정확해집니다.</p>
+        <div class="row"><button class="btn" id="resume">새 문항 ${leftMain}개 풀기</button></div></section>`
+    : amb.length
+    ? `<section class="card stack"><div class="sec-h"><h3>아직 50:50에 가까운 항목이 있어요</h3><small>확인 문항 ${ambIds.length}개</small></div>
+        <div class="amb">${amb.map(d => `<div><b>${d.label}</b><span>${d.why}</span></div>`).join("")}</div>
+        <div class="row"><button class="btn" id="more">확인 문항 더 풀기</button></div></section>`
+    : "";
+
   app.innerHTML = `
     <div class="stack">
+      ${banner}
       <section class="card hero">
         <p class="eyebrow">당신의 유형</p>
         <div class="code" aria-label="${R.type}">${R.type.split("").map((ch, i) => `<b class="${ch === AXES[i].a ? "a" : "b"}">${ch}</b>`).join("")}</div>
@@ -655,8 +875,10 @@ function renderResult() {
     try { await navigator.clipboard.writeText(summary); toast.textContent = "결과를 클립보드에 복사했어요."; }
     catch (e) { const ta = document.getElementById("copyText"); ta.hidden = false; ta.value = summary; ta.style.width = "100%"; ta.rows = 6; ta.select(); toast.textContent = "자동 복사가 막혀 있어요. 선택된 텍스트를 직접 복사해 주세요."; }
   };
-  document.getElementById("review").onclick = () => { state.view = "quiz"; state.page = 0; save(); render(); scrollTo(0, 0); };
-  document.getElementById("again").onclick = () => { state = { answers: {}, page: 0, view: "intro" }; save(); render(); scrollTo(0, 0); };
+  document.getElementById("review").onclick = () => startQueue([...MAIN, ...EXTRA].filter(i => isDone(i.id)).map(i => i.id));
+  document.getElementById("again").onclick = () => { state = { answers: {}, page: 0, view: "intro", queue: MAIN.map(i => i.id) }; save(); render(); scrollTo(0, 0); };
+  const rs = document.getElementById("resume"); if (rs) rs.onclick = resumeMain;
+  const mo = document.getElementById("more"); if (mo) mo.onclick = () => startQueue(ambIds);
 }
 
 render();
