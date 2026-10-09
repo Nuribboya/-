@@ -337,7 +337,16 @@ def sort_listed(listed_companies, company, progress=None, workers: int = 4):
     return makers, heads
 
 
-def affiliate_names(listed_companies, fetch) -> list[str]:
+#: 공장이 없을 이름 — 금융·투자·유통·서비스 계열사는 공장 조회에서 뺀다(하루 한도 아끼기).
+_NOT_FACTORY = re.compile(r"(금융|캐피탈|투자|증권|보험|자산운용|파트너스|리츠|인베스트|벤처스|"
+                          r"펀드|조합|신탁|유통|리테일|쇼핑|백화점|호텔|리조트|레저|골프|"
+                          r"엔터|미디어|방송|컨설팅|서비스|아이티|정보통신|건설|개발|부동산|"
+                          r"재단|병원|학교|SPC|PEF)", re.I)
+#: 공장을 찾아볼 계열사 지분 기준 — 절반 넘게 가진 자회사만.
+SUBSIDIARY_RATIO = 50.0
+
+
+def affiliate_names(listed_companies, fetch, min_ratio: float = 0.0) -> list[str]:
     """상장사들이 계열사로 가진 국내 회사 이름(원래 표기).
 
     fetch 는 인터넷에 다시 묻지 않는 것을 넘긴다 — 앞에서 못 받은 곳을 여기서 한 줄씩
@@ -353,10 +362,29 @@ def affiliate_names(listed_companies, fetch) -> list[str]:
             continue
         for row in rows:
             raw = row["name"]
-            if (is_affiliate_stake(row.get("ratio", 0.0), row.get("purpose", ""))
-                    and re.search(r"[가-힣]", raw) and not _FOREIGN.search(raw)):
+            ratio = row.get("ratio", 0.0)
+            if (is_affiliate_stake(ratio, row.get("purpose", "")) and ratio >= min_ratio
+                    and re.search(r"[가-힣]", raw) and not _FOREIGN.search(raw)
+                    and not (min_ratio and _NOT_FACTORY.search(raw))):
                 names.setdefault(company_key(raw), raw)
     return list(names.values())
+
+
+def near_first(makers, company, within_km: float):
+    """본사가 거리 안인 제조 상장사를 앞으로. 하루 한도에서 끊겨도 가까운 곳부터 받게."""
+    from prime_contractor.geo import distance_from_home
+
+    def km(row):
+        try:
+            _region, dist = distance_from_home(company(row[1]).get("adres", ""))
+        except Exception:
+            dist = None
+        return dist if dist is not None else 9999.0
+
+    scored = [(km(row), row) for row in makers]
+    near = [row for d, row in sorted(scored, key=lambda x: x[0]) if d <= within_km]
+    far = [row for d, row in scored if d > within_km]
+    return near, far
 
 
 def same_company(record_name: str, query: str) -> bool:

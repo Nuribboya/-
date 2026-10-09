@@ -894,7 +894,8 @@ class App:
     def _load_factories_by_key(self, data_key: str, cfg) -> None:
         """파일 없이: 상장사(제조업)·계열사 이름으로 공장등록 API 를 물어 공장을 모은다."""
         from prime_contractor.makers import (
-            affiliate_names, build_group_map, collect_by_name, find_factories,
+            SUBSIDIARY_RATIO, affiliate_names, build_group_map, collect_by_name, find_factories,
+            near_first,
             listed_names, mark_dart_registered, mark_groups, sort_listed)
         from prime_contractor.sources.dart import DartClient
         from prime_contractor.sources.factory_api import FactoryApi
@@ -927,8 +928,13 @@ class App:
                 self.say(f"⚠ {dart.invest_stopped}")
             elif failed:
                 self.say(f"  {len(failed)}곳은 DART 응답이 없어 건너뜀 — 다음에 누르면 다시 확인합니다.")
-            queries = list(dict.fromkeys([name for name, _c, _s in makers]
-                                         + affiliate_names(heads, dart.cached_investments)))
+            # 묻는 순서 = 받는 순서. 하루 1,000번에서 끊겨도 가까운 곳부터 채워진다.
+            near, far = near_first(makers, dart.company, cfg.within_km)
+            subsidiaries = affiliate_names(heads, dart.cached_investments,
+                                           min_ratio=SUBSIDIARY_RATIO)
+            queries = list(dict.fromkeys([name for name, _c, _s in near + far] + subsidiaries))
+            self.say(f"  조회 순서: 본사가 거리 안인 제조 상장사 {len(near)}곳 → 나머지 제조 상장사 "
+                     f"{len(far)}곳 → 자회사(지분 50%↑, 금융·유통·서비스 제외) {len(subsidiaries)}곳")
             fresh = sum(1 for q in queries if not api.cached(q))
             if fresh:
                 self.say("공장 조회 API 를 시험합니다…")

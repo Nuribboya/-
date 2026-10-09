@@ -2891,3 +2891,15 @@ def test_collect_by_name_reports_unexpected_errors():
 
     records, stopped = collect_by_name(["가", "나"], fetch, workers=1)
     assert records == [] and "2곳 조회 실패" in stopped and "연결 끊김" in stopped
+
+
+def test_factory_queries_skip_minor_and_non_factory_affiliates_and_go_near_first():
+    from prime_contractor.makers import affiliate_names, near_first
+    stakes = {"N1": [{"name": "(주)태경농산", "ratio": 100.0, "purpose": "경영참여"},
+                     {"name": "농심캐피탈", "ratio": 100.0, "purpose": "경영참여"},
+                     {"name": "율촌화학", "ratio": 32.0, "purpose": "경영참여"}]}
+    names = affiliate_names([("농심", "N1", "004370")], lambda c: stakes.get(c, []), min_ratio=50)
+    assert names == ["(주)태경농산"]
+    info = {"A": {"adres": "부산광역시 해운대구"}, "B": {"adres": "경기도 평택시 포승읍"}}
+    near, far = near_first([("부산회사", "A", "1"), ("평택회사", "B", "2")], info.get, 70)
+    assert [r[0] for r in near] == ["평택회사"] and [r[0] for r in far] == ["부산회사"]
