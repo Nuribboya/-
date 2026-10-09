@@ -2533,7 +2533,8 @@ def test_sizable_by_employees_area_or_dart(tmp_path):
     by = {c.name: c for c in _factories(tmp_path)}
     assert is_sizable(by["(주)한결포장기계"])      # 45명
     assert is_sizable(by["청정식품"])              # 4,500㎡
-    assert not is_sizable(by["작은식품"]) and not is_sizable(by["대명컨베이어"])
+    assert "작은식품" not in by                     # 3명 — 아예 뺀다
+    assert not is_sizable(by["대명컨베이어"])
     registered, on_market = mark_dart_registered(
         list(by.values()), {normalize_name("대명컨베이어"): "00123"})
     assert (registered, on_market) == (1, 0) and is_sizable(by["대명컨베이어"])
@@ -2926,3 +2927,17 @@ def test_low_demand_trades_are_left_out():
     assert not is_manufacturer({"induty_code": "14111"})       # 의복
     assert not is_manufacturer({"induty_code": "32021"})       # 가구
     assert is_manufacturer({"induty_code": "10301"})
+
+
+def test_same_name_companies_are_told_apart_by_ceo_and_offices_dropped():
+    from prime_contractor.makers import classify, collect_by_name, same_ceo
+    rows = [{"name": "제이에스", "ceo": "김철수", "address": "서울", "products": "광고 대행"},
+            {"name": "제이에스(주)", "ceo": "홍길동", "address": "평택", "products": "사출성형"},
+            {"name": "제이에스", "ceo": "", "address": "안성", "products": "도금"}]
+    records, _ = collect_by_name(["제이에스"], lambda q: rows, workers=1,
+                                 ceo_of={"제이에스": "홍길동, 이영희(각자대표)"})
+    assert [r["ceo"] for r in records] == ["홍길동", ""]   # 대표 모르면 남긴다
+    assert same_ceo("홍길동(대표이사)", "홍길동") and not same_ceo("대표이사", "대표")
+    for products in ("부동산 임대", "플랫폼S/W", "광고대행", "교육용 모바일게임", "경영컨설팅"):
+        assert classify(products)[0] == "", products
+    assert classify("사출성형")[0]

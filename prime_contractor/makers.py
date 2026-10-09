@@ -76,6 +76,9 @@ LOW_DEMAND_WORDS = ("의류", "의복", "봉제", "셔츠", "니트", "속옷", 
                     "장신구", "액세서리", "악세사리", "주얼리", "안경", "문구", "필기구", "완구",
                     "장난감", "인형", "악기", "피아노", "단순조립", "단순 조립", "임가공",
                     "포장대행", "포장 대행")
+#: 공장등록에 섞여 나오는 공장 아닌 일 — 임대·소프트웨어·광고 등. 판넬 수요가 없다.
+NOT_MANUFACTURING = re.compile(r"(임대|소프트웨어|S/W|\bSW\b|컨설팅|광고|콜센터|마케팅|게임|"
+                               r"교육|부동산|플랫폼|엔지니어링\s*서비스|대행)", re.I)
 #: 같은 업종의 한국표준산업분류(DART 업종코드 앞자리) — 조회 전에 상장사를 거르는 데 쓴다.
 #: 14 의복, 15 가죽·가방·신발, 16 목재, 32 가구, 331 귀금속·장신구, 332 악기, 333 운동·완구,
 #: 3399 문구 등, 27402 안경.
@@ -85,6 +88,8 @@ PART_WORDS = ("부품", "부분품", "소재", "금형", "베어링", "볼트", 
 
 #: '규모 있는 공장' 기준 — 하나라도 넘으면.
 MIN_EMPLOYEES = 30
+#: 이보다 적은 공장은 목록에서 아예 뺀다(인원이 적혀 있을 때만).
+MIN_SITE_EMPLOYEES = 5
 MIN_AREA_M2 = 3_000
 
 #: 머리글에서 칸을 찾는 말. 파일마다 이름이 조금씩 달라서 여러 개를 본다.
@@ -108,7 +113,7 @@ def classify(products: str, industry: str = "") -> tuple[str, bool, float]:
     for field, words in MACHINE_FIELDS:
         if any(w in text for w in words):
             return field, True, MACHINE_STEADY
-    if any(w in text for w in LOW_DEMAND_WORDS):
+    if any(w in text for w in LOW_DEMAND_WORDS) or NOT_MANUFACTURING.search(text):
         return "", False, 0.0
     for field, words, steady in PLANT_FIELDS:
         if any(w in text for w in words):
@@ -169,6 +174,9 @@ def find_factories(records: list[dict[str, str]],
         region, dist = distance_from_home(r.get("address", ""))
         if dist is None or (within_km is not None and dist > within_km):
             continue
+        employees = _number(r.get("employees", ""))
+        if 0 < employees < MIN_SITE_EMPLOYEES:   # 몇 명짜리 작업장 — 판넬 수요도, 원청도 아니다
+            continue
         key = (r["name"], r.get("address", ""))
         if key in seen:                      # 같은 공장이 여러 줄(생산품별)로 나오기도 한다
             continue
@@ -178,7 +186,7 @@ def find_factories(records: list[dict[str, str]],
             address=r.get("address", ""), ceo=r.get("ceo", ""), phone=r.get("phone", ""),
             products=r.get("products", ""), sector=field, sector_weight=steady,
             industry_name=r.get("industry", ""), region=region, distance_km=dist,
-            employees=_number(r.get("employees", "")), area_m2=_number(r.get("area", "")),
+            employees=employees, area_m2=_number(r.get("area", "")),
             sources={"공장등록"})
         found.append(cand)
     return sorted(found, key=lambda c: c.distance_km)
@@ -443,9 +451,22 @@ def same_company(record_name: str, query: str) -> bool:
     return company_key(record_name) == company_key(query)
 
 
-def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4) -> tuple[
-        list[dict[str, str]], str]:
-    """회사 이름마다 공장을 물어 모은다. (공장 줄, 멈춘 이유 — 한도 초과면 그 문구)."""
+def same_ceo(a: str, b: str) -> bool:
+    """대표자 이름이 하나라도 겹치는가. '홍길동, 김철수(각자대표)' 처럼 여럿일 수 있다."""
+    def names(text):
+        return {t for t in re.split(r"[^가-힣A-Za-z]+", text or "") if len(t) >= 2
+                and t not in ("각자대표", "공동대표", "대표이사", "대표")}
+    return bool(names(a) & names(b))
+
+
+def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4,
+                    ceo_of: dict[str, str] | None = None) -> tuple[list[dict[str, str]], str]:
+    """회사 이름마다 공장을 물어 모은다. (공장 줄, 멈춘 이유 — 한도 초과면 그 문구).
+
+    이름이 같은 다른 회사가 많다('제이에스', '태성'). ceo_of 에 DART 대표자가 있으면 공장
+    대표자와 맞는 줄만 남긴다 — 그래야 동네 작은 '제이에스'가 상장사로 둔갑하지 않는다.
+    """
+    ceo_of = ceo_of or {}
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     records: list[dict[str, str]] = []
@@ -467,7 +488,9 @@ def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4) 
                 elif type(exc).__name__ not in ("QuotaExceeded", "FactoryApiError"):
                     other_errors.append(f"{type(exc).__name__}: {exc}")
                 continue
-            records += [r for r in rows if same_company(r.get("name", ""), query)]
+            expected = ceo_of.get(query, "")
+            records += [r for r in rows if same_company(r.get("name", ""), query)
+                        and (not expected or not r.get("ceo") or same_ceo(expected, r["ceo"]))]
     if other_errors and not stopped:        # 조용히 넘기면 '0곳'만 보고 이유를 모른다
         stopped = f"{len(other_errors)}곳 조회 실패 — 첫 오류: {other_errors[0][:200]}"
     return records, stopped

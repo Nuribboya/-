@@ -64,6 +64,13 @@ def _label_for(choices: dict, value) -> str:
     return next((k for k, v in choices.items() if v == value), list(choices)[0])
 
 
+def _ceo(company, code: str) -> str:
+    try:
+        return company(code).get("ceo_nm", "") or ""
+    except Exception:
+        return ""
+
+
 RUN_LOG = Path.home() / ".cache" / "prime_contractor" / "run_log.txt"
 
 
@@ -948,8 +955,13 @@ class App:
             if fresh > 900:
                 self.say("  공공데이터포털 개발계정은 하루 1,000번까지라 며칠에 나눠 받습니다 — "
                          "받은 건 저장되니 다음 날 다시 누르면 이어서 받습니다.")
+            # 이름만 같은 다른 회사를 거르려고 DART 대표자 이름을 같이 넘긴다(받아 둔 것만 쓴다).
+            ceo_of = {name: _ceo(dart.company, code) for name, code, _s in near + far}
+            for name in subsidiaries:
+                info = dart.lookup(name) or {}
+                ceo_of.setdefault(name, info.get("ceo_nm", ""))
             records, stopped = collect_by_name(
-                queries, api.factories_of,
+                queries, api.factories_of, ceo_of=ceo_of,
                 progress=lambda done, total: self.say(f"  공장 조회 {done}/{total}"))
             api.save_cache()
             if stopped:
