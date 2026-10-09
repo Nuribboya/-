@@ -347,12 +347,12 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
         CENTER, DECIMAL, TEXT, WRAP, Column, Sheet, write_workbook)
 
     main = Sheet("공장", [
-        Column("순위", 5, CENTER), Column("회사 이름", 19, WRAP), Column("분야", 12, WRAP),
-        Column("경기", 7, CENTER), Column("규모", 12, WRAP), Column("생산품", 24, WRAP),
-        Column("지역", 7, CENTER), Column("거리(km)", 7, DECIMAL), Column("대표자", 8, CENTER),
-        Column("전화", 13, CENTER), Column("주소", 26, WRAP),
-    ], rows=[[i, c.name, c.sector, steady_text(c.sector_weight), size_text(c), c.products,
-              c.region, c.distance_km, c.ceo, c.phone, c.address]
+        Column("순위", 5, CENTER), Column("회사 이름", 18, WRAP), Column("그룹", 14, WRAP),
+        Column("분야", 11, WRAP), Column("경기", 6, CENTER), Column("규모", 10, WRAP),
+        Column("생산품", 20, WRAP), Column("지역", 6, CENTER), Column("거리(km)", 7, DECIMAL),
+        Column("대표자", 7, CENTER), Column("전화", 12, CENTER), Column("주소", 24, WRAP),
+    ], rows=[[i, c.name, c.group, c.sector, steady_text(c.sector_weight), size_text(c),
+              c.products, c.region, c.distance_km, c.ceo, c.phone, c.address]
              for i, c in enumerate(factories, 1)])
     fields = Counter(c.sector for c in factories).most_common()
     limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
@@ -365,6 +365,9 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
                      "기계·장비를 만드는 공장은 기계마다 제어반을 반복해서 밖에 맡깁니다."],
         ["규모", "종업원 수·면적은 공장등록 자료에 있을 때만 나옵니다. '외감(DART)'은 금감원 "
                "공시에 등록된 회사 — 외부감사를 받는 규모(대략 자산 100억 이상)입니다."],
+        ["그룹", "상장사면 그 회사 이름, 상장사가 지분 30% 넘게(경영참여 목적이면 15% 넘게) "
+               "가진 회사면 'OO 계열'입니다(금감원 사업보고서의 타법인 출자현황). 한 그룹에 "
+               "들어가면 같은 그룹 회사로 넓히기 쉽습니다."],
         ["경기", "덜 탐 = 식품·제약·환경처럼 불황에도 돌아가는 분야, 많이 탐 = 반도체·자동차·"
                "철강처럼 경기가 꺾이면 투자부터 끊는 분야."],
         ["뺀 곳", "판넬을 만드는 곳(경쟁사), 주소를 모르거나 거리 밖인 곳."],

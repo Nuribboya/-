@@ -12,7 +12,9 @@ from __future__ import annotations
 import io
 import json
 import logging
+import threading
 import time
+from datetime import date
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -25,6 +27,9 @@ log = logging.getLogger(__name__)
 
 CORP_CODE_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
 COMPANY_URL = "https://opendart.fss.or.kr/api/company.json"
+#: 정기보고서 '타법인 출자현황' — 이 회사가 지분을 가진 회사들(자회사·계열사 찾기에 쓴다).
+INVEST_URL = "https://opendart.fss.or.kr/api/otrCprInvstmntSttus.json"
+ANNUAL_REPORT = "11011"
 DEFAULT_CACHE = Path.home() / ".cache" / "prime_contractor"
 
 
@@ -47,6 +52,9 @@ class DartClient:
         self._index: dict[str, str] | None = None
         self._listed: list[tuple[str, str, str]] = []
         self._company_cache: dict[str, dict] = self._load_company_cache()
+        self._invest_cache: dict[str, list[dict]] | None = None
+        self._invest_lock = threading.Lock()
+        self._local = threading.local()
 
     # --- 고유번호 인덱스 -----------------------------------------------------
 
@@ -143,6 +151,68 @@ class DartClient:
         self._company_cache[corp_code] = data
         return data
 
+    # --- 타법인 출자현황 (계열사) ----------------------------------------------
+
+    @property
+    def _invest_cache_path(self) -> Path:
+        return self.cache_dir / "investments.json"
+
+    def _invest(self) -> dict[str, list[dict]]:
+        if self._invest_cache is None:
+            path = self._invest_cache_path
+            try:
+                self._invest_cache = (json.loads(path.read_text(encoding="utf-8"))
+                                      if path.exists() else {})
+            except ValueError:
+                self._invest_cache = {}
+        return self._invest_cache
+
+    def has_investments(self, corp_code: str) -> bool:
+        return corp_code in self._invest()
+
+    def investments(self, corp_code: str, today: date | None = None) -> list[dict]:
+        """이 회사가 지분을 가진 회사 [{name, ratio, purpose}]. 최근 사업보고서 기준.
+
+        올해 3월에 낸 작년 사업보고서부터 찾고, 없으면 그 전 해. 한 번 받으면 디스크에
+        남겨 다음엔 바로 쓴다(여러 스레드에서 불러도 된다).
+        """
+        cache = self._invest()
+        if corp_code in cache:
+            return cache[corp_code]
+        today = today or date.today()
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._local.session = (self.session if threading.current_thread()
+                                              is threading.main_thread() else requests.Session())
+        rows: list[dict] = []
+        for year in (today.year - 1, today.year - 2):
+            resp = session.get(INVEST_URL, params={
+                "crtfc_key": self.key, "corp_code": corp_code, "bsns_year": str(year),
+                "reprt_code": ANNUAL_REPORT}, timeout=self.timeout)
+            resp.raise_for_status()
+            time.sleep(self.sleep_sec)
+            data = resp.json()
+            status = data.get("status")
+            if status == "013":                 # 그 해 자료 없음 → 그 전 해
+                continue
+            if status != "000":
+                raise DartError(f"{corp_code}: {status} {data.get('message')}")
+            for item in data.get("list") or []:
+                name = (item.get("inv_prm") or "").strip()
+                if not name or name in ("-", "합계", "합 계", "계"):
+                    continue
+                rows.append({"name": name, "ratio": _ratio(item.get("trmend_blce_qota_rt")),
+                             "purpose": (item.get("invstmnt_purps") or "").strip()})
+            break
+        with self._invest_lock:
+            cache[corp_code] = rows
+        return rows
+
+    def save_investment_cache(self) -> None:
+        with self._invest_lock:
+            self._invest_cache_path.write_text(
+                json.dumps(self._invest(), ensure_ascii=False), encoding="utf-8")
+
     def lookup(self, name: str) -> dict | None:
         """상호로 기업개황을 찾는다. 없으면 None."""
         code = self.corp_index.get(normalize_name(name))
@@ -153,3 +223,11 @@ class DartClient:
         except (DartError, requests.RequestException, ValueError) as exc:
             log.warning("DART 조회 실패 %s(%s): %s", name, code, exc)
             return None
+
+
+def _ratio(text) -> float:
+    """'51.00' · '-' · '' → 51.0 · 0.0."""
+    try:
+        return float(str(text).replace(",", "").replace("%", "").strip())
+    except ValueError:
+        return 0.0

@@ -64,6 +64,7 @@ class Candidate:
     employees: int = 0            # 종업원 수 (공장등록 자료에 있으면)
     area_m2: int = 0              # 공장 면적 ㎡ (공장등록 자료에 있으면)
     stock_code: str = ""          # 상장사면 종목코드 (코스피·코스닥)
+    group: str = ""               # 어느 상장사 그룹 소속인가 ('농심 계열')
     corp_code: str = ""           # DART 고유번호
     region: str = ""              # 주소에서 뽑은 시군구
     distance_km: float | None = None

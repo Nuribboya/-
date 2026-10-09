@@ -2567,7 +2567,7 @@ def test_factories_excel_and_leads_keep_the_phone(tmp_path):
                                               rule="규모 있는 곳만"))
     assert list(sheets) == ["공장", "읽는 법"]
     main = sheets["공장"]
-    assert main[(1, "E")] == "규모" and main[(1, "J")] == "전화"
+    assert main[(1, "C")] == "그룹" and main[(1, "F")] == "규모" and main[(1, "K")] == "전화"
     assert any("규모 있는 곳만" in str(v) for v in sheets["읽는 법"].values())
     book = LeadBook(path=tmp_path / "leads.json")
     lead, created = book.add_candidate(next(c for c in factories if c.phone))
@@ -2605,3 +2605,71 @@ def test_company_key_strips_only_the_plant_name():
     assert company_key("삼양사 인천1공장") == company_key("삼양사")
     assert company_key("오뚜기제2공장") == company_key("오뚜기")
     assert company_key("행복센터") == company_key("행복센터")       # 이름 전체면 그대로
+
+
+
+# --- 계열사 (상장사가 지분 가진 회사) ---------------------------------------------
+
+def test_group_map_and_tags_affiliate_plants():
+    """농심이 51% 가진 비상장 '태경농산' 공장은 '농심 계열', KC 계열은 따로 표시."""
+    from prime_contractor.config import KC_GROUP
+    from prime_contractor.makers import build_group_map, find_factories, mark_groups
+    listed = [("농심", "N1", "004370"), ("오뚜기", "O1", "007310"), ("비상장사", "X1", "")]
+    stakes = {
+        "N1": [{"name": "(주)태경농산", "ratio": 51.0, "purpose": "경영참여"},
+               {"name": "작은투자처", "ratio": 5.0, "purpose": "단순투자"},
+               {"name": "오뚜기", "ratio": 1.0, "purpose": "단순투자"}],
+        "O1": [{"name": "오뚜기라면(주)", "ratio": 24.7, "purpose": "경영참여"}],
+    }
+    group_map = build_group_map(listed, lambda code: stakes.get(code, []), workers=2)
+    records = [
+        {"name": "태경농산 안성공장", "products": "스프, 건조채소", "address": "경기도 안성시 공도읍"},
+        {"name": "오뚜기라면 평택공장", "products": "라면", "address": "경기도 평택시 포승읍"},
+        {"name": "(주)농심 안성공장", "products": "라면", "address": "경기도 안성시 공도읍"},
+        {"name": "작은투자처", "products": "식품", "address": "경기도 안성시"},
+        {"name": "케이씨이노베이션(주)", "products": "반도체 장비", "address": "경기도 안성시 원곡면"},
+    ]
+    factories = find_factories(records, within_km=70.0)
+    for c in factories:
+        if c.name.startswith("(주)농심"):
+            c.stock_code = "004370"
+    mark_groups(factories, group_map, listed, KC_GROUP)
+    by = {c.name: c.group for c in factories}
+    assert by["태경농산 안성공장"] == "농심 계열"
+    assert by["오뚜기라면 평택공장"] == "오뚜기 계열"        # 15% 넘고 경영참여
+    assert by["(주)농심 안성공장"] == "농심"
+    assert by["작은투자처"] == ""                           # 5% 단순투자는 계열 아님
+    assert by["케이씨이노베이션(주)"].startswith("KC그룹")
+
+
+def test_dart_investments_reads_last_annual_report_and_caches(tmp_path):
+    from datetime import date
+    from prime_contractor.sources.dart import DartClient
+
+    class Resp:
+        def __init__(self, payload):
+            self.payload = payload
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return self.payload
+
+    calls = []
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            calls.append(params["bsns_year"])
+            if params["bsns_year"] == "2025":
+                return Resp({"status": "013", "message": "조회된 데이타가 없습니다."})
+            return Resp({"status": "000", "list": [
+                {"inv_prm": "(주)태경농산", "trmend_blce_qota_rt": "51.00", "invstmnt_purps": "경영참여"},
+                {"inv_prm": "합계", "trmend_blce_qota_rt": "-", "invstmnt_purps": "-"}]})
+
+    client = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
+    rows = client.investments("N1", today=date(2026, 10, 9))
+    assert calls == ["2025", "2024"]                      # 작년 보고서 없으면 그 전 해
+    assert rows == [{"name": "(주)태경농산", "ratio": 51.0, "purpose": "경영참여"}]
+    client.save_investment_cache()
+    again = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
+    assert again.has_investments("N1") and again.investments("N1") == rows
+    assert calls == ["2025", "2024"]                      # 두 번째는 캐시

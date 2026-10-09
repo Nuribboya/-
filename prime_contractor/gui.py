@@ -1045,8 +1045,8 @@ class App:
 
     def _load_makers(self, path: str, cfg) -> None:
         from prime_contractor.makers import (
-            find_factories, has_size_columns, listed_names, mark_dart_registered,
-            read_factory_file)
+            build_group_map, find_factories, has_size_columns, listed_names,
+            mark_dart_registered, mark_groups, read_factory_file)
         try:
             records = read_factory_file(path)
             factories = find_factories(records, within_km=cfg.within_km)
@@ -1061,11 +1061,25 @@ class App:
             from prime_contractor.sources.dart import DartClient
             try:
                 dart = DartClient(cfg.dart_api_key)
+                listed = dart.listed_companies
                 registered, on_market = mark_dart_registered(
-                    factories, dart.corp_index, listed_names(dart.listed_companies))
+                    factories, dart.corp_index, listed_names(listed))
                 knows_listed = True
                 self.say(f"그중 상장사(코스피·코스닥) 공장 {on_market}곳, 금감원 등록 회사 "
                          f"{registered}곳입니다.")
+                fresh = sum(1 for _n, code, stock in listed
+                            if stock and not dart.has_investments(code))
+                if fresh:
+                    self.say(f"상장사 {fresh}곳의 계열사(지분 가진 회사)를 확인합니다 — 처음 "
+                             "한 번은 10분쯤 걸리고, 다음부터는 저장해 둔 걸 씁니다…")
+                group_map = build_group_map(
+                    listed, dart.investments,
+                    progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
+                dart.save_investment_cache()
+                tagged = mark_groups(factories, group_map, listed, cfg.incumbent)
+                affiliates = sum(1 for c in factories if c.group.endswith(" 계열"))
+                self.say(f"상장사 계열사 공장 {affiliates}곳을 더 찾았습니다 "
+                         f"(그룹이 붙은 공장 모두 {tagged}곳).")
             except Exception as exc:              # 상장·규모 표시만 빠지고 목록은 그대로
                 self.say(f"DART 확인 실패(목록은 그대로): {redact_secrets(exc)}")
         else:
@@ -1095,10 +1109,10 @@ class App:
         opts = ttk.Frame(body)
         opts.pack(fill=X, pady=(0, 6))
         # 작은 공장은 수작업이 많아 판넬 수요가 적다. 상장사 공장을 기본으로 본다.
-        only_listed = BooleanVar(value=knows_listed)
+        only_listed = BooleanVar(value=knows_listed)        # 상장사 + 그 계열사
         only_big = BooleanVar(value=can_size and not knows_listed)
         only_machines = BooleanVar(value=False)
-        ttk.Checkbutton(opts, variable=only_listed, text="상장사(코스피·코스닥) 공장만",
+        ttk.Checkbutton(opts, variable=only_listed, text="상장사·계열사 공장만",
                         state="normal" if knows_listed else "disabled").pack(side=LEFT)
         ttk.Checkbutton(opts, variable=only_big,
                         text=f"규모 있는 곳만 (직원 {MIN_EMPLOYEES}명+ · 면적 {MIN_AREA_M2:,}㎡+ · "
@@ -1106,8 +1120,8 @@ class App:
                         state="normal" if can_size else "disabled").pack(side=LEFT, padx=16)
         ttk.Checkbutton(opts, variable=only_machines,
                         text="기계·장비 만드는 공장만").pack(side=LEFT)
-        cols = (("#", 40), ("회사", 180), ("분야", 120), ("경기", 60), ("규모", 120),
-                ("생산품", 220), ("지역", 55), ("거리", 50), ("전화", 105))
+        cols = (("#", 40), ("회사", 170), ("그룹", 130), ("분야", 115), ("경기", 55),
+                ("규모", 95), ("생산품", 190), ("지역", 55), ("거리", 50), ("전화", 100))
         frame = ttk.Frame(body)
         frame.pack(fill=BOTH, expand=True)
         tree = ttk.Treeview(frame, columns=[c for c, _ in cols], show="headings")
@@ -1123,7 +1137,7 @@ class App:
         def rule_text() -> str:
             bits = []
             if only_listed.get():
-                bits.append("상장사 공장만")
+                bits.append("상장사·계열사 공장만")
             if only_big.get():
                 bits.append("규모 있는 곳만")
             if only_machines.get():
@@ -1132,13 +1146,13 @@ class App:
 
         def refresh(*_a) -> None:
             shown[:] = [c for c in ordered
-                        if (not only_listed.get() or c.stock_code)
+                        if (not only_listed.get() or c.stock_code or c.group)
                         and (not only_big.get() or is_sizable(c))
                         and (not only_machines.get() or c.kind == "maker")]
             tree.delete(*tree.get_children())
             for i, c in enumerate(shown, 1):
                 tree.insert("", END, iid=str(i), values=(
-                    i, c.name, c.sector, steady_text(c.sector_weight), size_text(c),
+                    i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
                     c.products, c.region, f"{c.distance_km:.0f}km", c.phone or "-"))
             fields = Counter(c.sector for c in shown).most_common(6)
             win.title(f"공장 찾기 — {len(shown)}곳")

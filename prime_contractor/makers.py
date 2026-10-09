@@ -48,7 +48,8 @@ PLANT_FIELDS: tuple[tuple[str, tuple[str, ...], float], ...] = (
                  "사료", "떡", "면류", "냉동식품", "커피", "두부", "장류", "도시락", "라면", "스낵",
                  "과자", "빵", "햄", "소시지", "만두", "즉석", "간편식", "조미", "식용유", "설탕",
                  "밀가루", "전분", "생수", "맥주", "소주", "우유", "치즈", "아이스크림", "수산",
-                 "축산물", "통조림", "건강식품"), 0.9),
+                 "축산물", "통조림", "건강식품", "스프", "채소", "농산", "반찬", "양념", "젓갈",
+                 "가공식품", "음식", "조리식품", "곡물"), 0.9),
     ("제약·바이오·화장품", ("의약", "제약", "바이오", "화장품", "건강기능", "백신", "원료의약",
                        "의료기기"), 0.9),
     ("환경·재활용", ("재활용", "폐기물", "재생원료", "재생"), 0.9),
@@ -209,6 +210,78 @@ def mark_dart_registered(factories: list[Candidate], corp_index: dict[str, str],
 def listed_names(listed_companies) -> dict[str, str]:
     """DART 상장사 목록 [(상호, 고유번호, 종목코드)] → {정규화 상호: 종목코드}."""
     return {normalize_name(name): stock for name, _code, stock in listed_companies if stock}
+
+
+# --- 계열사 ---------------------------------------------------------------------
+#
+# 케이씨이노베이션에 들어가 있으면 케이씨텍·케이씨이앤씨 같은 같은 그룹 회사로 넓히기가
+# 쉽다 — 구매·설비 담당끼리 업체를 돌려 쓰고, '그룹사 납품 실적'이 그대로 통한다.
+# 상장사가 지분을 가진 회사(자회사·계열사)를 DART '타법인 출자현황'으로 모아, 비상장
+# 계열사 공장도 'OO 계열'로 묶는다.
+
+#: 이만큼 넘게 가지면 계열사로 본다. '경영참여'·'자회사' 목적이면 이보다 낮아도 본다.
+AFFILIATE_RATIO = 30.0
+AFFILIATE_PURPOSE_RATIO = 15.0
+
+
+def is_affiliate_stake(ratio: float, purpose: str) -> bool:
+    if ratio >= AFFILIATE_RATIO:
+        return True
+    return ratio >= AFFILIATE_PURPOSE_RATIO and any(
+        w in purpose for w in ("경영", "자회사", "계열", "지배"))
+
+
+def build_group_map(listed_companies, fetch, progress=None, workers: int = 4) -> dict[str, str]:
+    """{정규화 상호: 모회사(상장사) 이름}. fetch(corp_code) → [{name, ratio, purpose}].
+
+    상장사마다 한 번씩 물어보므로 처음엔 오래 걸린다(2천여 곳). fetch 쪽이 캐시를 둔다.
+    한 회사를 여러 상장사가 가지면 지분이 가장 큰 쪽을 그룹으로 본다.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    companies = [(name, code) for name, code, stock in listed_companies if stock]
+    best: dict[str, tuple[float, str]] = {}
+    done = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(fetch, code): name for name, code in companies}
+        for future in as_completed(futures):
+            parent = futures[future]
+            done += 1
+            if progress and done % 200 == 0:
+                progress(done, len(companies))
+            try:
+                rows = future.result()
+            except Exception:                    # 한 곳 실패로 전체를 멈추지 않는다
+                continue
+            for row in rows:
+                if not is_affiliate_stake(row.get("ratio", 0.0), row.get("purpose", "")):
+                    continue
+                key = company_key(row["name"])
+                if key and key != company_key(parent) and (
+                        key not in best or row["ratio"] > best[key][0]):
+                    best[key] = (row["ratio"], parent)
+    return {key: parent for key, (_ratio, parent) in best.items()}
+
+
+def mark_groups(factories: list[Candidate], group_map: dict[str, str],
+                listed_companies=(), incumbent=None) -> int:
+    """공장마다 그룹을 붙인다: 상장사 자신이면 그 이름, 계열사면 'OO 계열'. 붙인 수."""
+    display = {normalize_name(name): name for name, _code, stock in listed_companies if stock}
+    prefixes = tuple(getattr(incumbent, "affiliate_prefixes", ()) or ())
+    names = {normalize_name(n) for n in getattr(incumbent, "affiliate_names", ()) or ()}
+    tagged = 0
+    for c in factories:
+        keys = [normalize_name(c.name), company_key(c.name)]
+        if any(k in names or (prefixes and k.startswith(tuple(p.upper() for p in prefixes)))
+               for k in keys):
+            c.group = f"{getattr(incumbent, 'name', '기존 원청')}(거래 중)"
+        elif c.stock_code:
+            c.group = next((display[k] for k in keys if k in display), c.name)
+        else:
+            parent = next((group_map[k] for k in keys if k in group_map), "")
+            c.group = f"{parent} 계열" if parent else ""
+        tagged += bool(c.group)
+    return tagged
 
 
 def is_sizable(c: Candidate) -> bool:
