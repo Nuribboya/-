@@ -2767,3 +2767,22 @@ def test_affiliate_names_keep_domestic_controlled_companies():
                      {"name": "작은투자처", "ratio": 3.0, "purpose": "단순투자"}]}
     names = affiliate_names([("농심", "N1", "004370")], lambda code: stakes.get(code, []))
     assert names == ["(주)태경농산"]
+
+
+def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
+    """적합도 점수 없이 거리순 — 경기 덜 타는 분야라도 멀면 뒤로 간다."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from prime_contractor.models import Candidate
+    from prime_contractor import gui
+    app = gui.App.__new__(gui.App)
+    calls = {}
+    app.running = True
+    app.run_button = type("B", (), {"configure": lambda self, **k: None})()
+    app.filter_boxes = [app.run_button] * 3
+    app.only_listed = app.only_big = app.only_machines = type(
+        "V", (), {"set": lambda self, v: None, "get": lambda self: False})()
+    app._refresh_factories = lambda: calls.setdefault("refreshed", True)
+    far_food = Candidate(name="먼식품", sector_weight=0.9, distance_km=60.0)
+    near_chip = Candidate(name="가까운반도체", sector_weight=0.2, distance_km=10.0)
+    app._factories_loaded([far_food, near_chip], 70.0, True, True)
+    assert [c.name for c in app.factories] == ["가까운반도체", "먼식품"]

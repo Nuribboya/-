@@ -905,8 +905,8 @@ class App:
     def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool) -> None:
         self.running = False
         self.run_button.configure(state="normal")
-        # 경기를 덜 타는 분야 먼저, 같으면 가까운 순.
-        self.factories = sorted(factories, key=lambda c: (-c.sector_weight, c.distance_km))
+        # 가까운 순. 적합도 점수는 아직 없다 — 거리로만 줄 세운다.
+        self.factories = sorted(factories, key=lambda c: (c.distance_km, c.name))
         self.factory_within = within
         self.filter_boxes[0].configure(state="normal" if knows_listed else "disabled")
         self.filter_boxes[1].configure(state="normal" if can_size else "disabled")

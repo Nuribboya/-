@@ -436,7 +436,7 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
     guide = Sheet("읽는 법", [Column("항목", 18, TEXT), Column("설명", 80, WRAP)], rows=[
         ["만든 날", date.today().isoformat()],
         ["담은 곳", f"안성에서 {limit} 공장 {len(factories)}곳{(' — ' + rule) if rule else ''}. "
-                  "경기를 덜 타는 분야 먼저, 같으면 가까운 순."],
+                  "가까운 순."],
         ["분야별", ", ".join(f"{f} {n}곳" for f, n in fields)],
         ["왜 공장인가", "판넬을 실제로 쓰는 곳입니다. 라인 증설·개조·교체 때 제어반이 들어가고, "
                      "기계·장비를 만드는 공장은 기계마다 제어반을 반복해서 밖에 맡깁니다."],
