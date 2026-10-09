@@ -1,0 +1,663 @@
+<title>MBTI 심층 성향 검사</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: 단일 컬럼 설문지. 문항은 페이지 단위(8문항), 결과는 리포트 형태로 위에서 아래로 */
+:root {
+  --bg: #eef0f4;
+  --paper: #ffffff;
+  --ink: #18202f;
+  --muted: #5d6679;
+  --line: #d8dce5;
+  --pole-a: #2f4fd8;   /* E S T J 쪽 */
+  --pole-b: #d9771f;   /* I N F P 쪽 */
+  --soft-a: #e3e8fb;
+  --soft-b: #fbeadb;
+  --good: #1f8a5b;
+  --warn: #b5671a;
+  --display: "Black Han Sans", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151e; --paper: #1a2030; --ink: #e8ebf2; --muted: #9aa3b6; --line: #2d3547;
+    --pole-a: #7f95ff; --pole-b: #f0a35e; --soft-a: #232c4d; --soft-b: #3a2a1c;
+    --good: #4fc28d; --warn: #e7a35a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151e; --paper: #1a2030; --ink: #e8ebf2; --muted: #9aa3b6; --line: #2d3547;
+  --pole-a: #7f95ff; --pole-b: #f0a35e; --soft-a: #232c4d; --soft-b: #3a2a1c;
+  --good: #4fc28d; --warn: #e7a35a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 760px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, .lk input:focus-visible + span { outline: 3px solid var(--pole-a); outline-offset: 2px; }
+
+.mast { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 24px; }
+.mast h1 { font-family: var(--display); font-weight: 400; font-size: 26px; letter-spacing: .01em; }
+.mast .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 22px; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+
+/* intro */
+.intro h2 { font-size: 22px; margin-bottom: 8px; }
+.intro ul { margin: 12px 0 0; padding-left: 20px; color: var(--muted); }
+.intro li + li { margin-top: 4px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { border: 0; border-radius: 8px; padding: 12px 20px; font-weight: 600; background: var(--ink); color: var(--paper); }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+
+/* progress */
+.prog { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 10px; margin-bottom: 8px; }
+.prog-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--ink); width: 0; transition: width .3s; }
+
+/* question */
+.q { padding: 20px 0; border-bottom: 1px solid var(--line); }
+.q:last-child { border-bottom: 0; }
+.q-text { font-size: 16px; font-weight: 500; margin-bottom: 14px; }
+.q-text .n { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 8px; }
+.scale { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+.scale .end { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.lk { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.lk label { flex: 0 0 auto; display: grid; place-items: center; cursor: pointer; }
+.lk input { position: absolute; opacity: 0; pointer-events: none; }
+.lk span { display: block; border-radius: 50%; border: 2px solid var(--line); transition: background .15s, border-color .15s, transform .1s; }
+.lk label:nth-child(1) span, .lk label:nth-child(7) span { width: 38px; height: 38px; }
+.lk label:nth-child(2) span, .lk label:nth-child(6) span { width: 32px; height: 32px; }
+.lk label:nth-child(3) span, .lk label:nth-child(5) span { width: 26px; height: 26px; }
+.lk label:nth-child(4) span { width: 20px; height: 20px; }
+.lk label:nth-child(-n+3) span { border-color: color-mix(in srgb, var(--pole-b) 55%, var(--line)); }
+.lk label:nth-child(n+5) span { border-color: color-mix(in srgb, var(--pole-a) 55%, var(--line)); }
+.lk label:nth-child(-n+3) input:checked + span { background: var(--pole-b); border-color: var(--pole-b); }
+.lk label:nth-child(n+5) input:checked + span { background: var(--pole-a); border-color: var(--pole-a); }
+.lk label:nth-child(4) input:checked + span { background: var(--muted); border-color: var(--muted); }
+.lk label:hover span { transform: scale(1.08); }
+.q.missing .q-text { color: var(--warn); }
+@media (max-width: 480px) {
+  .scale { grid-template-columns: 1fr 1fr; }
+  .scale .lk { grid-column: 1 / -1; grid-row: 1; }
+  .scale .end.r { text-align: right; }
+  .lk label:nth-child(1) span, .lk label:nth-child(7) span { width: 34px; height: 34px; }
+}
+.nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
+.hint { font-size: 13px; color: var(--warn); min-height: 1.4em; margin-top: 8px; text-align: right; }
+
+/* result */
+.hero { text-align: left; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+.code { font-family: var(--display); font-size: clamp(64px, 18vw, 120px); line-height: 1; letter-spacing: .04em; margin: 6px 0 4px; display: flex; gap: .04em; }
+.code b { font-weight: 400; }
+.code .a { color: var(--pole-a); }
+.code .b { color: var(--pole-b); }
+.nick { font-size: 20px; font-weight: 700; }
+.oneliner { color: var(--muted); margin-top: 6px; max-width: 60ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.chip { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--muted); }
+.chip.warn { color: var(--warn); border-color: currentColor; }
+
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.sec-h h3 { font-size: 17px; }
+.sec-h small { color: var(--muted); font-size: 12px; }
+
+.axis + .axis { margin-top: 18px; }
+.axis-top { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; gap: 8px; }
+.axis-top .a { color: var(--pole-a); }
+.axis-top .b { color: var(--pole-b); text-align: right; }
+.axis-bar { position: relative; height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--soft-a) 50%, var(--soft-b) 50%); margin: 6px 0 4px; }
+.axis-bar .mid { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--line); }
+.axis-bar .dot { position: absolute; top: 50%; width: 22px; height: 22px; border-radius: 50%; transform: translate(-50%, -50%); border: 3px solid var(--paper); box-shadow: 0 0 0 1px var(--line); }
+.axis-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--mono); }
+.axis-foot .cl { font-family: var(--body); }
+
+.fn-list { display: flex; flex-direction: column; gap: 8px; }
+.fn { display: grid; grid-template-columns: 44px 1fr 44px; gap: 10px; align-items: center; }
+.fn .k { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+.fn .track { height: 18px; background: var(--bg); border-radius: 4px; position: relative; overflow: hidden; }
+.fn .track i { position: absolute; inset: 0 auto 0 0; background: var(--muted); opacity: .35; border-radius: 4px; }
+.fn.in-stack .track i { background: var(--pole-a); opacity: 1; }
+.fn .track em { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 11px; color: var(--ink); font-weight: 600; white-space: nowrap; }
+.fn.in-stack .track em { color: #fff; }
+.fn .v { font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 12px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+.match { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.match > div { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.match .t { font-family: var(--display); font-size: 26px; }
+.match .s { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.match .st { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.match > div.me { border-color: var(--pole-a); background: var(--soft-a); }
+@media (max-width: 480px) { .match { grid-template-columns: 1fr; } }
+.note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+.note strong { color: var(--ink); }
+
+.stackline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.stackline > div { border-top: 3px solid var(--ink); padding-top: 6px; }
+.stackline > div:nth-child(2) { border-color: color-mix(in srgb, var(--ink) 70%, transparent); }
+.stackline > div:nth-child(3) { border-color: color-mix(in srgb, var(--ink) 40%, transparent); }
+.stackline > div:nth-child(4) { border-color: color-mix(in srgb, var(--ink) 20%, transparent); }
+.stackline small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+.stackline b { font-family: var(--mono); font-weight: 500; font-size: 16px; }
+.stackline span { display: block; font-size: 12px; color: var(--muted); }
+@media (max-width: 480px) { .stackline { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.deep { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 22px; }
+.deep h4 { font-size: 13px; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+.deep ul { margin: 0; padding-left: 18px; }
+.deep li + li { margin-top: 3px; }
+.deep .full { grid-column: 1 / -1; }
+@media (max-width: 560px) { .deep { grid-template-columns: 1fr; } }
+
+.disclaimer { font-size: 12px; color: var(--muted); }
+.toast { font-size: 13px; color: var(--good); min-height: 1.4em; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <h1>MBTI 심층 성향 검사</h1>
+    <span class="meta">72문항 · 4지표 + 8인지기능</span>
+  </header>
+  <main id="app"></main>
+</div>
+
+<script>
+// ---------- 문항 데이터 ----------
+// 지표 문항: s = +1 이면 "그렇다" 쪽이 첫 글자(E/S/T/J), -1 이면 둘째 글자(I/N/F/P)
+const AXES = [
+  { id: "EI", a: "E", b: "I", an: "외향", bn: "내향", desc: "에너지의 방향" },
+  { id: "SN", a: "S", b: "N", an: "감각", bn: "직관", desc: "정보를 받아들이는 방식" },
+  { id: "TF", a: "T", b: "F", an: "사고", bn: "감정", desc: "판단의 기준" },
+  { id: "JP", a: "J", b: "P", an: "판단", bn: "인식", desc: "바깥 세계를 대하는 태도" },
+];
+const AXIS_ITEMS = {
+  EI: [
+    ["처음 보는 사람이 많은 모임에 가면 오히려 에너지가 차오른다.", 1],
+    ["혼자 보내는 시간이 있어야 다음 주를 버틸 힘이 생긴다.", -1],
+    ["생각을 정리할 때 말로 꺼내 놓으면서 정리하는 편이다.", 1],
+    ["말하기 전에 머릿속에서 충분히 다듬은 뒤 말한다.", -1],
+    ["메시지가 오면 바로 답하고, 대화가 이어지는 게 즐겁다.", 1],
+    ["즐거운 약속이었어도 사람을 많이 만난 날은 혼자 회복할 시간이 필요하다.", -1],
+    ["새로운 그룹에 들어가면 내가 먼저 말을 거는 쪽이다.", 1],
+    ["넓고 얕은 관계보다 소수의 깊은 관계가 편하다.", -1],
+    ["조용한 곳보다 적당히 북적이는 곳에서 집중이 더 잘 된다.", 1],
+    ["관심사가 생기면 누구와 얘기하기보다 혼자 파고드는 게 먼저다.", -1],
+    ["갑작스러운 약속 제안이 오면 반갑다.", 1],
+    ["전화보다 문자가 훨씬 편하다.", -1],
+  ],
+  SN: [
+    ["설명을 들을 때 구체적인 예시와 사실이 있어야 이해가 된다.", 1],
+    ["대화하다 보면 엉뚱한 연상으로 화제가 자주 튄다.", -1],
+    ["새로운 방법보다 검증된 방법을 쓸 때 마음이 편하다.", 1],
+    ["지금 벌어지는 일보다 그 일이 앞으로 무엇을 의미할지가 더 궁금하다.", -1],
+    ["장소, 날짜, 그날 입은 옷 같은 디테일을 잘 기억한다.", 1],
+    ["은유나 상징, 숨은 의미를 찾아내는 걸 좋아한다.", -1],
+    ["이론을 먼저 배우기보다 직접 해보면서 익히는 게 맞다.", 1],
+    ["설명서를 읽기 전에 전체 구조나 원리부터 머릿속에 그려본다.", -1],
+    ["아이디어를 들으면 \"현실적으로 가능한가\"부터 따진다.", 1],
+    ["아직 존재하지 않는 것을 상상하는 시간이 즐겁다.", -1],
+    ["맛, 촉감, 풍경 같은 감각적인 경험을 생생하게 즐긴다.", 1],
+    ["같은 일을 같은 방식으로 반복하면 금방 지루해져서 방식을 바꿔본다.", -1],
+  ],
+  TF: [
+    ["결정할 때는 감정보다 논리적으로 맞는지가 우선이다.", 1],
+    ["상대가 상처받을 것 같으면 사실을 돌려서 말한다.", -1],
+    ["토론에서 틀린 건 틀렸다고 짚어야 직성이 풀린다.", 1],
+    ["결정을 내릴 때 사람들에게 어떤 영향을 줄지가 가장 먼저 떠오른다.", -1],
+    ["위로가 필요한 친구에게도 해결책부터 말하게 된다.", 1],
+    ["분위기가 어색하거나 누가 불편해 보이면 계속 신경이 쓰인다.", -1],
+    ["공정함이란 모두에게 같은 기준을 적용하는 것이다.", 1],
+    ["원칙보다 그 사람의 사정을 고려하는 게 맞을 때가 많다.", -1],
+    ["비판을 받아도 내용이 맞으면 크게 상처받지 않는다.", 1],
+    ["효율적이어도 내 가치관에 어긋나는 일은 하기 싫다.", -1],
+    ["문제를 분석해서 원인을 찾아내는 과정 자체가 재밌다.", 1],
+    ["고마움이나 칭찬을 말로 표현하는 게 자연스럽다.", -1],
+  ],
+  JP: [
+    ["여행 가기 전에 일정과 동선을 미리 짜둔다.", 1],
+    ["마감 직전이 되어야 집중력이 폭발한다.", -1],
+    ["할 일 목록을 하나씩 지울 때 만족감을 느낀다.", 1],
+    ["계획이 갑자기 바뀌어도 크게 스트레스받지 않는다.", -1],
+    ["결정을 빨리 내리고 다음으로 넘어가는 게 편하다.", 1],
+    ["가능하면 선택지를 끝까지 열어두고 싶다.", -1],
+    ["물건이 제자리에 있어야 마음이 편하다.", 1],
+    ["하던 일 도중에 흥미로운 게 생기면 그쪽으로 옮겨간다.", -1],
+    ["약속 시간보다 일찍 도착하는 편이다.", 1],
+    ["규칙은 상황에 따라 유연하게 적용하면 된다고 생각한다.", -1],
+    ["일을 시작하기 전에 어떻게 마무리할지부터 정한다.", 1],
+    ["계획 없이 그날 기분대로 보내는 하루가 좋다.", -1],
+  ],
+};
+const FUNCS = {
+  Se: { name: "외향 감각", short: "지금 이 순간의 현실", desc: "눈앞의 상황을 빠르게 포착하고 몸으로 즉시 반응하는 힘." },
+  Si: { name: "내향 감각", short: "경험과 기억의 기준", desc: "과거 경험과 몸의 감각을 기준 삼아 안정적으로 판단하는 힘." },
+  Ne: { name: "외향 직관", short: "가능성의 확장", desc: "하나에서 여러 가능성과 연결고리를 끝없이 펼쳐내는 힘." },
+  Ni: { name: "내향 직관", short: "하나로 모이는 통찰", desc: "흩어진 단서를 하나의 흐름과 미래상으로 수렴시키는 힘." },
+  Te: { name: "외향 사고", short: "효율과 실행", desc: "목표를 세우고 자원과 사람을 조직해 결과를 내는 힘." },
+  Ti: { name: "내향 사고", short: "원리와 정합성", desc: "개념을 정의하고 내부 논리 체계를 정교하게 다듬는 힘." },
+  Fe: { name: "외향 감정", short: "관계와 조화", desc: "집단의 정서를 읽고 사람들 사이 조화를 만들어내는 힘." },
+  Fi: { name: "내향 감정", short: "내면의 가치", desc: "자기만의 가치 기준으로 진정성 있게 판단하는 힘." },
+};
+const FUNC_ITEMS = {
+  Se: ["주변에서 일어나는 작은 변화를 남들보다 빨리 알아챈다.", "몸을 쓰는 활동이나 즉각적인 경험을 할 때 살아있다고 느낀다.", "기회가 오면 생각보다 몸이 먼저 움직인다."],
+  Si: ["지금 상황을 과거에 겪은 비슷한 경험과 비교해서 판단한다.", "익숙한 루틴이 깨지면 컨디션이 쉽게 흐트러진다.", "피로, 허기, 온도 같은 내 몸 상태 변화를 세심하게 알아챈다."],
+  Ne: ["아이디어 하나에서 여러 가능성이 줄줄이 떠오른다.", "서로 관계없어 보이는 것들 사이의 연결고리를 잘 발견한다.", "브레인스토밍을 시작하면 멈추기가 어렵다."],
+  Ni: ["이유를 설명하진 못해도 일이 어떻게 흘러갈지에 대한 직감이 잘 맞는다.", "여러 정보를 하나의 핵심 통찰로 정리하는 걸 좋아한다.", "장기적인 비전 하나를 오랫동안 붙잡고 있는다."],
+  Te: ["일이 비효율적으로 돌아가면 구조를 바로잡고 싶어진다.", "목표, 기한, 담당자를 정해서 일을 실행시키는 걸 잘한다.", "객관적인 데이터와 결과로 판단하는 게 맞다고 본다."],
+  Ti: ["다들 맞다고 해도 내가 원리를 이해해야 납득이 된다.", "개념의 정확한 정의와 논리적 일관성을 따지는 걸 좋아한다.", "머릿속으로 체계를 만들고 다듬는 시간이 즐겁다."],
+  Fe: ["모임에서 분위기를 읽고 조화를 맞추는 역할을 자주 맡는다.", "다른 사람의 감정이 나에게 쉽게 전해진다.", "사람들이 함께 지키는 예의와 정서적인 배려를 중요하게 여긴다."],
+  Fi: ["남들이 뭐라 해도 내 안의 가치 기준은 확고하다.", "내 진짜 감정이 무엇인지 스스로 깊이 들여다보는 편이다.", "진정성 없는 말이나 행동을 견디기 어렵다."],
+};
+
+// ---------- 16유형 ----------
+const TYPES = {
+  ISTJ: { nick: "청렴한 관리자", stack: ["Si","Te","Fi","Ne"], one: "약속한 것은 반드시 지키고, 검증된 방식으로 일을 끝까지 책임지는 사람.",
+    str: ["꾸준함과 신뢰성, 맡은 일은 끝까지 해낸다", "사실과 기록에 기반한 정확한 판단", "체계를 세우고 유지하는 능력"],
+    weak: ["낯선 방식이나 급격한 변화에 대한 저항", "감정 표현이 적어 차갑게 보일 수 있음", "'원래 그렇게 하는 것'에 갇힐 위험"],
+    stress: "열등기능 Ne가 튀어나오면 최악의 시나리오를 연달아 상상하며 불안이 커진다. 평소의 침착함이 사라지고 모든 가능성이 위협처럼 느껴진다.",
+    grow: "새로운 방식을 작은 범위에서 실험해 보는 습관. 결과가 아닌 과정의 감정도 말로 표현해 보기.",
+    love: "말보다 행동으로 사랑을 보여준다. 기념일을 잊지 않고 생활을 안정적으로 꾸린다. 상대의 즉흥성에는 시간이 필요하다.",
+    work: "회계, 법무, 품질관리, 공공행정, 운영관리처럼 정확성과 책임이 중요한 일." },
+  ISFJ: { nick: "용감한 수호자", stack: ["Si","Fe","Ti","Ne"], one: "주변 사람의 필요를 세심하게 기억하고 조용히 챙기는 든든한 보호자.",
+    str: ["사람들의 취향과 필요를 세세하게 기억하는 배려", "성실하고 책임감 있는 실행", "안정감 있는 분위기를 만드는 힘"],
+    weak: ["거절을 못 해 혼자 떠안는 경향", "갈등을 피하다 쌓아두는 감정", "변화와 불확실성에 대한 부담"],
+    stress: "Ne 열등기능이 작동하면 '이러다 다 잘못되면 어떡하지' 같은 부정적 가능성에 압도된다.",
+    grow: "내 필요도 다른 사람의 필요만큼 중요하다고 인정하기. 서운함은 쌓이기 전에 작게 말하기.",
+    love: "기억력과 배려로 상대를 감동시킨다. 헌신적이지만 고마움을 표현받지 못하면 조용히 지친다.",
+    work: "간호·의료, 교육, 인사, 고객지원, 사무관리처럼 사람을 돌보고 체계를 지키는 일." },
+  INFJ: { nick: "선의의 옹호자", stack: ["Ni","Fe","Ti","Se"], one: "사람과 세상의 깊은 흐름을 꿰뚫어 보고 의미 있는 방향으로 이끌고 싶어 하는 통찰가.",
+    str: ["사람의 속마음과 상황의 흐름을 읽는 통찰", "장기적 비전과 신념", "깊이 있는 공감과 소통"],
+    weak: ["완벽주의와 높은 이상으로 인한 소진", "속을 잘 안 보여 오해받기 쉬움", "관계를 한 번에 끊어버리는 '도어슬램'"],
+    stress: "Se 열등기능에 잡히면 폭식, 과소비, 충동적 행동처럼 감각적 자극에 몰두하거나 사소한 디테일에 집착한다.",
+    grow: "통찰을 머릿속에만 두지 말고 작은 실행으로 옮기기. 몸을 쓰는 활동으로 현재에 머무는 연습.",
+    love: "영혼의 연결을 원한다. 상대를 깊이 이해하지만 자신은 천천히 연다. 진정성이 흔들리면 급격히 멀어진다.",
+    work: "상담, 심리, 교육, 글쓰기, 비영리, UX 리서치처럼 사람의 성장과 의미를 다루는 일." },
+  INTJ: { nick: "용의주도한 전략가", stack: ["Ni","Te","Fi","Se"], one: "큰 그림을 먼저 그리고 그 비전을 현실로 만들 시스템을 설계하는 전략가.",
+    str: ["장기 전략과 구조 설계 능력", "독립적이고 결단력 있는 실행", "복잡한 문제를 핵심으로 압축하는 힘"],
+    weak: ["타인의 감정이나 절차를 비효율로 여기는 경향", "자기 판단에 대한 과신", "지나치게 높은 기준으로 인한 고립"],
+    stress: "Se 열등기능이 튀어나오면 갑자기 감각적 쾌락에 빠지거나 주변 환경에 과민하게 반응한다.",
+    grow: "계획 단계에서 다른 사람의 피드백을 일부러 구하기. 지금 이 순간의 경험을 즐기는 시간 만들기.",
+    love: "신중하게 고르고 한 번 정하면 충실하다. 문제 해결로 애정을 표현하는데, 상대는 공감을 원할 수 있다.",
+    work: "전략기획, 연구개발, 엔지니어링, 데이터 사이언스, 창업처럼 시스템과 장기 목표를 다루는 일." },
+  ISTP: { nick: "만능 재주꾼", stack: ["Ti","Se","Ni","Fe"], one: "원리를 직접 뜯어보고 손으로 해결하는, 침착하고 실용적인 문제 해결사.",
+    str: ["위기 상황에서의 침착함과 빠른 대처", "도구와 시스템의 원리를 파악하는 능력", "군더더기 없는 실용성"],
+    weak: ["감정 표현과 장기 약속에 대한 부담", "흥미가 떨어지면 쉽게 손을 놓음", "필요 이상으로 혼자 해결하려 함"],
+    stress: "Fe 열등기능이 작동하면 '아무도 날 이해 못 한다'는 감정이 폭발하거나 지나치게 남의 평가에 예민해진다.",
+    grow: "감정을 정보로 받아들이고 짧게라도 말로 표현하기. 관심 있는 일 하나를 장기 프로젝트로 키워보기.",
+    love: "자유를 존중해 주는 관계를 원한다. 말보다 함께 무언가를 하며 가까워진다.",
+    work: "엔지니어링, 정비, 보안, 응급의료, 파일럿, 개발처럼 손과 머리를 같이 쓰는 일." },
+  ISFP: { nick: "호기심 많은 예술가", stack: ["Fi","Se","Ni","Te"], one: "자기만의 미감과 가치를 조용히 지키며, 지금의 아름다움을 온몸으로 느끼는 사람.",
+    str: ["뛰어난 미적 감각과 감수성", "있는 그대로의 상대를 받아들이는 따뜻함", "현재를 즐기는 유연함"],
+    weak: ["갈등 회피와 자기 의견을 잘 말하지 않음", "장기 계획과 구조화의 어려움", "비판에 대한 높은 민감도"],
+    stress: "Te 열등기능에 잡히면 갑자기 냉정하고 비판적으로 변하거나 모든 걸 통제하려 든다.",
+    grow: "내 가치를 작은 목표와 일정으로 바꾸는 연습. 불편함을 느끼는 순간 바로 표현하기.",
+    love: "섬세한 행동과 작은 선물로 마음을 표현한다. 강요받으면 조용히 멀어진다.",
+    work: "디자인, 음악·미술, 요리, 사진, 수의·돌봄처럼 감각과 가치를 표현하는 일." },
+  INFP: { nick: "열정적인 중재자", stack: ["Fi","Ne","Si","Te"], one: "깊은 내면의 가치와 상상력으로 세상에 의미를 더하고 싶은 이상주의자.",
+    str: ["깊은 공감과 진정성", "풍부한 상상력과 창의적 표현", "약자와 가치를 지키려는 신념"],
+    weak: ["현실 실행과 마감 관리의 어려움", "이상과 현실의 괴리에서 오는 자기비판", "감정을 혼자 오래 품음"],
+    stress: "Te 열등기능이 튀어나오면 자신과 남을 가혹하게 평가하고 '나는 아무것도 못 해'라는 무력감에 빠진다.",
+    grow: "큰 이상을 작은 일일 실천으로 쪼개기. 완벽한 감정 정리 전에 일단 말해 보기.",
+    love: "운명 같은 깊은 연결을 꿈꾼다. 상대의 진짜 모습을 사랑하지만 이상화했다가 실망하기도 한다.",
+    work: "글쓰기, 상담, 예술, 교육, 콘텐츠 기획, 비영리처럼 가치와 창의성을 담는 일." },
+  INTP: { nick: "논리적인 사색가", stack: ["Ti","Ne","Si","Fe"], one: "모든 것의 원리를 알고 싶어 하며 아이디어를 끝까지 논리로 파고드는 사색가.",
+    str: ["정교한 논리와 분석력", "독창적인 아이디어와 이론 구축", "편견 없는 객관성"],
+    weak: ["생각은 많고 실행은 느림", "감정적 소통에 서툼", "사소한 오류에 대한 집착"],
+    stress: "Fe 열등기능에 잡히면 감정이 갑자기 터지거나 '다들 나를 싫어한다'는 생각에 사로잡힌다.",
+    grow: "아이디어 하나를 끝까지 완성해 세상에 내놓기. 상대의 감정에 맞장구치는 것도 정확성의 일부임을 인정하기.",
+    love: "지적 교감을 중시한다. 표현은 서툴지만 상대의 관심사를 진지하게 탐구하는 것으로 애정을 보인다.",
+    work: "연구, 프로그래밍, 수학, 철학, 아키텍처 설계처럼 깊이 있는 사고가 필요한 일." },
+  ESTP: { nick: "모험을 즐기는 사업가", stack: ["Se","Ti","Fe","Ni"], one: "현장에서 가장 빨리 움직이고, 위기를 기회로 바꾸는 행동파.",
+    str: ["빠른 상황 판단과 실행력", "협상과 설득에 강한 현장 감각", "위기에서 빛나는 대담함"],
+    weak: ["장기적인 결과를 가볍게 봄", "지루함을 못 견딤", "충동적인 결정"],
+    stress: "Ni 열등기능이 튀어나오면 근거 없는 불길한 예감에 사로잡히거나 사람들의 숨은 의도를 의심한다.",
+    grow: "결정 전에 '1년 뒤에도 괜찮을까'를 한 번 물어보기. 혼자 생각하는 시간을 일부러 확보하기.",
+    love: "함께 있으면 재밌고 활기찬 연인. 즉흥 데이트에 강하지만 깊은 감정 대화는 연습이 필요하다.",
+    work: "영업, 창업, 스포츠, 응급·소방, 트레이딩, 이벤트처럼 속도와 현장감이 중요한 일." },
+  ESFP: { nick: "자유로운 영혼의 연예인", stack: ["Se","Fi","Te","Ni"], one: "어디서든 분위기를 밝히고, 지금 이 순간을 사람들과 즐겁게 나누는 에너지.",
+    str: ["주변을 즐겁게 만드는 친화력", "현재를 즐기는 감각과 순발력", "실용적인 도움을 주는 따뜻함"],
+    weak: ["장기 계획과 재정 관리의 어려움", "갈등이나 무거운 주제 회피", "지루한 일에 대한 낮은 인내"],
+    stress: "Ni 열등기능에 잡히면 미래가 온통 어둡게 느껴지고 근거 없는 비관에 빠진다.",
+    grow: "즐거움을 유지하면서도 3개월 단위 계획 하나 세워보기. 감정이 무거울 때 피하지 말고 머물러 보기.",
+    love: "애정 표현이 풍부하고 함께하는 경험을 중시한다. 관계가 무거워지면 부담을 느낄 수 있다.",
+    work: "공연, 서비스, 마케팅, 이벤트, 패션, 교육처럼 사람과 현장 에너지가 필요한 일." },
+  ENFP: { nick: "재기발랄한 활동가", stack: ["Ne","Fi","Te","Si"], one: "가능성을 보면 가슴이 뛰고, 사람들에게 영감을 불어넣는 열정가.",
+    str: ["끝없는 아이디어와 열정", "사람의 잠재력을 알아보는 눈", "분위기를 띄우는 공감력"],
+    weak: ["시작은 많고 마무리는 적음", "루틴과 디테일 관리의 어려움", "감정 기복과 과몰입"],
+    stress: "Si 열등기능이 튀어나오면 몸의 작은 증상에 집착하거나 과거 실수를 끝없이 곱씹는다.",
+    grow: "새 아이디어를 시작하기 전에 진행 중인 것 하나를 끝내기. 수면·식사 같은 기본 루틴 지키기.",
+    love: "깊은 대화와 함께 성장하는 관계를 원한다. 사랑에 빠르게 빠지지만 진정성이 없으면 금방 식는다.",
+    work: "기획, 마케팅, 상담, 크리에이티브, 교육, 스타트업처럼 아이디어와 사람이 만나는 일." },
+  ENTP: { nick: "뜨거운 논쟁을 즐기는 변론가", stack: ["Ne","Ti","Fe","Si"], one: "기존의 답을 의심하고 새 관점을 던지며 토론으로 생각을 단련하는 발명가.",
+    str: ["빠른 사고와 기발한 발상", "어떤 주제든 논리로 다루는 유연성", "변화와 혁신을 즐기는 태도"],
+    weak: ["논쟁을 위한 논쟁", "실행과 마무리를 귀찮아함", "규칙과 반복 업무를 경시"],
+    stress: "Si 열등기능에 잡히면 사소한 일에 집착하거나 몸 상태에 과민해지고, 평소와 달리 무기력하게 틀어박힌다.",
+    grow: "아이디어 검증을 실제 결과물로 끝내기. 상대가 원하는 게 토론인지 공감인지 먼저 물어보기.",
+    love: "지적 자극을 주고받는 관계를 원한다. 장난스럽고 재밌지만 감정 표현을 농담으로 넘기기도 한다.",
+    work: "창업, 컨설팅, 기획, 변호사, 제품 매니저, 연구처럼 새로운 해법이 필요한 일." },
+  ESTJ: { nick: "엄격한 관리자", stack: ["Te","Si","Ne","Fi"], one: "명확한 기준과 질서로 조직을 굴러가게 만드는 실행 책임자.",
+    str: ["조직력과 리더십", "명확한 기준과 공정한 실행", "책임감과 추진력"],
+    weak: ["융통성 부족과 독단적인 인상", "감정적 배려를 놓침", "다른 방식에 대한 낮은 인내"],
+    stress: "Fi 열등기능이 튀어나오면 '아무도 내 노력을 몰라준다'는 서운함과 감정 폭발이 찾아온다.",
+    grow: "결정 전에 관련된 사람의 감정을 한 번 묻기. 내 감정도 '비효율'이 아니라 중요한 정보로 다루기.",
+    love: "안정적이고 믿음직한 파트너. 계획과 책임으로 사랑을 보여주지만 감정 대화는 연습이 필요하다.",
+    work: "경영관리, 프로젝트 관리, 금융, 군·경찰, 공공기관처럼 체계와 리더십이 필요한 일." },
+  ESFJ: { nick: "사교적인 외교관", stack: ["Fe","Si","Ne","Ti"], one: "모두가 소속감을 느끼도록 챙기고, 공동체의 조화를 지키는 사람.",
+    str: ["사람을 챙기는 따뜻함과 실천력", "공동체를 하나로 묶는 능력", "성실하고 책임감 있는 태도"],
+    weak: ["타인의 인정에 크게 좌우됨", "갈등과 비판에 상처받기 쉬움", "다름을 '틀림'으로 받아들이기 쉬움"],
+    stress: "Ti 열등기능에 잡히면 갑자기 냉소적이고 날카롭게 남의 논리를 공격하거나 스스로를 혹독하게 분석한다.",
+    grow: "모두를 만족시킬 수 없다는 걸 받아들이기. 결정의 근거를 논리로도 한 번 정리해 보기.",
+    love: "헌신적이고 표현이 풍부하다. 기념일과 작은 배려를 중요하게 여기며 같은 마음을 돌려받고 싶어 한다.",
+    work: "교육, 간호, 인사, 서비스, 행사기획, 영업관리처럼 사람을 돌보고 연결하는 일." },
+  ENFJ: { nick: "정의로운 사회운동가", stack: ["Fe","Ni","Se","Ti"], one: "사람들의 가능성을 믿고 하나의 비전 아래 모아 이끄는 카리스마 있는 리더.",
+    str: ["사람을 이끌고 동기를 부여하는 힘", "타인의 성장을 돕는 통찰", "말과 표현의 설득력"],
+    weak: ["남을 챙기다 자신을 소진함", "상대를 '좋은 방향'으로 바꾸려는 과한 개입", "비판을 개인적으로 받아들임"],
+    stress: "Ti 열등기능에 잡히면 차갑게 따지고 들거나 '내가 다 틀렸다'는 식의 자기 분석에 빠진다.",
+    grow: "도움을 주기 전에 상대가 원하는지 묻기. 혼자만의 회복 시간을 일정에 넣기.",
+    love: "상대의 성장을 응원하는 헌신적인 파트너. 감정을 적극적으로 나누고 같은 깊이를 기대한다.",
+    work: "교육, 리더십 코칭, HR, 커뮤니티 운영, 정치·사회활동, 홍보처럼 사람을 움직이는 일." },
+  ENTJ: { nick: "대담한 통솔자", stack: ["Te","Ni","Se","Fi"], one: "목표를 정하면 사람과 자원을 조직해 끝내 결과를 만들어내는 지휘관.",
+    str: ["결단력과 강력한 추진력", "장기 전략과 실행의 연결", "비효율을 찾아 고치는 능력"],
+    weak: ["타인의 감정과 속도를 무시하기 쉬움", "지나친 통제 욕구", "쉬는 것을 낭비로 여김"],
+    stress: "Fi 열등기능에 잡히면 갑자기 감정이 북받치거나 '아무도 날 진심으로 아끼지 않는다'는 고립감을 느낀다.",
+    grow: "성과만큼 사람의 감정을 중요한 변수로 다루기. 내 감정을 인정하는 시간을 따로 두기.",
+    love: "관계에서도 함께 성장하는 것을 중시한다. 든든하지만 감정 표현을 의식적으로 연습할 필요가 있다.",
+    work: "경영, 전략 컨설팅, 창업, 투자, 법조, 프로젝트 리딩처럼 큰 결정과 조직이 필요한 일." },
+};
+
+// ---------- 문항 섞기 (고정 순서: 지표와 기능 문항을 고르게 배치) ----------
+function buildItems() {
+  const ax = [], fn = [];
+  for (let i = 0; i < 12; i++) for (const a of AXES) {
+    const [text, s] = AXIS_ITEMS[a.id][i];
+    ax.push({ id: `${a.id}${i}`, kind: "axis", axis: a.id, s, text });
+  }
+  for (let i = 0; i < 3; i++) for (const f of Object.keys(FUNC_ITEMS)) {
+    fn.push({ id: `${f}${i}`, kind: "fn", fn: f, text: FUNC_ITEMS[f][i] });
+  }
+  // 지표 2개 : 기능 1개 비율로 섞음 (48 + 24 = 72)
+  const out = [];
+  while (ax.length || fn.length) {
+    if (ax.length) out.push(ax.shift());
+    if (ax.length) out.push(ax.shift());
+    if (fn.length) out.push(fn.shift());
+  }
+  return out;
+}
+const ITEMS = buildItems();
+const PER_PAGE = 8;
+const PAGES = Math.ceil(ITEMS.length / PER_PAGE);
+
+// ---------- 상태 ----------
+const KEY = "mbti-deep-v1";
+let state = { answers: {}, page: 0, view: "intro" };
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.answers) state = s; } catch (e) {}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+const app = document.getElementById("app");
+const answeredCount = () => Object.keys(state.answers).length;
+
+// ---------- 화면 ----------
+function render() {
+  if (state.view === "quiz") return renderQuiz();
+  if (state.view === "result") return renderResult();
+  renderIntro();
+}
+
+function renderIntro() {
+  const n = answeredCount();
+  app.innerHTML = `
+    <section class="card intro stack">
+      <div>
+        <h2>4가지 지표와 8가지 인지기능을 함께 봅니다</h2>
+        <p>일반적인 MBTI 검사는 E/I, S/N, T/F, J/P 네 글자만 알려줍니다. 이 검사는 각 지표가 얼마나 뚜렷한지, 그리고 융(Jung)의 인지기능 8가지 중 무엇을 주로 쓰는지까지 측정해서 두 결과가 서로 맞아떨어지는지 교차 확인합니다.</p>
+      </div>
+      <ul>
+        <li>총 ${ITEMS.length}문항, 한 페이지에 ${PER_PAGE}문항씩 ${PAGES}페이지. 10~15분 정도 걸립니다.</li>
+        <li>'되고 싶은 나'가 아니라 편하게 있을 때의 평소 모습으로 답해 주세요.</li>
+        <li>애매하면 가운데를 고르기보다 조금이라도 기우는 쪽을 고르는 편이 결과가 정확합니다.</li>
+        <li>답변은 이 브라우저에만 저장되고 다른 곳으로 전송되지 않습니다.</li>
+      </ul>
+      <div class="row">
+        <button class="btn" id="start">${n ? `이어서 하기 (${n}/${ITEMS.length})` : "검사 시작"}</button>
+        ${n ? `<button class="btn ghost" id="reset">처음부터 다시</button>` : ""}
+        ${n === ITEMS.length ? `<button class="btn ghost" id="toResult">결과 보기</button>` : ""}
+      </div>
+    </section>`;
+  document.getElementById("start").onclick = () => { state.view = "quiz"; save(); render(); scrollTo(0, 0); };
+  const r = document.getElementById("reset");
+  if (r) r.onclick = () => { state = { answers: {}, page: 0, view: "quiz" }; save(); render(); };
+  const t = document.getElementById("toResult");
+  if (t) t.onclick = () => { state.view = "result"; save(); render(); };
+}
+
+function renderQuiz() {
+  const p = state.page;
+  const items = ITEMS.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+  const labels = ["전혀 아니다", "아니다", "약간 아니다", "보통", "약간 그렇다", "그렇다", "매우 그렇다"];
+  app.innerHTML = `
+    <div class="prog">
+      <div class="prog-top"><span>${p + 1} / ${PAGES} 페이지</span><span id="cnt">${answeredCount()} / ${ITEMS.length} 응답</span></div>
+      <div class="bar"><i id="barfill"></i></div>
+    </div>
+    <section class="card">
+      ${items.map((it, i) => {
+        const idx = p * PER_PAGE + i + 1;
+        const v = state.answers[it.id];
+        return `<div class="q" data-id="${it.id}">
+          <p class="q-text"><span class="n">${String(idx).padStart(2, "0")}</span>${it.text}</p>
+          <div class="scale">
+            <span class="end">아니다</span>
+            <div class="lk" role="radiogroup" aria-label="${idx}번 문항">
+              ${[1,2,3,4,5,6,7].map(k => `<label title="${labels[k-1]}"><input type="radio" id="q-${it.id}-${k}" name="${it.id}" value="${k}" ${v === k ? "checked" : ""} aria-label="${labels[k-1]}"><span></span></label>`).join("")}
+            </div>
+            <span class="end r">그렇다</span>
+          </div>
+        </div>`;
+      }).join("")}
+      <div class="nav">
+        <button class="btn ghost" id="prev">${p === 0 ? "처음으로" : "이전"}</button>
+        <button class="btn" id="next">${p === PAGES - 1 ? "결과 보기" : "다음"}</button>
+      </div>
+      <p class="hint" id="hint"></p>
+    </section>`;
+  updateProgress();
+  app.querySelectorAll(".lk input").forEach(inp => inp.addEventListener("change", e => {
+    state.answers[e.target.name] = +e.target.value; save(); updateProgress();
+    const q = e.target.closest(".q"); q.classList.remove("missing");
+    const next = q.nextElementSibling;
+    if (next && next.classList.contains("q") && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const r = next.getBoundingClientRect();
+      if (r.top > innerHeight * 0.7) next.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }));
+  document.getElementById("prev").onclick = () => {
+    if (p === 0) state.view = "intro"; else state.page--;
+    save(); render(); scrollTo(0, 0);
+  };
+  document.getElementById("next").onclick = () => {
+    const missing = items.filter(it => !state.answers[it.id]);
+    if (missing.length) {
+      missing.forEach(it => app.querySelector(`.q[data-id="${it.id}"]`).classList.add("missing"));
+      document.getElementById("hint").textContent = `응답하지 않은 문항이 ${missing.length}개 있어요. 주황색으로 표시된 문항에 답해 주세요.`;
+      app.querySelector(`.q[data-id="${missing[0].id}"]`).scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (p === PAGES - 1) {
+      const allMissing = ITEMS.findIndex(it => !state.answers[it.id]);
+      if (allMissing >= 0) { state.page = Math.floor(allMissing / PER_PAGE); save(); render(); return; }
+      state.view = "result";
+    } else state.page++;
+    save(); render(); scrollTo(0, 0);
+  };
+}
+function updateProgress() {
+  const n = answeredCount();
+  const f = document.getElementById("barfill"); if (f) f.style.width = (n / ITEMS.length * 100) + "%";
+  const c = document.getElementById("cnt"); if (c) c.textContent = `${n} / ${ITEMS.length} 응답`;
+}
+
+// ---------- 채점 ----------
+function score() {
+  const A = state.answers;
+  const axes = {};
+  for (const a of AXES) {
+    const its = ITEMS.filter(i => i.kind === "axis" && i.axis === a.id);
+    let sum = 0;
+    for (const it of its) sum += ((A[it.id] || 4) - 4) * it.s;   // -3..+3
+    const max = its.length * 3;
+    const pctA = Math.round(50 + (sum / max) * 50);               // 첫 글자 쪽 비율
+    axes[a.id] = { pctA, pctB: 100 - pctA, letter: pctA >= 50 ? a.a : a.b, tie: pctA === 50 };
+  }
+  const funcs = {};
+  for (const f of Object.keys(FUNCS)) {
+    const its = ITEMS.filter(i => i.kind === "fn" && i.fn === f);
+    const mean = its.reduce((s, it) => s + (A[it.id] || 4), 0) / its.length; // 1..7
+    funcs[f] = Math.round((mean - 1) / 6 * 100);
+  }
+  const type = AXES.map(a => axes[a.id].letter).join("");
+  // 기능 프로파일 매칭: 유형별 기대 프로필과 사용자 점수의 상관계수
+  const ideal = [100, 78, 52, 32];
+  const keys = Object.keys(FUNCS);
+  const u = keys.map(k => funcs[k]);
+  const fits = Object.entries(TYPES).map(([t, d]) => {
+    const e = keys.map(k => { const i = d.stack.indexOf(k); return i >= 0 ? ideal[i] : 20; });
+    return { t, r: pearson(u, e) };
+  }).sort((x, y) => y.r - x.r);
+  return { axes, funcs, type, fits };
+}
+function pearson(x, y) {
+  const n = x.length, mx = x.reduce((a, b) => a + b) / n, my = y.reduce((a, b) => a + b) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { num += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) ** 2; dy += (y[i] - my) ** 2; }
+  return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+}
+function clarity(p) {
+  const d = Math.abs(p - 50);
+  if (d < 6) return "경계";
+  if (d < 16) return "약간";
+  if (d < 31) return "뚜렷";
+  return "매우 뚜렷";
+}
+
+// ---------- 결과 화면 ----------
+function renderResult() {
+  const R = score();
+  const T = TYPES[R.type];
+  const borderline = AXES.filter(a => Math.abs(R.axes[a.id].pctA - 50) < 6);
+  const alt = borderline.length ? R.type.split("").map((ch, i) => {
+    const a = AXES[i]; return borderline.includes(a) ? (ch === a.a ? a.b : a.a) : ch;
+  }).join("") : null;
+  const myRank = R.fits.findIndex(f => f.t === R.type) + 1;
+  const top3 = R.fits.slice(0, 3);
+  const fnSorted = Object.entries(R.funcs).sort((a, b) => b[1] - a[1]);
+  const roles = ["주기능", "부기능", "3차 기능", "열등 기능"];
+
+  let consistency;
+  if (myRank === 1) consistency = `<strong>지표 결과와 인지기능 결과가 일치합니다.</strong> 네 글자 유형과 실제로 자주 쓰는 기능의 순서가 같은 그림을 가리키고 있어서 신뢰도가 높은 결과입니다.`;
+  else if (myRank <= 3) consistency = `<strong>대체로 일치합니다.</strong> 인지기능 기준으로는 ${R.type}가 ${myRank}순위입니다. 1순위로 나온 ${top3[0].t}의 설명도 함께 읽어보고 더 와닿는 쪽을 참고하세요.`;
+  else consistency = `<strong>지표와 인지기능 결과가 다르게 나왔습니다.</strong> 인지기능 기준 1순위는 ${top3[0].t}입니다. 상황에 따라 다르게 행동하거나, 되고 싶은 모습으로 답했을 가능성이 있어요. 두 유형 설명을 비교해 보는 걸 추천합니다.`;
+
+  app.innerHTML = `
+    <div class="stack">
+      <section class="card hero">
+        <p class="eyebrow">당신의 유형</p>
+        <div class="code" aria-label="${R.type}">${R.type.split("").map((ch, i) => `<b class="${ch === AXES[i].a ? "a" : "b"}">${ch}</b>`).join("")}</div>
+        <p class="nick">${T.nick}</p>
+        <p class="oneliner">${T.one}</p>
+        <div class="chips">
+          ${AXES.map(a => { const ax = R.axes[a.id]; const p = Math.max(ax.pctA, ax.pctB); const c = clarity(ax.pctA);
+            return `<span class="chip ${c === "경계" ? "warn" : ""}">${ax.letter} ${p}% · ${c}</span>`; }).join("")}
+          ${alt ? `<span class="chip warn">경계 유형: ${alt}</span>` : ""}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><h3>4가지 지표</h3><small>가운데에서 멀수록 선호가 뚜렷함</small></div>
+        ${AXES.map(a => { const ax = R.axes[a.id]; const left = 100 - ax.pctA; const col = ax.pctA >= 50 ? "var(--pole-a)" : "var(--pole-b)";
+          return `<div class="axis">
+            <div class="axis-top"><span class="a">${a.a} · ${a.an}</span><span>${a.desc}</span><span class="b">${a.bn} · ${a.b}</span></div>
+            <div class="axis-bar"><span class="mid"></span><span class="dot" style="left:${left}%;background:${col}"></span></div>
+            <div class="axis-foot"><span>${ax.pctA}%</span><span class="cl">${clarity(ax.pctA)}</span><span>${ax.pctB}%</span></div>
+          </div>`; }).join("")}
+        ${borderline.length ? `<p class="note">${borderline.map(a => `${a.a}/${a.b}`).join(", ")} 지표가 50% 근처입니다. 이 지표는 상황에 따라 양쪽 모습을 모두 보일 수 있어서 <strong>${alt}</strong> 설명도 함께 참고하면 좋습니다.</p>` : ""}
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><h3>인지기능 사용 정도</h3><small>0~100, 높을수록 자주 씀</small></div>
+        <div class="fn-list">
+          ${fnSorted.map(([k, v]) => { const i = T.stack.indexOf(k);
+            return `<div class="fn ${i >= 0 ? "in-stack" : ""}">
+              <span class="k">${k}</span>
+              <div class="track"><i style="width:${Math.max(v, 3)}%"></i><em>${FUNCS[k].name}${i >= 0 ? " · " + roles[i] : ""}</em></div>
+              <span class="v">${v}</span>
+            </div>`; }).join("")}
+        </div>
+        <div class="legend"><span><i style="background:var(--pole-a)"></i>${R.type}의 기능 스택</span><span><i style="background:var(--muted);opacity:.35"></i>그 외 (그림자 기능)</span></div>
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><h3>인지기능으로 본 유형</h3><small>기능 점수 패턴과 각 유형 스택의 일치도</small></div>
+        <div class="match">
+          ${top3.map((f, i) => `<div class="${f.t === R.type ? "me" : ""}">
+            <span class="s">${i + 1}순위 · 일치도 ${Math.round(Math.max(0, f.r) * 100)}%</span>
+            <div class="t">${f.t}</div>
+            <div class="st">${TYPES[f.t].stack.join(" · ")}</div>
+          </div>`).join("")}
+        </div>
+        <p class="note">${consistency}</p>
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><h3>${R.type} 깊이 보기</h3><small>${T.nick}</small></div>
+        <div class="stackline">
+          ${T.stack.map((k, i) => `<div><small>${roles[i]}</small><b>${k}</b><span>${FUNCS[k].short}</span></div>`).join("")}
+        </div>
+        <div class="deep">
+          <div class="full"><h4>주기능 ${T.stack[0]}</h4><p>${FUNCS[T.stack[0]].desc} 부기능 ${T.stack[1]}(${FUNCS[T.stack[1]].short})이 이를 보완해 균형을 잡습니다.</p></div>
+          <div><h4>강점</h4><ul>${T.str.map(s => `<li>${s}</li>`).join("")}</ul></div>
+          <div><h4>맹점</h4><ul>${T.weak.map(s => `<li>${s}</li>`).join("")}</ul></div>
+          <div class="full"><h4>스트레스 받을 때</h4><p>${T.stress}</p></div>
+          <div class="full"><h4>성장 포인트</h4><p>${T.grow}</p></div>
+          <div><h4>관계에서</h4><p>${T.love}</p></div>
+          <div><h4>잘 맞는 일</h4><p>${T.work}</p></div>
+        </div>
+      </section>
+
+      <section class="card stack">
+        <div class="row">
+          <button class="btn" id="copy">결과 복사</button>
+          <button class="btn ghost" id="review">답변 수정</button>
+          <button class="btn ghost" id="again">다시 검사</button>
+        </div>
+        <p class="toast" id="toast" aria-live="polite"></p>
+        <textarea id="copyText" readonly hidden></textarea>
+        <p class="disclaimer">이 검사는 MBTI 이론과 융의 인지기능 개념을 바탕으로 만든 자가 진단용 검사이며, 공식 MBTI® 검사(Myers-Briggs Company)가 아닙니다. 성격은 고정된 상자가 아니라 경향이므로, 결과는 자기 이해를 위한 참고로만 활용하세요.</p>
+      </section>
+    </div>`;
+
+  const summary = `[MBTI 심층 검사 결과] ${R.type} · ${T.nick}\n` +
+    AXES.map(a => { const ax = R.axes[a.id]; return `${a.a} ${ax.pctA}% / ${a.b} ${ax.pctB}% (${clarity(ax.pctA)})`; }).join("\n") +
+    `\n기능 순위: ${fnSorted.map(([k, v]) => `${k} ${v}`).join(" > ")}\n인지기능 기준 1순위: ${top3[0].t}`;
+  document.getElementById("copy").onclick = async () => {
+    const toast = document.getElementById("toast");
+    try { await navigator.clipboard.writeText(summary); toast.textContent = "결과를 클립보드에 복사했어요."; }
+    catch (e) { const ta = document.getElementById("copyText"); ta.hidden = false; ta.value = summary; ta.style.width = "100%"; ta.rows = 6; ta.select(); toast.textContent = "자동 복사가 막혀 있어요. 선택된 텍스트를 직접 복사해 주세요."; }
+  };
+  document.getElementById("review").onclick = () => { state.view = "quiz"; state.page = 0; save(); render(); scrollTo(0, 0); };
+  document.getElementById("again").onclick = () => { state = { answers: {}, page: 0, view: "intro" }; save(); render(); scrollTo(0, 0); };
+}
+
+render();
+</script>
