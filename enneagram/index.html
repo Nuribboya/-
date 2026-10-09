@@ -144,7 +144,7 @@ button:focus-visible, select:focus-visible, .lk input:focus-visible + span { out
 <div class="wrap">
   <header class="mast">
     <h1>에니어그램 심층 검사</h1>
-    <span class="meta">98문항 · 9유형 + 날개 + 트라이타입 + 본능</span>
+    <span class="meta">98문항 + 확인 문항 · 9유형 + 날개 + 트라이타입 + 본능</span>
   </header>
   <main id="app"></main>
 </div>
@@ -257,23 +257,59 @@ function buildItems() {
   return out;
 }
 const ITEMS = buildItems();
-const BY_ID = Object.fromEntries(ITEMS.map(i => [i.id, i]));
 const PER_PAGE = 10;
-const PAGES = Math.ceil(ITEMS.length / PER_PAGE);
+
+// 확인 문항: 같은 질문에 대한 두 유형의 답을 나란히 놓고 고르게 한다.
+// 점수가 붙은 유형끼리만 골라서 묻는다 (유형 쌍마다 최대 10문항)
+const THEMES = ["내가 가장 두려운 것은", "내가 진짜 원하는 것은", "스트레스가 쌓이면 나는", "사람들에게 가장 듣고 싶은 말은", "가장 견디기 힘든 상황은",
+  "무언가에 깊이 빠지는 진짜 이유는", "남에게 들키고 싶지 않은 내 모습은", "어릴 때부터 나는", "혼자 있을 때 나는 주로", "관계에서 가장 상처받는 순간은"];
+const MOTIVE = {
+  1: ["내가 틀렸거나 잘못된 사람으로 드러나는 것", "모든 게 올바르고 제대로 돌아가는 것", "더 엄격해지고 사소한 잘못에도 날이 선다", "\"너는 정말 바르고 믿을 만한 사람이야\"", "다들 대충 해도 된다며 엉터리로 넘어가는 상황",
+    "그걸 흠 없이 제대로 해내고 싶어서", "속으로는 화가 나 있는데 꾹 참고 있는 모습", "잘못된 걸 보면 지적하고 고치고 싶었다", "해야 할 일과 고칠 점을 정리한다", "내 노력이 그냥 '깐깐함'으로 취급될 때"],
+  2: ["아무에게도 필요 없는 사람이 되는 것", "사람들에게 사랑받고 소중한 존재가 되는 것", "서운함이 쌓여 생색을 내거나 감정이 터진다", "\"네가 있어서 정말 고마워\"", "내가 챙겨준 사람에게 외면당하는 상황",
+    "그걸로 누군가를 기쁘게 해줄 수 있어서", "나도 사실 챙김받고 싶어서 서운해하는 모습", "주변 사람 기분을 살피고 챙기는 아이였다", "누구에게 연락하거나 무엇을 해줄지 생각한다", "내가 준 마음이 당연하게 여겨질 때"],
+  3: ["실패한 사람, 별 볼 일 없는 사람으로 보이는 것", "성공해서 인정받는 것", "일에 더 몰두하고 감정을 꺼버린다", "\"너 정말 대단하다, 잘한다\"", "열심히 했는데 성과가 안 보이는 상황",
+    "거기서 잘하고 두각을 나타내고 싶어서", "사실은 자신 없고 공허한 모습", "칭찬받고 1등 하는 데서 힘을 얻었다", "다음 목표나 해야 할 일을 계획한다", "내가 이룬 걸 아무도 알아주지 않을 때"],
+  4: ["나만의 의미 없이 평범하게 묻혀 사라지는 것", "진짜 나 자신을 찾고 깊이 이해받는 것", "감정 속으로 가라앉아 혼자 곱씹는다", "\"너는 정말 특별하고 독특해\"", "나를 그저 평범한 사람으로 취급하는 상황",
+    "그 안에서 나 자신과 의미를 발견할 수 있어서", "남을 부러워하며 내가 부족하다고 느끼는 모습", "다른 아이들과 나는 뭔가 다르다고 느꼈다", "음악이나 상상, 감정에 깊이 빠진다", "진짜 내 모습을 이해받지 못한다고 느낄 때"],
+  5: ["무능하고 아무것도 모르는 사람으로 드러나는 것", "세상을 깊이 이해하고 유능해지는 것", "더 혼자 틀어박혀 사람과의 접촉을 끊는다", "\"너는 정말 아는 게 많고 똑똑하다\"", "준비도 안 됐는데 많은 걸 요구받는 상황",
+    "그 원리를 완전히 이해하고 싶어서", "사람들 앞에서 어설프고 서툰 모습", "혼자 책이나 관심사에 파묻혀 지냈다", "궁금한 걸 찾아보고 파고든다", "내 공간과 시간을 침범당할 때"],
+  6: ["의지할 곳 없이 혼자 위험에 놓이는 것", "믿을 수 있는 안전한 기반을 갖는 것", "걱정이 꼬리를 물고 사람들을 의심하게 된다", "\"너라면 믿을 수 있어\"", "앞이 안 보이고 아무것도 확실하지 않은 상황",
+    "그게 나를 더 안전하고 준비된 사람으로 만들어줘서", "겉으론 괜찮은 척하지만 속으론 불안한 모습", "걱정이 많고 어른들 말이 맞는지 따져보는 아이였다", "앞으로 생길 일들을 머릿속으로 시뮬레이션한다", "믿었던 사람에게 배신당했다고 느낄 때"],
+  7: ["지루하고 괴로운 상황에 갇혀 빠져나갈 수 없는 것", "자유롭게 하고 싶은 걸 마음껏 경험하는 것", "더 바쁘게 놀거나 새로운 자극으로 도망친다", "\"너랑 있으면 진짜 재밌어\"", "선택지 없이 꼼짝없이 묶여 있는 상황",
+    "너무 재밌고 새로워서", "힘든 감정을 마주하기 싫어서 피하는 모습", "호기심 많고 가만히 있지 못하는 아이였다", "재밌는 거리나 다음 계획을 찾는다", "상대가 나를 가볍고 철없는 사람으로 볼 때"],
+  8: ["남에게 통제당하고 휘둘리며 약해지는 것", "내 삶을 내 뜻대로 움직일 힘을 갖는 것", "더 공격적으로 밀어붙이고 화가 바로 터진다", "\"너는 정말 강하고 든든하다\"", "누군가 나를 쥐고 흔들려고 하는 상황",
+    "그걸 장악하고 내 것으로 만들고 싶어서", "상처받고 약해져 있는 모습", "지기 싫어했고 일찍부터 강해져야 했다", "다음에 밀고 나갈 일을 구상한다", "마음을 연 사람이 등을 돌릴 때"],
+  9: ["갈등 속에서 사람들과 멀어지고 평화가 깨지는 것", "모두가 편안하고 아무 갈등 없이 지내는 것", "멍해지고 할 일을 미루며 아무것도 안 한다", "\"너랑 있으면 편해\"", "사람들이 싸우면서 나에게 편을 들라고 하는 상황",
+    "그 안에 있으면 마음이 편하고 잡생각이 사라져서", "화가 나 있는데 아무렇지 않은 척하는 모습", "순하고 있는 듯 없는 듯한 아이였다", "편하게 늘어져서 좋아하는 걸 보며 쉰다", "내 의견이 아무렇지 않게 무시될 때"],
+};
+const EXTRA = [];
+for (let a = 1; a <= 9; a++) for (let b = a + 1; b <= 9; b++) THEMES.forEach((stem, k) => {
+  const [x, y] = k % 2 ? [b, a] : [a, b];   // 좌우 위치 편향을 줄이려고 번갈아 배치
+  EXTRA.push({ id: `tb${a}${b}-${k}`, kind: "fc", pair: `${a}${b}`, stem, a: x, b: y, ta: MOTIVE[x][k], tb: MOTIVE[y][k] });
+});
+const BY_ID = Object.fromEntries([...ITEMS, ...EXTRA].map(i => [i.id, i]));
 const FC_LEAN = { 1: 2, 2: 1, 3: -1, 4: -2 };
 
 // ---------- 상태 ----------
 const KEY = "enneagram-deep-v1";
-let state = { answers: {}, page: 0, view: "intro", mbti: "" };
+let state = { answers: {}, page: 0, view: "intro", mbti: "", queue: [] };
 try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && s.answers) state = Object.assign(state, s); } catch (e) {}
+if (!Array.isArray(state.queue) || !state.queue.length) state.queue = ITEMS.map(i => i.id);
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 const app = document.getElementById("app");
 const isDone = id => state.answers[id] != null;
 const doneCount = () => ITEMS.filter(i => isDone(i.id)).length;
 function go(view, page) { state.view = view; if (page != null) state.page = page; save(); render(); scrollTo(0, 0); }
+function startQueue(ids) { state.queue = ids; go("quiz", 0); }
+function resumeMain() {
+  const left = ITEMS.filter(i => !isDone(i.id)).map(i => i.id);
+  startQueue(left.length ? left : ITEMS.map(i => i.id));
+}
 
 function render() {
   if (state.view === "quiz") return renderQuiz();
+  if (state.view === "check") return renderCheck();
   if (state.view === "result") return renderResult();
   renderIntro();
 }
@@ -287,7 +323,7 @@ function renderIntro() {
         <p>MBTI가 생각하고 판단하는 방식을 본다면, 에니어그램은 행동 밑에 깔린 핵심 욕구와 두려움을 봅니다. 그래서 MBTI가 같아도 에니어그램은 다를 수 있고, 둘을 같이 보면 MBTI에서 애매했던 부분이 정리되기도 합니다.</p>
       </div>
       <ul>
-        <li>총 ${ITEMS.length}문항, 한 페이지에 ${PER_PAGE}문항씩 ${PAGES}페이지. 12~15분 정도 걸립니다.</li>
+        <li>총 ${ITEMS.length}문항, 한 페이지에 ${PER_PAGE}문항씩. 12~15분 정도 걸립니다. 점수가 비슷한 유형이 있으면 그 유형끼리 비교하는 확인 문항이 이어집니다.</li>
         <li>9가지 유형별 문항, 헷갈리기 쉬운 유형의 동기를 비교하는 양자택일, 세 가지 본능 문항이 섞여 있습니다.</li>
         <li>요즘 상태보다 인생 전반에 걸쳐 꾸준했던 모습으로 답해 주세요. 특히 20대 초반 무렵 가장 나다웠던 시기를 떠올리면 좋습니다.</li>
         <li>행동보다 이유에 집중해 주세요. 같은 행동이라도 왜 하는지가 유형을 가릅니다.</li>
@@ -299,12 +335,9 @@ function renderIntro() {
         ${n ? `<button class="btn ghost" id="reset">처음부터 다시</button>` : ""}
       </div>
     </section>`;
-  document.getElementById("start").onclick = () => {
-    const first = ITEMS.findIndex(i => !isDone(i.id));
-    go("quiz", first < 0 ? 0 : Math.floor(first / PER_PAGE));
-  };
+  document.getElementById("start").onclick = resumeMain;
   const t = document.getElementById("toResult"); if (t) t.onclick = () => go("result");
-  const r = document.getElementById("reset"); if (r) r.onclick = () => { state.answers = {}; go("quiz", 0); };
+  const r = document.getElementById("reset"); if (r) r.onclick = () => { state.answers = {}; startQueue(ITEMS.map(i => i.id)); };
 }
 
 const L5 = ["전혀 아니다", "아니다", "보통", "그렇다", "매우 그렇다"];
@@ -317,7 +350,7 @@ function radios(it, labels, cls) {
 function itemHTML(it, idx) {
   const n = `<span class="n">${String(idx).padStart(2, "0")}</span>`;
   if (it.kind === "fc") return `<div class="q" data-id="${it.id}">
-      <p class="q-text">${n}둘 중 나의 진짜 이유에 더 가까운 쪽은?</p>
+      <p class="q-text">${n}${it.stem ? `${it.stem}… 둘 중 더 가까운 쪽은?` : "둘 중 나의 진짜 이유에 더 가까운 쪽은?"}</p>
       <div class="fc"><p><b>A</b>${it.ta}</p><p><b>B</b>${it.tb}</p></div>
       <div class="scale"><span class="end">A</span>${radios(it, L4, "lk4")}<span class="end r">B</span></div>
     </div>`;
@@ -328,25 +361,28 @@ function itemHTML(it, idx) {
 }
 
 function renderQuiz() {
-  const p = Math.min(state.page, PAGES - 1);
-  const items = ITEMS.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+  const Q = state.queue.filter(id => BY_ID[id]);
+  const pages = Math.max(1, Math.ceil(Q.length / PER_PAGE));
+  const p = Math.min(state.page, pages - 1);
+  const items = Q.slice(p * PER_PAGE, (p + 1) * PER_PAGE).map(id => BY_ID[id]);
+  const isExtra = items.length && items.every(it => it.pair);
   app.innerHTML = `
     <div class="prog">
-      <div class="prog-top"><span>${p + 1} / ${PAGES} 페이지</span><span id="cnt"></span></div>
+      <div class="prog-top"><span>${isExtra ? "확인 문항 · " : ""}${p + 1} / ${pages} 페이지</span><span id="cnt"></span></div>
       <div class="bar"><i id="barfill"></i></div>
     </div>
     <section class="card">
       ${items.map((it, i) => itemHTML(it, p * PER_PAGE + i + 1)).join("")}
       <div class="nav">
         <button class="btn ghost" id="prev">${p === 0 ? "처음으로" : "이전"}</button>
-        <button class="btn" id="next">${p === PAGES - 1 ? "결과 보기" : "다음"}</button>
+        <button class="btn" id="next">${p === pages - 1 ? "결과 보기" : "다음"}</button>
       </div>
       <p class="hint" id="hint"></p>
     </section>`;
   const upd = () => {
-    const n = doneCount();
-    document.getElementById("barfill").style.width = (n / ITEMS.length * 100) + "%";
-    document.getElementById("cnt").textContent = `${n} / ${ITEMS.length} 응답`;
+    const n = Q.filter(isDone).length;
+    document.getElementById("barfill").style.width = (n / Q.length * 100) + "%";
+    document.getElementById("cnt").textContent = `${n} / ${Q.length} 응답`;
   };
   upd();
   app.querySelectorAll(".lk input").forEach(inp => inp.addEventListener("change", e => {
@@ -366,11 +402,47 @@ function renderQuiz() {
       app.querySelector(`.q[data-id="${missing[0].id}"]`).scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (p < PAGES - 1) return go("quiz", p + 1);
-    const first = ITEMS.findIndex(i => !isDone(i.id));
+    if (p < pages - 1) return go("quiz", p + 1);
+    const first = Q.findIndex(id => !isDone(id));
     if (first >= 0) return go("quiz", Math.floor(first / PER_PAGE));
-    go("result");
+    if (ITEMS.some(i => !isDone(i.id))) return resumeMain();
+    go(tieItems(score()).ids.length ? "check" : "result");
   };
+}
+
+// ---------- 점수가 붙은 유형 확인 ----------
+const TIE_GAP = 10;   // 1위와 이 점수 미만으로 차이 나는 유형을 후보로 봄
+const PER_PAIR = 5;   // 한 번에 묻는 유형 쌍별 문항 수
+function tieItems(R) {
+  const top = R.types[R.main];
+  const cand = R.ranked.filter(t => top - R.types[t] < TIE_GAP).slice(0, 3);
+  const lists = [];
+  for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++) {
+    const key = `${Math.min(cand[i], cand[j])}${Math.max(cand[i], cand[j])}`;
+    lists.push(EXTRA.filter(it => it.pair === key && !isDone(it.id)).slice(0, PER_PAIR).map(it => it.id));
+  }
+  const ids = [];
+  for (let k = 0; k < PER_PAIR; k++) for (const l of lists) if (l[k]) ids.push(l[k]);
+  return { cand, ids };
+}
+function renderCheck() {
+  const R = score(), tie = tieItems(R);
+  if (!tie.ids.length) return go("result");
+  app.innerHTML = `
+    <section class="card stack">
+      <div>
+        <p class="eyebrow">거의 다 왔어요</p>
+        <h2 style="font-size:20px;margin-top:4px">${tie.cand.map(t => `${t}번`).join(", ")} 점수가 가깝게 나왔어요</h2>
+      </div>
+      <div class="trio">${tie.cand.map(t => `<div><small>${TYPES[t].name}</small><b style="color:var(--${CENTER[t]})">${t}</b><span>${R.types[t]}점</span></div>`).join("")}</div>
+      <p>같은 질문에 대한 두 유형의 답을 나란히 보여드릴게요. 둘 다 조금씩 맞더라도 더 가까운 쪽을 골라 주세요. 확인 문항 ${tie.ids.length}개입니다.</p>
+      <div class="row">
+        <button class="btn" id="more">확인 문항 ${tie.ids.length}개 풀기</button>
+        <button class="btn ghost" id="skip">지금 결과 보기</button>
+      </div>
+    </section>`;
+  document.getElementById("more").onclick = () => startQueue(tie.ids);
+  document.getElementById("skip").onclick = () => go("result");
 }
 
 // ---------- 채점 ----------
@@ -378,7 +450,7 @@ function score() {
   const A = state.answers;
   const vals = {}; for (let t = 1; t <= 9; t++) vals[t] = [];
   const inst = { sp: [], so: [], sx: [] };
-  for (const it of ITEMS) {
+  for (const it of [...ITEMS, ...EXTRA]) {
     if (!isDone(it.id)) continue;
     const v = A[it.id];
     if (it.kind === "type") vals[it.t].push((v - 1) / 4 * 100);
@@ -429,9 +501,9 @@ function figure(R) {
 // ---------- 결과 ----------
 function renderResult() {
   const R = score(), T = TYPES[R.main];
-  const second = R.ranked[1];
-  const gap = R.types[R.main] - R.types[second];
-  const close = gap < 6;
+  const tie = tieItems(R);
+  const close = tie.cand.length > 1;
+  const others = tie.cand.filter(t => t !== R.main);
   const tri = R.tri.join("");
   const order = Object.keys(TYPES).map(Number);
   const mbtiOpts = Object.keys(MBTI_COMMON).map(m => `<option value="${m}" ${state.mbti === m ? "selected" : ""}>${m}</option>`).join("");
@@ -448,7 +520,7 @@ function renderResult() {
             <span class="chip">트라이타입 ${tri}</span>
             <span class="chip">본능 ${R.instStack.join("/")}</span>
             <span class="chip">${CENTER_INFO[CENTER[R.main]].name}</span>
-            ${close ? `<span class="chip warn">${second}번과 근소한 차이</span>` : ""}
+            ${close ? `<span class="chip warn">${others.join(", ")}번과 근소한 차이</span>` : ""}
           </div>
         </div>
         ${figure(R)}
@@ -468,7 +540,8 @@ function renderResult() {
           <span><i style="background:var(--heart)"></i>가슴 중심 (2 3 4)</span>
           <span><i style="background:var(--head)"></i>머리 중심 (5 6 7)</span>
         </div>
-        ${close ? `<p class="note"><strong>${R.main}번과 ${second}번의 점수 차이가 ${gap}점으로 가깝습니다.</strong> 두 유형의 핵심 두려움을 비교해 보세요. ${R.main}번은 '${T.fear}', ${second}번은 '${TYPES[second].fear}'을(를) 두려워합니다. 더 뜨끔한 쪽이 진짜 주유형일 가능성이 높습니다.</p>` : ""}
+        ${close ? `<p class="note"><strong>${tie.cand.map(t => `${t}번(${R.types[t]})`).join(", ")}의 점수가 가깝습니다.</strong> ${tie.cand.map(t => `${t}번은 '${TYPES[t].fear}'`).join(", ")}을(를) 가장 두려워합니다. 더 뜨끔한 쪽이 진짜 주유형일 가능성이 높습니다.</p>
+        ${tie.ids.length ? `<div class="row" style="margin-top:12px"><button class="btn" id="tieBtn">확인 문항 ${tie.ids.length}개 더 풀기</button></div>` : `<p class="note">준비된 확인 문항을 모두 풀었는데도 비슷하다면, 두 유형의 '무너질 때' 설명을 비교해 보세요. 이 부분이 가장 잘 갈립니다.</p>`}` : ""}
       </section>
 
       <section class="card">
@@ -551,7 +624,8 @@ function renderResult() {
     try { await navigator.clipboard.writeText(summary); toast.textContent = "결과를 클립보드에 복사했어요."; }
     catch (e) { const ta = document.getElementById("copyText"); ta.hidden = false; ta.value = summary; ta.style.width = "100%"; ta.rows = 4; ta.select(); toast.textContent = "자동 복사가 막혀 있어요. 선택된 텍스트를 직접 복사해 주세요."; }
   };
-  document.getElementById("review").onclick = () => go("quiz", 0);
+  document.getElementById("review").onclick = () => startQueue([...ITEMS, ...EXTRA].filter(i => isDone(i.id)).map(i => i.id));
+  const tb = document.getElementById("tieBtn"); if (tb) tb.onclick = () => startQueue(tie.ids);
   document.getElementById("again").onclick = () => { state.answers = {}; go("intro", 0); };
 }
 
