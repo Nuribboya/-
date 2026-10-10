@@ -612,6 +612,35 @@ def _xlsx_rows(path: Path) -> list[list[str]]:
     return rows
 
 
+#: 확인한 협력사 등록 창구. (상호가 이 말로 시작하면, 안내 주소, 한 줄 설명).
+#: 확인한 것만 넣는다 — 나머지는 supplier_search_url 로 찾아본다.
+SUPPLIER_PORTALS: tuple[tuple[str, str, str], ...] = (
+    ("삼성전자", "https://www.secbuy.co.kr",
+     "삼성전자 구매포털 — 신규거래 신청 제안서를 내려받아 이메일로 접수(상시)"),
+)
+
+
+def supplier_portal(name: str) -> tuple[str, str]:
+    """확인된 협력사 등록 창구 (주소, 설명). 없으면 ('', '')."""
+    key = company_key(name)
+    for prefix, url, note in SUPPLIER_PORTALS:
+        if key.startswith(normalize_name(prefix)):
+            return url, note
+    return "", ""
+
+
+def supplier_search_url(name: str) -> str:
+    """'회사명 협력사 등록'을 네이버에서 찾는 주소 — 포털이 있는지 전화 대신 클릭 한 번으로."""
+    from urllib.parse import quote
+    plain = re.sub(r"\(주\)|㈜|주식회사", "", company_key_display(name)).strip()
+    return "https://search.naver.com/search.naver?query=" + quote(f"{plain} 협력사 등록")
+
+
+def company_key_display(name: str) -> str:
+    """공장 이름을 뗀 회사 이름(원래 글자 그대로): '(주)농심 안성공장' → '(주)농심'."""
+    return _PLANT_NUMBER.sub("", _PLANT_WORD.sub("", (name or "").strip())).strip() or name
+
+
 #: DART 공시 원문 주소 (뒤에 접수번호).
 DART_VIEW = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
 
@@ -631,9 +660,11 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
         Column("생산품", 20, WRAP), Column("지역", 6, CENTER), Column("거리(km)", 7, DECIMAL),
         Column("대표자", 7, CENTER), Column("전화", 12, CENTER), Column("주소", 24, WRAP),
         Column("시설투자 공시", 18, WRAP), Column("공시 원문", 24, TEXT),
+        Column("협력사 등록", 30, TEXT),
     ], rows=[[i, c.name, c.group, c.sector, steady_text(c.sector_weight), size_text(c),
               c.products, c.region, c.distance_km, c.ceo, c.phone, c.address,
-              c.investment, (DART_VIEW + c.investment_no) if c.investment_no else ""]
+              c.investment, (DART_VIEW + c.investment_no) if c.investment_no else "",
+              supplier_portal(c.name)[0] or supplier_search_url(c.name)]
              for i, c in enumerate(factories, 1)])
     fields = Counter(c.sector for c in factories).most_common()
     limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
@@ -654,6 +685,8 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
         ["시설투자 공시", "최근 2년 안에 상장사가 낸 '신규시설투자'·'유형자산 취득' 공시 중 "
                       "가장 최근 것. 공장·라인을 늘리는 회사라 판넬 일이 곧 나올 수 있습니다. "
                       "회사 전체 공시라 어느 공장인지는 원문에서 확인하세요."],
+        ["협력사 등록", "확인된 등록 창구(구매포털)가 있으면 그 주소, 없으면 '회사명 협력사 등록' "
+                    "네이버 검색 주소입니다. 눌러 보고 포털이 없으면 대표번호로 구매팀을 찾으세요."],
         ["뺀 곳", "판넬을 만드는 곳(경쟁사), 수작업 위주 공장, 주소를 모르거나 거리 밖인 곳."],
         ["연락할 때", "본사 구매팀보다 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 "
                     "'판넬 교체·라인 개조 때 견적 낼 수 있게 해 달라'고 하세요."],

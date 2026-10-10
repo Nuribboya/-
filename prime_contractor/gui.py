@@ -274,6 +274,10 @@ class App:
         self.save_button = _Button(act, text="엑셀로 저장 (보이는 것만)", command=self.on_save,
                                    state="disabled", bootstyle="success-outline")
         self.save_button.pack(side=LEFT, padx=6)
+        self.portal_button = _Button(act, text="고른 회사 협력사 등록 찾기",
+                                     command=self.on_find_portals, state="disabled",
+                                     bootstyle="secondary-outline")
+        self.portal_button.pack(side=LEFT)
         self.factory_info = ttk.Label(act, text="", foreground="#333", wraplength=700, justify=LEFT)
         self.factory_info.pack(side=LEFT, padx=10)
 
@@ -1131,6 +1135,27 @@ class App:
         state = "normal" if self.shown else "disabled"
         self.save_button.configure(state=state)
         self.lead_add_button.configure(state=state)
+        self.portal_button.configure(state=state)
+
+    def on_find_portals(self) -> None:
+        """고른 회사마다 협력사 등록 창구를 브라우저로 연다 — 확인된 포털이면 바로, 아니면 검색."""
+        import webbrowser
+        from prime_contractor.makers import supplier_portal, supplier_search_url
+        picked = self.tree.selection()
+        if not picked:
+            messagebox.showinfo("회사를 고르세요", "표에서 회사를 클릭해 고르세요 (Ctrl+클릭으로 여러 곳).")
+            return
+        urls = []
+        for i in picked:
+            c = self.shown[int(i) - 1]
+            url = supplier_portal(c.name)[0] or supplier_search_url(c.name)
+            if url not in urls:
+                urls.append(url)
+        if len(urls) > 10 and not messagebox.askyesno(
+                "창이 많이 열립니다", f"{len(urls)}개 창을 엽니다. 계속할까요?"):
+            return
+        for url in urls:
+            webbrowser.open_new_tab(url)
 
     def on_add_to_leads(self) -> None:
         picked = self.tree.selection()

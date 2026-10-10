@@ -3123,3 +3123,12 @@ def test_facility_investment_notices_are_marked(tmp_path):
     assert again.facility_notices("N1") and len(calls) == n               # 캐시
     path = write_factories_xlsx([a, c], tmp_path / "f.xlsx", 50)
     assert path.exists()
+
+
+def test_supplier_portal_and_search_link():
+    from urllib.parse import unquote
+    from prime_contractor.makers import supplier_portal, supplier_search_url
+    assert supplier_portal("삼성전자 주식회사")[0].startswith("https://www.secbuy")
+    assert supplier_portal("(주)농심 안성공장") == ("", "")
+    url = unquote(supplier_search_url("(주)농심 안성공장"))
+    assert url.endswith("query=농심 협력사 등록")
