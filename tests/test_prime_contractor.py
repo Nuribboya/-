@@ -2828,7 +2828,7 @@ def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
     app.run_button = type("B", (), {"configure": lambda self, **k: None})()
     app.filter_boxes = [app.run_button] * 4
     monkeypatch.setattr(gui, "LAST_FACTORIES", tmp_path / "last.json")
-    app.only_listed = app.only_big = app.only_machines = app.only_investing = type(
+    app.only_listed = app.min_staff = app.only_machines = app.only_investing = type(
         "V", (), {"set": lambda self, v: None, "get": lambda self: False})()
     app._refresh_factories = lambda: calls.setdefault("refreshed", True)
     far_food = Candidate(name="먼식품", sector_weight=0.9, distance_km=60.0)

@@ -43,6 +43,9 @@ REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손�
 FACTORY_COLUMNS = (("#", 40), ("회사", 165), ("그룹", 115), ("분야", 105), ("경기", 50),
                    ("규모", 90), ("투자", 65), ("생산품", 180), ("지역", 50), ("거리", 50),
                    ("전화", 100))
+#: 공장 직원 수로 거르기. 100~300명 공장이 시설팀이 있어 판넬 물량이 꾸준하다.
+STAFF_CHOICES = {"직원 전체": 0, "직원 30명 이상": 30, "직원 50명 이상": 50,
+                 "직원 100명 이상": 100, "직원 300명 이상": 300}
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
 AUTOSAVE_MS = 60_000
 
@@ -232,21 +235,21 @@ class App:
                                   bootstyle="primary")
         self.run_button.pack(side=LEFT)
         self.only_listed = BooleanVar(value=True)       # 상장사 + 그 계열사
-        self.only_big = BooleanVar(value=False)
+        staff = saved.get("min_staff")
+        self.min_staff = StringVar(value=staff if staff in STAFF_CHOICES else "직원 100명 이상")
         self.only_machines = BooleanVar(value=False)
         self.only_investing = BooleanVar(value=False)
-        from prime_contractor.makers import MIN_AREA_M2, MIN_EMPLOYEES
         self.filter_boxes = [
             ttk.Checkbutton(buttons, variable=self.only_listed, text="상장사·계열사 공장만"),
-            ttk.Checkbutton(buttons, variable=self.only_big,
-                            text=f"규모 있는 곳만 ({MIN_EMPLOYEES}명+·{MIN_AREA_M2:,}㎡+)"),
+            ttk.Combobox(buttons, textvariable=self.min_staff, values=list(STAFF_CHOICES),
+                         state="readonly", width=14),
             ttk.Checkbutton(buttons, variable=self.only_machines, text="기계·장비 만드는 공장만"),
             ttk.Checkbutton(buttons, variable=self.only_investing, text="시설투자 공시 회사만"),
         ]
         for box_ in self.filter_boxes:
             box_.pack(side=LEFT, padx=(14, 0))
             box_.configure(state="disabled")
-        for var in (self.only_listed, self.only_big, self.only_machines, self.only_investing):
+        for var in (self.only_listed, self.min_staff, self.only_machines, self.only_investing):
             var.trace_add("write", lambda *_a: self._refresh_factories())
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
@@ -645,6 +648,7 @@ class App:
             "dart_key": self.dart_key.get(),
             "data_key": self.data_key.get(),
             "kakao_key": self.kakao_key.get(),
+            "min_staff": self.min_staff.get(),
             "distance": self.distance.get(),
             "factory_file": self.factory_file.get(),
             "sales_path": self.sales_path.get(),
@@ -1079,13 +1083,12 @@ class App:
         self.factories = sorted(factories, key=lambda c: (c.distance_km, c.name))
         self.factory_within = within
         self.filter_boxes[0].configure(state="normal" if knows_listed else "disabled")
-        self.filter_boxes[1].configure(state="normal" if can_size else "disabled")
+        self.filter_boxes[1].configure(state="readonly" if can_size else "disabled")
         self.filter_boxes[2].configure(state="normal")
         self.filter_boxes[3].configure(
             state="normal" if any(c.investment for c in factories) else "disabled")
         # 작은 공장은 수작업이 많아 판넬 수요가 적다 — 상장사·계열사 공장을 기본으로 본다.
         self.only_listed.set(knows_listed)
-        self.only_big.set(can_size and not knows_listed)
         self._refresh_factories()
         if not factories:
             messagebox.showinfo("공장 찾기", "거리 안에서 공장을 찾지 못했습니다.\n"
@@ -1095,8 +1098,8 @@ class App:
         bits = []
         if self.only_listed.get():
             bits.append("상장사·계열사 공장만")
-        if self.only_big.get():
-            bits.append("규모 있는 곳만")
+        if STAFF_CHOICES.get(self.min_staff.get()):
+            bits.append(self.min_staff.get())
         if self.only_machines.get():
             bits.append("기계·장비 만드는 공장만")
         if self.only_investing.get():
@@ -1105,10 +1108,11 @@ class App:
 
     def _refresh_factories(self) -> None:
         from collections import Counter
-        from prime_contractor.makers import is_sizable, size_text, steady_text
+        from prime_contractor.makers import size_text, steady_text
+        staff = STAFF_CHOICES.get(self.min_staff.get(), 0)
         self.shown = [c for c in self.factories
                       if (not self.only_listed.get() or c.stock_code or c.group)
-                      and (not self.only_big.get() or is_sizable(c))
+                      and c.employees >= staff        # 인원을 모르는 공장은 거를 때 뺀다
                       and (not self.only_machines.get() or c.kind == "maker")
                       and (not self.only_investing.get() or c.investment)]
         self.tree.delete(*self.tree.get_children())
