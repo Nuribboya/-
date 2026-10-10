@@ -647,8 +647,51 @@ def load_last_factories(path) -> tuple[list[Candidate], dict]:
         return [], {}
     for c in factories:
         c.sources = {"공장등록"}
-        # 거리 계산이 바뀌었을 수 있으니 저장된 값 대신 주소로 다시 잰다.
-        region, dist = distance_from_home(c.address)
-        if dist is not None:
-            c.region, c.distance_km = region, dist
+        # 번지 좌표로 잰 거리가 아니면, 거리 계산이 바뀌었을 수 있으니 주소로 다시 잰다.
+        if not data.get("precise"):
+            region, dist = distance_from_home(c.address)
+            if dist is not None:
+                c.region, c.distance_km = region, dist
     return factories, data
+
+
+#: 번지 좌표로 다시 잴 때, 읍·면·동 중심으로 잰 거리가 이만큼 넘어도 일단 후보로 둔다.
+REFINE_MARGIN_KM = 8.0
+
+
+def refine_distances(factories: list[Candidate], geocoder, within_km: float | None,
+                     progress=None, workers: int = 4) -> tuple[list[Candidate], int, str]:
+    """카카오 좌표로 공장마다 번지 단위 거리를 다시 잰다. (거리 안 공장, 정확히 잰 수, 멈춘 이유).
+
+    못 찾은 주소는 읍·면·동 중심 거리를 그대로 둔다. 키가 틀리면 그 자리에서 멈추고
+    나머지도 읍·면·동 거리로 둔다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from prime_contractor.geo import HOME_ADDRESS, HOME_COORD, haversine_km
+
+    stopped = ""
+    try:
+        home = geocoder.coord(HOME_ADDRESS) or HOME_COORD
+    except Exception as exc:                 # 키 오류 — 거리는 읍·면·동 기준 그대로
+        return ([c for c in factories if within_km is None or c.distance_km <= within_km],
+                0, str(exc))
+
+    def locate(c):
+        try:
+            return geocoder.coord(c.address)
+        except Exception as exc:
+            return exc
+
+    exact = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for i, (c, found) in enumerate(zip(factories, pool.map(locate, factories)), 1):
+            if isinstance(found, Exception):
+                stopped = stopped or str(found)
+            elif found:
+                c.distance_km = round(haversine_km(home, found), 1)
+                exact += 1
+            if progress and (i % 200 == 0 or i == len(factories)):
+                progress(i, len(factories))
+    kept = [c for c in factories if within_km is None or c.distance_km <= within_km]
+    return sorted(kept, key=lambda c: (c.distance_km, c.name)), exact, stopped
+

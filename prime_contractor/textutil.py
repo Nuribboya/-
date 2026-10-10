@@ -35,6 +35,9 @@ def clip(text: str, width: int) -> str:
 _SECRET_PARAM = re.compile(r"(?<![a-z_])((?:service_?key|crtfc_key|api_?key|key)=)[^&\s'\")]+", re.I)
 
 
+_KAKAO_HEADER = re.compile(r"(KakaoAK\s+)\S+")
+
+
 def redact_secrets(text: str) -> str:
     """주소 속 인증키 값을 '***'로 가린다."""
-    return _SECRET_PARAM.sub(r"\1***", str(text))
+    return _KAKAO_HEADER.sub(r"\1***", _SECRET_PARAM.sub(r"\1***", str(text)))

@@ -209,15 +209,21 @@ class App:
         ttk.Label(box, text="안성에서 얼마나").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
                      state="readonly", width=18).grid(row=2, column=1, sticky=W, pady=4)
-        ttk.Label(box, text="공장 목록 파일 (선택)").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
-        ttk.Entry(box, textvariable=self.factory_file, width=46).grid(
+        self.kakao_key = StringVar(value=saved.get("kakao_key", ""))
+        ttk.Label(box, text="카카오 키 (선택)").grid(row=3, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.kakao_key, width=46, show="•").grid(
             row=3, column=1, sticky=W, pady=4)
+        ttk.Label(box, text="developers.kakao.com — 넣으면 번지 단위 정확한 거리",
+                  foreground="#666").grid(row=3, column=2, sticky=W, padx=6)
+        ttk.Label(box, text="공장 목록 파일 (선택)").grid(row=4, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Entry(box, textvariable=self.factory_file, width=46).grid(
+            row=4, column=1, sticky=W, pady=4)
         ttk.Button(box, text="파일 찾기", command=self.on_pick_factory_file).grid(
-            row=3, column=2, sticky=W, padx=6)
+            row=4, column=2, sticky=W, padx=6)
         ttk.Label(box, foreground="#666", justify=LEFT, text=(
             "인증키 두 개만 넣으면 상장사·계열사 공장을 바로 찾아옵니다. 파일은 비워 두세요 — "
             "비상장 작은 공장까지 다 보고 싶을 때만 '전국등록공장현황' 파일을 고릅니다.")).grid(
-            row=4, column=0, columnspan=4, sticky=W, pady=(4, 0))
+            row=5, column=0, columnspan=4, sticky=W, pady=(4, 0))
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, padx=10)
@@ -635,6 +641,7 @@ class App:
         return {
             "dart_key": self.dart_key.get(),
             "data_key": self.data_key.get(),
+            "kakao_key": self.kakao_key.get(),
             "distance": self.distance.get(),
             "factory_file": self.factory_file.get(),
             "sales_path": self.sales_path.get(),
@@ -865,13 +872,44 @@ class App:
             dead_ticks += 1
         self.root.after(1000, self._watch, worker, started, dead_ticks)
 
+    def _coarse_within(self, cfg):
+        """번지 좌표로 다시 잴 거면 읍·면·동 거리로 미리 거를 때 여유를 둔다."""
+        from prime_contractor.makers import REFINE_MARGIN_KM
+        if cfg.within_km is None or not self.kakao_key.get().strip():
+            return cfg.within_km
+        return cfg.within_km + REFINE_MARGIN_KM
+
+    def _refine(self, factories, cfg):
+        """카카오 키가 있으면 공장마다 번지 단위로 거리를 다시 잰다. (공장들, 번지로 쟀는가)."""
+        from prime_contractor.makers import refine_distances
+        key = self.kakao_key.get().strip()
+        if not key:
+            return factories, False
+        if len(factories) > 5000:
+            self.say(f"공장이 {len(factories):,}곳이라 번지 단위 거리는 건너뜁니다(읍·면·동 기준).")
+            return [c for c in factories if cfg.within_km is None
+                    or c.distance_km <= cfg.within_km], False
+        from prime_contractor.sources.kakao_geo import KakaoGeocoder
+        geo = KakaoGeocoder(key, Path.home() / ".cache" / "prime_contractor")
+        self.say(f"공장 {len(factories)}곳의 정확한 위치를 카카오 지도로 찾습니다 "
+                 "(처음 한 번만 몇 분, 다음부터는 저장해 둔 걸 씁니다)…")
+        kept, exact, stopped = refine_distances(
+            factories, geo, cfg.within_km,
+            progress=lambda done, total: self.say(f"  위치 확인 {done}/{total}"))
+        geo.save()
+        if stopped:
+            self.say(f"⚠ {redact_secrets(stopped)}")
+        self.say(f"  {exact}곳은 번지 단위로, 나머지는 읍·면·동 중심으로 거리를 쟀습니다.")
+        return kept, exact > 0
+
     def _load_factories(self, path: str, cfg) -> None:
         from prime_contractor.makers import (
             build_group_map, find_factories, has_size_columns, listed_names,
             mark_dart_registered, mark_groups, read_factory_file)
         try:
             records = read_factory_file(path)
-            factories = find_factories(records, within_km=cfg.within_km)
+            factories = find_factories(records, within_km=self._coarse_within(cfg))
+            factories, precise = self._refine(factories, cfg)
         except (OSError, ValueError) as exc:
             self.root.after(0, self._factories_failed, str(exc))
             return
@@ -910,7 +948,7 @@ class App:
         self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외). "
                  "연락은 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 하세요.")
         self.root.after(0, self._factories_loaded, factories, cfg.within_km,
-                        sized or knows_listed, knows_listed)
+                        sized or knows_listed, knows_listed, True, precise)
 
     def _load_factories_by_key(self, data_key: str, cfg) -> None:
         """파일 없이: 상장사(제조업)·계열사 이름으로 공장등록 API 를 물어 공장을 모은다."""
@@ -989,7 +1027,8 @@ class App:
                 self.say("공장 칸을 못 읽었습니다. 받은 칸 이름: " + ", ".join(api.sample_keys))
             if not records and not stopped:
                 raise RuntimeError("공장을 하나도 받지 못했습니다. 이 창과 진행 기록을 캡처해 보내 주세요.")
-            factories = find_factories(records, within_km=cfg.within_km)
+            factories = find_factories(records, within_km=self._coarse_within(cfg))
+            factories, precise = self._refine(factories, cfg)
             registered, on_market = mark_dart_registered(
                 factories, dart.corp_index, listed_names(listed))
             mark_groups(factories, group_map, listed, cfg.incumbent)
@@ -998,7 +1037,8 @@ class App:
             return
         self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외, "
                  f"상장사 공장 {on_market}곳). 연락은 그 공장 시설팀·공무팀에 하세요.")
-        self.root.after(0, self._factories_loaded, factories, cfg.within_km, True, True)
+        self.root.after(0, self._factories_loaded, factories, cfg.within_km, True, True, True,
+                        precise)
 
     def _factories_failed(self, message: str) -> None:
         self.running = False
@@ -1007,14 +1047,15 @@ class App:
         messagebox.showerror("공장 목록을 읽지 못했습니다", message)
 
     def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool,
-                          save: bool = True) -> None:
+                          save: bool = True, precise: bool = False) -> None:
         self.running = False
         self.run_button.configure(state="normal")
         if save:
             from prime_contractor.makers import save_last_factories
             try:
                 save_last_factories(LAST_FACTORIES, factories, within=within,
-                                    can_size=can_size, knows_listed=knows_listed)
+                                    can_size=can_size, knows_listed=knows_listed,
+                                    precise=precise)
             except OSError:
                 pass
         # 가까운 순. 적합도 점수는 아직 없다 — 거리로만 줄 세운다.

@@ -3009,3 +3009,63 @@ def test_merged_jeonnam_gwangju_is_not_gyeonggi_gwangju():
     assert distance_from_home("경기도 광주시 오포읍 1")[1] < 70
     from prime_contractor.makers import in_far_province
     assert in_far_province("전남광주통합특별시 화순군 화순읍")
+
+
+class _KakaoResp:
+    def __init__(self, status, docs=()):
+        self.status_code, self._docs = status, list(docs)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise __import__("requests").HTTPError(str(self.status_code))
+
+    def json(self):
+        return {"documents": self._docs}
+
+
+def test_kakao_geocoder_cleans_caches_and_refines(tmp_path):
+    from prime_contractor.makers import refine_distances
+    from prime_contractor.models import Candidate
+    from prime_contractor.sources.kakao_geo import KakaoGeocoder, clean_address
+    assert clean_address("경기도 안성시 미양면 안성맞춤대로 474-22 (총 2 필지)") == \
+        "경기도 안성시 미양면 안성맞춤대로 474-22"
+    assert clean_address("충남 영암군 삼호읍 자유무역로 194, 표준공장F동 1층") == "충남 영암군 삼호읍 자유무역로 194"
+    places = {"경기도 안성시 미양면 신두만곡로 903-25": (36.97, 127.22),
+              "경기도 평택시 고덕면 삼성로 114": (37.02, 127.05)}
+    calls = []
+
+    class S:
+        def get(self, url, params=None, headers=None, timeout=None):
+            calls.append(params["query"])
+            assert headers["Authorization"] == "KakaoAK k"
+            hit = places.get(params["query"])
+            return _KakaoResp(200, [{"y": str(hit[0]), "x": str(hit[1])}] if hit else [])
+
+    geo = KakaoGeocoder("k", tmp_path, session=S())
+    near = Candidate(name="삼성", address="경기도 평택시 고덕면 삼성로 114", distance_km=19.0)
+    lost = Candidate(name="모름", address="어딘가 1", distance_km=12.0)
+    far = Candidate(name="먼곳", address="경기도 평택시 고덕면 삼성로 114", distance_km=60.0)
+    kept, exact, stopped = refine_distances([near, lost, far], geo, 50, workers=1)
+    assert exact == 2 and not stopped
+    assert 15 < near.distance_km < 18 and lost.distance_km == 12.0     # 못 찾으면 그대로
+    assert [c.name for c in kept] == ["모름", "먼곳", "삼성"]   # 먼곳도 번지로 재 보니 가까웠다
+    geo.save()
+    n = len(calls)
+    again = KakaoGeocoder("k", tmp_path, session=S())
+    assert again.coord("경기도 평택시 고덕면 삼성로 114 (공장)") == (37.02, 127.05) and len(calls) == n
+
+
+def test_kakao_bad_key_falls_back_to_town_distance(tmp_path):
+    from prime_contractor.makers import refine_distances
+    from prime_contractor.models import Candidate
+    from prime_contractor.sources.kakao_geo import KakaoGeocoder
+
+    class S:
+        def get(self, *a, **k):
+            return _KakaoResp(401)
+
+    c = Candidate(name="a", address="경기도 평택시 고덕면 1", distance_km=19.0)
+    kept, exact, stopped = refine_distances([c], KakaoGeocoder("bad", tmp_path, session=S()), 50)
+    assert kept == [c] and exact == 0 and "카카오" in stopped
+    from prime_contractor.textutil import redact_secrets
+    assert "secret" not in redact_secrets("Authorization: KakaoAK secret123")
