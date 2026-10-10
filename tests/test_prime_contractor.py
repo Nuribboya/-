@@ -3200,3 +3200,14 @@ def test_search_needs_keys_or_file(tmp_path):
     assert "인증키" in SearchOptions().problem()
     assert "파일" in SearchOptions(factory_file=str(tmp_path / "없음.csv")).problem()
     assert SearchOptions(data_key="a", dart_key="b").problem() == ""
+
+
+def test_assembly_rnd_and_mold_only_plants_are_left_out():
+    from prime_contractor.makers import classify
+    for products in ("휴대폰 케이스", "배터리팩", "안테나류,필터류,LED조명장치", "신용카드",
+                     "영수증 프린터", "데스크탑컴퓨터", "자동차 시트 커버", "의치제조",
+                     "기업부설연구소(PCB연구개발)", "금형", "주형,금형", "전자의료기기"):
+        assert classify(products)[0] == "", products
+    for products in ("금형,조향장치,콤프레셔", "잉크렛 프린터 외", "X-RAY 의료기기",
+                     "반도체 제조용 기계", "라면"):
+        assert classify(products)[0], products

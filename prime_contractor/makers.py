@@ -81,7 +81,19 @@ LOW_DEMAND_WORDS = ("의류", "의복", "봉제", "셔츠", "니트", "속옷", 
                     "부품조립", "전자부품조립", "수작업", "수공", "핸드메이드", "공예",
                     "진단키트", "진단 키트", "체외진단", "진단시약", "진단용시약", "검사용시약",
                     "수술도구", "수술기구", "의료용니들", "주사기", "거즈", "면봉",
-                    "마스크팩", "보건용마스크", "보호구", "보호복", "안전용덧옷", "소분")
+                    "마스크팩", "보건용마스크", "보호구", "보호복", "안전용덧옷", "소분",
+                    # 부품을 사다 사람이 조립하는 전자·통신·사무기기 — 라인 설비가 적다.
+                    "휴대폰 케이스", "휴대폰용 모듈", "메모리카드", "배터리팩", "신용카드",
+                    "안테나", "중계기", "무전기", "드론", "송수신기", "무선통신장비",
+                    "영수증 프린터", "데스크탑", "마우스", "메모리 저장장치", "SSD",
+                    "금융자동화", "전자칠판", "조명기구",
+                    # 사람이 꿰매거나 손으로 만드는 의료·내장재
+                    "시트커버", "시트 커버", "의치", "의료용기구", "의료용기기", "전자의료기기",
+                    "미용의료기기", "스텐트", "스텐드", "체성분",
+                    # 생산 라인이 없는 연구소·설계 용역
+                    "연구개발", "연구소", "연구용역")
+#: 생산품이 이것뿐이면 금형 가게 — CNC 에 제어반이 딸려 와 따로 맡길 일이 적다.
+_MOLD_ONLY = re.compile(r"^(금형|주형|금형제조|금형설계|정밀금형|프레스금형|사출금형|[,·\s])+$")
 #: 공장등록에 섞여 나오는 공장 아닌 일 — 임대·소프트웨어·광고 등. 판넬 수요가 없다.
 NOT_MANUFACTURING = re.compile(r"(^\s*창고\s*$|임대|소프트웨어|S/W|\bSW\b|컨설팅|광고|콜센터|마케팅|게임|"
                                r"교육|부동산|플랫폼|엔지니어링\s*서비스|대행)", re.I)
@@ -124,7 +136,8 @@ def classify(products: str, industry: str = "") -> tuple[str, bool, float]:
     for field, words in MACHINE_FIELDS:
         if any(w in text for w in words):
             return field, True, MACHINE_STEADY
-    if any(w in text for w in LOW_DEMAND_WORDS) or NOT_MANUFACTURING.search(text):
+    if (any(w in text for w in LOW_DEMAND_WORDS) or NOT_MANUFACTURING.search(text)
+            or _MOLD_ONLY.match((products or "").strip())):
         return "", False, 0.0
     for field, words, steady in PLANT_FIELDS:
         if any(w in text for w in words):
