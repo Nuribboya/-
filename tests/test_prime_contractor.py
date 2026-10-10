@@ -31,8 +31,22 @@ def test_gwangju_disambiguated_by_province():
 
 
 def test_distance_from_anseong_is_zero():
-    region, dist = distance_from_home("경기도 안성시 공도읍")
-    assert region == "안성" and dist == 0.0
+    region, dist = distance_from_home("경기도 안성시 미양면 신두만곡로 903-25")
+    assert region == "안성" and dist == 0.0              # 우리 공장(미양면)
+
+
+def test_distance_uses_town_and_district_not_just_city():
+    _, gongdo = distance_from_home("경기도 안성시 공도읍 서동대로 1")
+    _, juksan = distance_from_home("경기도 안성시 죽산면 용대길 38-9")
+    assert 3 < gongdo < 8 and 15 < juksan < 25            # 같은 안성시라도 다르다
+    _, poseung = distance_from_home("경기도 평택시 포승읍 2")
+    _, godeok = distance_from_home("경기도 평택시 고덕면 삼성로 114")
+    assert godeok < poseung                               # 같은 평택시라도 다르다
+    _, yeongtong = distance_from_home("경기도 수원시 영통구 삼성로 129")   # 동 없으면 구 중심점
+    _, city_only = distance_from_home("수원")
+    assert yeongtong != city_only
+    _, dong = distance_from_home("경기도 수원시 영통구 매탄3동 416")
+    assert dong != yeongtong
 
 
 def test_haversine_known_distance():
@@ -2905,7 +2919,7 @@ def test_factory_queries_skip_minor_and_non_factory_affiliates_and_go_near_first
     info["C"] = {"adres": "서울특별시 동작구"}
     info["D"] = {"adres": "경기도 광주시 오포읍"}
     near, far, dropped = near_first([("부산회사", "A", "1"), ("평택회사", "B", "2"),
-                                     ("서울회사", "C", "3"), ("광주회사", "D", "4")], info.get, 50)
+                                     ("서울회사", "C", "3"), ("광주회사", "D", "4")], info.get, 60)
     assert [r[0] for r in near] == ["평택회사", "광주회사"]   # 가까운 순
     assert [r[0] for r in far] == ["서울회사"]
     assert dropped == 1                                   # 부산 본사만 뺀다(경기 광주는 아님)
@@ -2950,7 +2964,8 @@ def test_last_factories_survive_restart(tmp_path):
                   employees=500, stock_code="004370", group="농심", sector="식품·음료")
     save_last_factories(tmp_path / "last.json", [c], within=70, can_size=True, knows_listed=True)
     back, meta = load_last_factories(tmp_path / "last.json")
-    assert back[0].name == c.name and back[0].distance_km == 3.2 and back[0].stock_code == "004370"
+    assert back[0].name == c.name and back[0].stock_code == "004370"
+    assert back[0].distance_km == distance_from_home("경기도 안성시")[1]   # 주소로 다시 잰다
     assert meta["within"] == 70 and meta["knows_listed"] is True
     assert load_last_factories(tmp_path / "없음.json") == ([], {})
 
@@ -2986,3 +3001,11 @@ def test_fields_from_real_listing_mistakes():
     assert classify("화장품 충전기계, 포장기")[0] == "포장·충진기계"
     assert classify("보일러, 온수기, 전기오븐")[0] == "열·공조설비"
     assert classify("창고")[0] == ""
+
+
+def test_merged_jeonnam_gwangju_is_not_gyeonggi_gwangju():
+    region, dist = distance_from_home("전남광주통합특별시 나주시 왕곡면 덕산리 817-6번지")
+    assert dist > 150
+    assert distance_from_home("경기도 광주시 오포읍 1")[1] < 70
+    from prime_contractor.makers import in_far_province
+    assert in_far_province("전남광주통합특별시 화순군 화순읍")

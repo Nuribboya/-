@@ -405,7 +405,7 @@ def affiliate_names(listed_companies, fetch, min_ratio: float = 0.0) -> list[str
 
 #: 안성에서 멀어 영업 범위 밖인 도. 본사가 여기면 공장도 대개 그 지역이라 묻지 않는다.
 #: '광주'는 경기도 광주시와 헷갈리므로 '광주광역시'로만 본다.
-FAR_PROVINCES = ("전라", "전북", "전남", "광주광역시", "강원", "경상", "경북", "경남",
+FAR_PROVINCES = ("전라", "전북", "전남", "광주광역시", "전남광주", "강원", "경상", "경북", "경남",
                  "부산", "대구", "울산", "제주")
 
 
@@ -647,4 +647,8 @@ def load_last_factories(path) -> tuple[list[Candidate], dict]:
         return [], {}
     for c in factories:
         c.sources = {"공장등록"}
+        # 거리 계산이 바뀌었을 수 있으니 저장된 값 대신 주소로 다시 잰다.
+        region, dist = distance_from_home(c.address)
+        if dist is not None:
+            c.region, c.distance_km = region, dist
     return factories, data

@@ -10,7 +10,10 @@ import math
 import re
 
 HOME_CITY = "안성"
-HOME_COORD = (37.0078, 127.2797)  # 안성시청
+#: 우리 공장: 경기 안성시 미양면 신두만곡로 903-25. 번지 좌표를 확인하지 못해 미양면 중심점을
+#: 쓴다(오차 2~3km 안). 거리는 모두 여기서 잰 직선거리다.
+HOME_ADDRESS = "경기도 안성시 미양면 신두만곡로 903-25"
+HOME_COORD = (36.9694, 127.2246)
 
 #: 시군구 대표 좌표. 안성 기준 납품권(경기 남부·충청)을 촘촘히, 나머지는 대표 도시만.
 CITY_COORDS: dict[str, tuple[float, float]] = {
@@ -45,7 +48,10 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
 }
 
 #: '광주'가 경기/광역시로 갈리는 등 동음 지명은 앞 광역시도로 구분한다.
-_PROVINCE_HINTS = {"광주광역시": "광주광역", "전라남도": "광주광역", "광주시": "광주"}
+#: 2026-07 부터 광주광역시·전라남도는 '전남광주통합특별시' — '광주'만 보고 경기 광주시로
+#: 읽으면 나주·화순 공장이 47km 로 둔갑한다.
+_PROVINCE_HINTS = {"전남광주": "광주광역", "광주광역시": "광주광역", "전라남도": "광주광역",
+                   "광주시": "광주"}
 
 _CITY_RE = re.compile(r"([가-힣]{2,4})(?:특별시|광역시|특별자치시|특별자치도|시|군)(?![가-힣])")
 
@@ -88,7 +94,7 @@ def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
 _FAR_PROVINCES: tuple[tuple[tuple[str, ...], str, tuple[float, float]], ...] = (
     (("경상남도", "경남 "), "경남", (35.2378, 128.6919)),
     (("경상북도", "경북 "), "경북", (36.5760, 128.5056)),
-    (("전라남도", "전남 "), "전남", (34.8161, 126.4629)),
+    (("전라남도", "전남 ", "전남광주"), "전남", (34.8161, 126.4629)),
     (("전라북도", "전북특별자치도", "전북 "), "전북", (35.8203, 127.1088)),
     (("강원도", "강원특별자치도", "강원 "), "강원", (37.6970, 127.8880)),
     (("제주특별자치도", "제주도"), "제주", (33.4996, 126.5312)),
@@ -106,6 +112,34 @@ _ORG_PROVINCE_RE = re.compile(
     r"(?:지역본부|본부|지사|지부|사업단|사업본부|개발공사|도청|광역시|특별자치)")
 
 
+_DONG_TOKEN = re.compile(r"([가-힣0-9]+(?:읍|면|동|가))(?![가-힣])")
+_GU_TOKEN = re.compile(r"([가-힣]+구)(?![가-힣])")
+
+
+def _fine_coord(region: str, address: str) -> tuple[float, float] | None:
+    """주소에 읍·면·동이 있으면 그 중심점, 없으면 구 중심점. 둘 다 없으면 None(시 좌표를 쓴다)."""
+    from prime_contractor.dong_coords import DONG, DOWNTOWN, GU
+    dongs, gus = DONG.get(region), GU.get(region, {})
+    if not dongs or not address:
+        return None
+    # 괄호 안('(총 2 필지)', '(삼성동)')은 참고 표기라 뒤로 미룬다.
+    main, _, rest = address.partition("(")
+    for text in (main, rest):
+        for token in _DONG_TOKEN.findall(text):
+            plain = re.sub(r"제?\d+(?=[동가]$)", "", token)
+            # 면이 읍으로 바뀐 곳('덕산면' → '덕산읍')도 받아 준다.
+            for key in (token, plain, token[:-1] + "읍", token[:-1] + "면"):
+                if key in dongs:
+                    return dongs[key]
+    for token in _GU_TOKEN.findall(main):
+        if token in gus:
+            return gus[token]
+    # 표에 없는 법정동('(신소현동)')이면 그 시의 시내(동 지역) 중심.
+    if any(t.endswith("동") for t in _DONG_TOKEN.findall(address)) and region in DOWNTOWN:
+        return DOWNTOWN[region]
+    return None
+
+
 def distance_from_home(address_or_region: str,
                        company_name: bool = False) -> tuple[str, float | None]:
     """주소(또는 지역명)로 (시군구, 안성으로부터의 거리 km)를 돌려준다.
@@ -119,7 +153,8 @@ def distance_from_home(address_or_region: str,
     else:
         region = extract_region(address_or_region, loose=not company_name)
     if region:
-        return region, round(haversine_km(HOME_COORD, CITY_COORDS[region]), 1)
+        coord = None if company_name else _fine_coord(region, address_or_region)
+        return region, round(haversine_km(HOME_COORD, coord or CITY_COORDS[region]), 1)
     text = address_or_region or ""
     if company_name:
         return "", None
