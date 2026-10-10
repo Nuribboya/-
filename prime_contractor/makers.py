@@ -651,7 +651,8 @@ def load_last_factories(path) -> tuple[list[Candidate], dict]:
     except (OSError, ValueError, KeyError, TypeError):
         return [], {}
     # 거르는 기준(수작업·공장 아닌 곳 등)이 바뀌었을 수 있으니 저장된 것도 다시 거른다.
-    factories = [c for c in factories if classify(c.products, c.industry_name)[0]]
+    factories = [c for c in factories if not (c.products or c.industry_name)
+                 or classify(c.products, c.industry_name)[0]]
     for c in factories:
         c.sources = {"공장등록"}
         # 번지 좌표로 잰 거리가 아니면, 거리 계산이 바뀌었을 수 있으니 주소로 다시 잰다.
