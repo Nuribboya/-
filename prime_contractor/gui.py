@@ -40,8 +40,9 @@ SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
 REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
                   ("판정", 520))
-FACTORY_COLUMNS = (("#", 40), ("회사", 175), ("그룹", 125), ("분야", 115), ("경기", 55),
-                   ("규모", 95), ("생산품", 190), ("지역", 55), ("거리", 50), ("전화", 100))
+FACTORY_COLUMNS = (("#", 40), ("회사", 165), ("그룹", 115), ("분야", 105), ("경기", 50),
+                   ("규모", 90), ("투자", 65), ("생산품", 180), ("지역", 50), ("거리", 50),
+                   ("전화", 100))
 #: 입력 칸을 이 간격(밀리초)마다 조용히 저장한다. 창을 닫을 때도 한 번 더 저장한다.
 AUTOSAVE_MS = 60_000
 
@@ -233,17 +234,19 @@ class App:
         self.only_listed = BooleanVar(value=True)       # 상장사 + 그 계열사
         self.only_big = BooleanVar(value=False)
         self.only_machines = BooleanVar(value=False)
+        self.only_investing = BooleanVar(value=False)
         from prime_contractor.makers import MIN_AREA_M2, MIN_EMPLOYEES
         self.filter_boxes = [
             ttk.Checkbutton(buttons, variable=self.only_listed, text="상장사·계열사 공장만"),
             ttk.Checkbutton(buttons, variable=self.only_big,
-                            text=f"규모 있는 곳만 (직원 {MIN_EMPLOYEES}명+·{MIN_AREA_M2:,}㎡+·금감원 등록)"),
+                            text=f"규모 있는 곳만 ({MIN_EMPLOYEES}명+·{MIN_AREA_M2:,}㎡+)"),
             ttk.Checkbutton(buttons, variable=self.only_machines, text="기계·장비 만드는 공장만"),
+            ttk.Checkbutton(buttons, variable=self.only_investing, text="시설투자 공시 회사만"),
         ]
         for box_ in self.filter_boxes:
             box_.pack(side=LEFT, padx=(14, 0))
             box_.configure(state="disabled")
-        for var in (self.only_listed, self.only_big, self.only_machines):
+        for var in (self.only_listed, self.only_big, self.only_machines, self.only_investing):
             var.trace_add("write", lambda *_a: self._refresh_factories())
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
@@ -872,6 +875,18 @@ class App:
             dead_ticks += 1
         self.root.after(1000, self._watch, worker, started, dead_ticks)
 
+    def _mark_investments(self, factories, dart) -> None:
+        """상장사 공장에 최근 시설투자 공시를 붙인다 — 라인을 늘리는 회사 = 판넬 일이 곧 나올 곳."""
+        from prime_contractor.makers import mark_investments
+        self.say("상장사들의 최근 2년 시설투자 공시를 확인합니다 (처음엔 몇 분, 일주일 동안 저장)…")
+        count, stopped = mark_investments(
+            factories, dart.facility_notices,
+            progress=lambda done, total: self.say(f"  투자 공시 확인 {done}/{total}"))
+        dart.save_notice_cache()
+        if stopped:
+            self.say(f"⚠ {stopped}")
+        self.say(f"  최근 시설투자 공시가 있는 회사 {count}곳 — '투자' 칸에 날짜가 붙습니다.")
+
     def _coarse_within(self, cfg):
         """번지 좌표로 다시 잴 거면 읍·면·동 거리로 미리 거를 때 여유를 둔다."""
         from prime_contractor.makers import REFINE_MARGIN_KM
@@ -937,6 +952,7 @@ class App:
                     progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
                 dart.save_investment_cache()
                 tagged = mark_groups(factories, group_map, listed, cfg.incumbent)
+                self._mark_investments(factories, dart)
                 affiliates = sum(1 for c in factories if c.group.endswith(" 계열"))
                 self.say(f"상장사 계열사 공장 {affiliates}곳을 더 찾았습니다 "
                          f"(그룹이 붙은 공장 모두 {tagged}곳).")
@@ -1032,6 +1048,7 @@ class App:
             registered, on_market = mark_dart_registered(
                 factories, dart.corp_index, listed_names(listed))
             mark_groups(factories, group_map, listed, cfg.incumbent)
+            self._mark_investments(factories, dart)
         except Exception as exc:
             self.root.after(0, self._factories_failed, redact_secrets(exc))
             return
@@ -1064,6 +1081,8 @@ class App:
         self.filter_boxes[0].configure(state="normal" if knows_listed else "disabled")
         self.filter_boxes[1].configure(state="normal" if can_size else "disabled")
         self.filter_boxes[2].configure(state="normal")
+        self.filter_boxes[3].configure(
+            state="normal" if any(c.investment for c in factories) else "disabled")
         # 작은 공장은 수작업이 많아 판넬 수요가 적다 — 상장사·계열사 공장을 기본으로 본다.
         self.only_listed.set(knows_listed)
         self.only_big.set(can_size and not knows_listed)
@@ -1080,6 +1099,8 @@ class App:
             bits.append("규모 있는 곳만")
         if self.only_machines.get():
             bits.append("기계·장비 만드는 공장만")
+        if self.only_investing.get():
+            bits.append("시설투자 공시 회사만")
         return ", ".join(bits)
 
     def _refresh_factories(self) -> None:
@@ -1088,12 +1109,14 @@ class App:
         self.shown = [c for c in self.factories
                       if (not self.only_listed.get() or c.stock_code or c.group)
                       and (not self.only_big.get() or is_sizable(c))
-                      and (not self.only_machines.get() or c.kind == "maker")]
+                      and (not self.only_machines.get() or c.kind == "maker")
+                      and (not self.only_investing.get() or c.investment)]
         self.tree.delete(*self.tree.get_children())
         for i, c in enumerate(self.shown, 1):
             self.tree.insert("", END, iid=str(i), values=(
                 i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
-                c.products, c.region, f"{c.distance_km:.0f}km", c.phone or "-"))
+                c.investment[:7] or "-", c.products, c.region, f"{c.distance_km:.0f}km",
+                c.phone or "-"))
         if not self.factories:
             self.status.configure(text="준비됨")
             return

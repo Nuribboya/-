@@ -2826,8 +2826,9 @@ def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
     calls = {}
     app.running = True
     app.run_button = type("B", (), {"configure": lambda self, **k: None})()
-    app.filter_boxes = [app.run_button] * 3
-    app.only_listed = app.only_big = app.only_machines = type(
+    app.filter_boxes = [app.run_button] * 4
+    monkeypatch.setattr(gui, "LAST_FACTORIES", tmp_path / "last.json")
+    app.only_listed = app.only_big = app.only_machines = app.only_investing = type(
         "V", (), {"set": lambda self, v: None, "get": lambda self: False})()
     app._refresh_factories = lambda: calls.setdefault("refreshed", True)
     far_food = Candidate(name="먼식품", sector_weight=0.9, distance_km=60.0)
@@ -3078,3 +3079,47 @@ def test_hand_work_plants_are_left_out():
         assert classify(products)[0] == "", products
     assert classify("자동차부품조립용 볼트 외")[0]          # 볼트 공장은 기계로 찍는다
     assert classify("X-RAY 의료기기")[0]                      # 장비형 의료기기는 남긴다
+
+
+def test_facility_investment_notices_are_marked(tmp_path):
+    from datetime import date
+    from prime_contractor.makers import mark_investments, write_factories_xlsx
+    from prime_contractor.models import Candidate
+    from prime_contractor.sources.dart import DartClient
+
+    calls = []
+
+    class Resp:
+        def __init__(self, payload):
+            self.payload = payload
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return self.payload
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            calls.append(params["corp_code"])
+            if params["corp_code"] == "N1":
+                return Resp({"status": "000", "total_page": 1, "list": [
+                    {"report_nm": "신규시설투자등", "rcept_dt": "20260512", "rcept_no": "2026051200001"},
+                    {"report_nm": "[기재정정]유형자산취득결정", "rcept_dt": "20250303", "rcept_no": "2"},
+                    {"report_nm": "분기보고서 (2026.06)", "rcept_dt": "20260814", "rcept_no": "3"}]})
+            return Resp({"status": "013", "message": "조회된 데이타가 없습니다."})
+
+    dart = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
+    rows = dart.facility_notices("N1", today=date(2026, 10, 11))
+    assert [r["date"] for r in rows] == ["2026-05-12", "2025-03-03"]     # 분기보고서는 아님
+    a = Candidate(name="(주)농심 안성공장", corp_code="N1", stock_code="004370", distance_km=5)
+    b = Candidate(name="(주)농심 구미공장", corp_code="N1", stock_code="004370", distance_km=9)
+    c = Candidate(name="오뚜기", corp_code="O1", stock_code="007310", distance_km=9)
+    d = Candidate(name="비상장", corp_code="X1", distance_km=9)     # 거래소 공시 대상 아님
+    count, stopped = mark_investments([a, b, c, d], dart.facility_notices, workers=1)
+    assert count == 1 and not stopped and "X1" not in calls
+    assert a.investment == "2026-05 신규시설투자등" == b.investment and not c.investment
+    dart.save_notice_cache()
+    again = DartClient("k", cache_dir=tmp_path, sleep_sec=0, session=Session())
+    n = len(calls)
+    assert again.facility_notices("N1") and len(calls) == n               # 캐시
+    path = write_factories_xlsx([a, c], tmp_path / "f.xlsx", 50)
+    assert path.exists()

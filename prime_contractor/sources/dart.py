@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import threading
 import time
 from datetime import date
@@ -30,6 +31,12 @@ COMPANY_URL = "https://opendart.fss.or.kr/api/company.json"
 #: 정기보고서 '타법인 출자현황' — 이 회사가 지분을 가진 회사들(자회사·계열사 찾기에 쓴다).
 INVEST_URL = "https://opendart.fss.or.kr/api/otrCprInvstmntSttus.json"
 ANNUAL_REPORT = "11011"
+#: 공시 목록 검색. 상장사가 공장·라인에 돈을 넣으면 '신규시설투자등'(거래소 공시)이나
+#: '유형자산취득결정'(주요사항보고)을 낸다 — 판넬 일이 곧 나올 회사라는 신호.
+LIST_URL = "https://opendart.fss.or.kr/api/list.json"
+FACILITY_WORDS = ("신규시설투자", "시설투자", "유형자산취득", "유형자산 취득")
+#: 시설투자 공시를 다시 확인하는 간격(일).
+NOTICE_REFRESH_DAYS = 7
 #: 출자현황 한 번에 기다리는 최대 초. DART 가 느려지면 30초씩 4천 번 기다리게 된다.
 INVEST_TIMEOUT = 10.0
 DEFAULT_CACHE = Path.home() / ".cache" / "prime_contractor"
@@ -227,6 +234,66 @@ class DartClient:
     def cached_investments(self, corp_code: str) -> list[dict]:
         """이미 받아 둔 출자현황만 — 인터넷에 묻지 않는다(못 받은 곳은 빈 목록)."""
         return self._invest().get(corp_code, [])
+
+    # --- 시설투자 공시 ---------------------------------------------------------
+
+    def _notices(self) -> dict:
+        if getattr(self, "_notice_cache", None) is None:
+            path = self.cache_dir / "facility_notices.json"
+            try:
+                self._notice_cache = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self._notice_cache = {}
+        return self._notice_cache
+
+    def facility_notices(self, corp_code: str, today: date | None = None,
+                         months: int = 24) -> list[dict]:
+        """최근 시설투자 공시 [{date, title, rcept_no}] (새것 먼저). 7일 동안 캐시."""
+        from datetime import timedelta
+        today = today or date.today()
+        cache = self._notices()
+        with self._invest_lock:
+            hit = cache.get(corp_code)
+        if hit and date.fromisoformat(hit["at"]) >= today - timedelta(days=NOTICE_REFRESH_DAYS):
+            return hit["rows"]
+        if self.invest_stopped:
+            raise DartError(self.invest_stopped)
+        session = self._thread_session()
+        begin = today - timedelta(days=months * 31)
+        rows: list[dict] = []
+        for page in range(1, 6):
+            resp = session.get(LIST_URL, params={
+                "crtfc_key": self.key, "corp_code": corp_code, "bgn_de": f"{begin:%Y%m%d}",
+                "end_de": f"{today:%Y%m%d}", "page_no": str(page), "page_count": "100"},
+                timeout=min(self.timeout, INVEST_TIMEOUT))
+            resp.raise_for_status()
+            time.sleep(self.sleep_sec)
+            data = resp.json()
+            status = data.get("status")
+            if status == "013":
+                break
+            if status == "020":
+                self.invest_stopped = "DART 하루 요청 한도를 넘었습니다 — 내일 다시 누르면 이어서 확인합니다."
+                raise DartError(self.invest_stopped)
+            if status != "000":
+                raise DartError(f"{corp_code}: {status} {data.get('message')}")
+            for item in data.get("list") or []:
+                title = re.sub(r"\s+", " ", item.get("report_nm") or "").strip()
+                if any(w in title for w in FACILITY_WORDS) and "철회" not in title:
+                    d = item.get("rcept_dt") or ""
+                    rows.append({"date": f"{d[:4]}-{d[4:6]}-{d[6:8]}", "title": title,
+                                 "rcept_no": item.get("rcept_no", "")})
+            if page >= int(data.get("total_page") or 1):
+                break
+        rows.sort(key=lambda r: r["date"], reverse=True)
+        with self._invest_lock:
+            cache[corp_code] = {"at": today.isoformat(), "rows": rows}
+        return rows
+
+    def save_notice_cache(self) -> None:
+        with self._invest_lock:
+            (self.cache_dir / "facility_notices.json").write_text(
+                json.dumps(self._notices(), ensure_ascii=False), encoding="utf-8")
 
     def save_investment_cache(self) -> None:
         with self._invest_lock:

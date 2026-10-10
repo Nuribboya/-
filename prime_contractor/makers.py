@@ -510,6 +510,40 @@ def collect_by_name(queries: list[str], fetch, progress=None, workers: int = 4,
     return records, stopped
 
 
+def mark_investments(factories: list[Candidate], fetch, progress=None,
+                     workers: int = 4) -> tuple[int, str]:
+    """상장사 공장마다 최근 시설투자 공시를 붙인다. (붙인 회사 수, 멈춘 이유).
+
+    fetch(corp_code) → [{date, title, rcept_no}] (새것 먼저). 회사마다 한 번만 묻는다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    codes = sorted({c.corp_code for c in factories if c.corp_code and c.stock_code})
+    found: dict[str, dict] = {}
+    stopped = ""
+
+    def one(code):
+        try:
+            return code, fetch(code), ""
+        except Exception as exc:                 # 한 곳 실패로 멈추지 않는다
+            return code, [], str(exc)
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for i, (code, rows, err) in enumerate(pool.map(one, codes), 1):
+            if rows:
+                found[code] = rows[0]
+            if err and "한도" in err:
+                stopped = err
+            if progress and (i % 100 == 0 or i == len(codes)):
+                progress(i, len(codes))
+    for c in factories:
+        hit = found.get(c.corp_code)
+        if hit:
+            title = re.sub(r"^\[[^]]*\]\s*", "", hit["title"])
+            c.investment, c.investment_no = f"{hit['date'][:7]} {title}", hit["rcept_no"]
+    return len(found), stopped
+
+
 def is_sizable(c: Candidate) -> bool:
     """규모 있는 공장인가 — 종업원·면적 기준을 넘거나 DART 등록 회사."""
     return (c.employees >= MIN_EMPLOYEES or c.area_m2 >= MIN_AREA_M2 or bool(c.corp_code))
@@ -578,6 +612,10 @@ def _xlsx_rows(path: Path) -> list[list[str]]:
     return rows
 
 
+#: DART 공시 원문 주소 (뒤에 접수번호).
+DART_VIEW = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo="
+
+
 def write_factories_xlsx(factories, path: str | Path, within_km: float | None = None,
                         rule: str = "") -> Path:
     """공장 찾기 결과를 인쇄용 엑셀로. 분야·경기·규모로 필터해 볼 수 있다."""
@@ -592,8 +630,10 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
         Column("분야", 11, WRAP), Column("경기", 6, CENTER), Column("규모", 10, WRAP),
         Column("생산품", 20, WRAP), Column("지역", 6, CENTER), Column("거리(km)", 7, DECIMAL),
         Column("대표자", 7, CENTER), Column("전화", 12, CENTER), Column("주소", 24, WRAP),
+        Column("시설투자 공시", 18, WRAP), Column("공시 원문", 24, TEXT),
     ], rows=[[i, c.name, c.group, c.sector, steady_text(c.sector_weight), size_text(c),
-              c.products, c.region, c.distance_km, c.ceo, c.phone, c.address]
+              c.products, c.region, c.distance_km, c.ceo, c.phone, c.address,
+              c.investment, (DART_VIEW + c.investment_no) if c.investment_no else ""]
              for i, c in enumerate(factories, 1)])
     fields = Counter(c.sector for c in factories).most_common()
     limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
@@ -611,7 +651,10 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
                "들어가면 같은 그룹 회사로 넓히기 쉽습니다."],
         ["경기", "덜 탐 = 식품·제약·환경처럼 불황에도 돌아가는 분야, 많이 탐 = 반도체·자동차·"
                "철강처럼 경기가 꺾이면 투자부터 끊는 분야."],
-        ["뺀 곳", "판넬을 만드는 곳(경쟁사), 주소를 모르거나 거리 밖인 곳."],
+        ["시설투자 공시", "최근 2년 안에 상장사가 낸 '신규시설투자'·'유형자산 취득' 공시 중 "
+                      "가장 최근 것. 공장·라인을 늘리는 회사라 판넬 일이 곧 나올 수 있습니다. "
+                      "회사 전체 공시라 어느 공장인지는 원문에서 확인하세요."],
+        ["뺀 곳", "판넬을 만드는 곳(경쟁사), 수작업 위주 공장, 주소를 모르거나 거리 밖인 곳."],
         ["연락할 때", "본사 구매팀보다 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 "
                     "'판넬 교체·라인 개조 때 견적 낼 수 있게 해 달라'고 하세요."],
         ["출처", "한국산업단지공단 전국 등록공장 현황(공공데이터포털·팩토리온). 생산품은 공장 "
@@ -624,7 +667,7 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
 
 _SAVED_FIELDS = ("name", "kind", "address", "ceo", "phone", "products", "employees", "area_m2",
                  "stock_code", "group", "corp_code", "region", "distance_km", "sector",
-                 "sector_weight", "industry_name")
+                 "sector_weight", "industry_name", "investment", "investment_no")
 
 
 def save_last_factories(path, factories: list[Candidate], **meta) -> None:
