@@ -92,11 +92,8 @@ LOW_DEMAND_CODES = ("14", "15", "16", "32", "331", "332", "333", "3399", "27402"
 #: 기계 제작사만 볼 때, 이 말만 있고 '기계를 만든다'는 말이 없으면 부품·소재 업체로 본다.
 PART_WORDS = ("부품", "부분품", "소재", "금형", "베어링", "볼트", "너트", "스프링", "가스켓")
 
-#: '규모 있는 공장' 기준 — 하나라도 넘으면.
-MIN_EMPLOYEES = 30
 #: 이보다 적은 공장은 목록에서 아예 뺀다(인원이 적혀 있을 때만).
 MIN_SITE_EMPLOYEES = 5
-MIN_AREA_M2 = 3_000
 
 #: 머리글에서 칸을 찾는 말. 파일마다 이름이 조금씩 달라서 여러 개를 본다.
 COLUMN_HINTS = {
@@ -172,13 +169,9 @@ def read_factory_file(path: str | Path) -> list[dict[str, str]]:
     return out
 
 
-def has_size_columns(records: list[dict[str, str]]) -> bool:
-    return any(r.get("employees") or r.get("area") for r in records[:200])
-
-
 def find_factories(records: list[dict[str, str]],
                    within_km: float | None = 70.0) -> list[Candidate]:
-    """거리 안의 공장(판넬 업체 제외)을 가까운 순으로. 규모로 거르는 건 is_sizable 로 따로."""
+    """거리 안의 공장(판넬 업체·수작업·공장 아닌 곳 제외)을 가까운 순으로."""
     found: list[Candidate] = []
     seen: set[tuple[str, str]] = set()
     for r in records:
@@ -542,11 +535,6 @@ def mark_investments(factories: list[Candidate], fetch, progress=None,
             title = re.sub(r"^\[[^]]*\]\s*", "", hit["title"])
             c.investment, c.investment_no = f"{hit['date'][:7]} {title}", hit["rcept_no"]
     return len(found), stopped
-
-
-def is_sizable(c: Candidate) -> bool:
-    """규모 있는 공장인가 — 종업원·면적 기준을 넘거나 DART 등록 회사."""
-    return (c.employees >= MIN_EMPLOYEES or c.area_m2 >= MIN_AREA_M2 or bool(c.corp_code))
 
 
 def size_text(c: Candidate) -> str:

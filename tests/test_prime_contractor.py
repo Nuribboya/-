@@ -2541,17 +2541,15 @@ def test_factory_csv_is_read_and_competitors_far_ones_dropped(tmp_path):
     assert by["(주)한결포장기계"].phone == "031-000-0001"
 
 
-def test_sizable_by_employees_area_or_dart(tmp_path):
+def test_size_text_and_dart_registered(tmp_path):
     from prime_contractor.industry import normalize_name
-    from prime_contractor.makers import is_sizable, mark_dart_registered, size_text
+    from prime_contractor.makers import mark_dart_registered, size_text
     by = {c.name: c for c in _factories(tmp_path)}
-    assert is_sizable(by["(주)한결포장기계"])      # 45명
-    assert is_sizable(by["청정식품"])              # 4,500㎡
+    assert by["(주)한결포장기계"].employees == 45 and by["청정식품"].area_m2 == 4500
     assert "작은식품" not in by                     # 3명 — 아예 뺀다
-    assert not is_sizable(by["대명컨베이어"])
     registered, on_market = mark_dart_registered(
         list(by.values()), {normalize_name("대명컨베이어"): "00123"})
-    assert (registered, on_market) == (1, 0) and is_sizable(by["대명컨베이어"])
+    assert (registered, on_market) == (1, 0)
     assert "외감" in size_text(by["대명컨베이어"]) and "500㎡" in size_text(by["대명컨베이어"])
 
 
@@ -2833,7 +2831,8 @@ def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
     app._refresh_factories = lambda: calls.setdefault("refreshed", True)
     far_food = Candidate(name="먼식품", sector_weight=0.9, distance_km=60.0)
     near_chip = Candidate(name="가까운반도체", sector_weight=0.2, distance_km=10.0)
-    app._factories_loaded([far_food, near_chip], 70.0, True, True)
+    from prime_contractor.factory_search import SearchResult
+    app._factories_loaded(SearchResult([far_food, near_chip], knows_listed=True), 70.0)
     assert [c.name for c in app.factories] == ["가까운반도체", "먼식품"]
 
 
@@ -3132,3 +3131,72 @@ def test_supplier_portal_and_search_link():
     assert supplier_portal("(주)농심 안성공장") == ("", "")
     url = unquote(supplier_search_url("(주)농심 안성공장"))
     assert url.endswith("query=농심 협력사 등록")
+
+
+
+def _search_env(tmp_path, monkeypatch, records_by_company, file_rows=None):
+    """run_search 를 네트워크 없이: DART·공장 API 를 가짜로 바꾼다."""
+    from prime_contractor import factory_search
+    from prime_contractor.sources import dart as dart_mod, factory_api
+
+    class FakeDart:
+        def __init__(self, key, cache_dir=None):
+            self.cache_dir, self.invest_stopped = cache_dir, ""
+            self.listed_companies = [("농심", "N1", "004370")]
+            self.corp_index = {"농심": "N1"}
+        def company(self, code):
+            return {"induty_code": "10301", "adres": "서울특별시 동작구", "ceo_nm": "신동원"}
+        def investments(self, code):
+            return []
+        cached_investments = investments
+        def lookup(self, name):
+            return None
+        def facility_notices(self, code):
+            return [{"date": "2026-04-01", "title": "신규시설투자등", "rcept_no": "1"}]
+        def save_company_cache(self): pass
+        def save_investment_cache(self): pass
+        def save_notice_cache(self): pass
+
+    class FakeApi:
+        verified = True
+        sample_keys = []
+        def __init__(self, key, cache_dir=None): pass
+        def cached(self, q): return True
+        def factories_of(self, q): return records_by_company.get(q, [])
+        def save_cache(self): pass
+
+    monkeypatch.setattr(dart_mod, "DartClient", FakeDart)
+    monkeypatch.setattr(factory_api, "FactoryApi", FakeApi)
+    path = ""
+    if file_rows is not None:
+        path = tmp_path / "f.csv"
+        path.write_text("회사명,대표자,생산품,공장주소,종업원합계\n" + "\n".join(file_rows),
+                        encoding="utf-8")
+    return factory_search.SearchOptions(data_key="d", dart_key="k", factory_file=str(path),
+                                        within_km=50, cache_dir=tmp_path)
+
+
+def test_search_merges_listed_and_unlisted_plants(tmp_path, monkeypatch):
+    from prime_contractor.factory_search import run_search
+    nongshim = [{"name": "(주)농심 안성공장", "ceo": "신동원", "address": "경기도 안성시 공도읍 1",
+                 "products": "라면", "employees": "400"}]
+    opts = _search_env(tmp_path, monkeypatch, {"농심": nongshim}, file_rows=[
+        "(주)농심 안성공장,신동원,라면,경기도 안성시 공도읍 1,400",        # 이미 있음 — 한 번만
+        "대한식품(주),김대한,떡,경기도 평택시 포승읍 1,120",               # 비상장 120명 — 더한다
+        "작은식품,이작은,떡,경기도 평택시 포승읍 2,20",                    # 50명 미만 — 뺀다
+        "먼식품,박먼,떡,부산광역시 해운대구 1,300"])                       # 거리 밖
+    lines = []
+    result = run_search(opts, say=lines.append)
+    names = sorted(c.name for c in result.factories)
+    assert names == ["(주)농심 안성공장", "대한식품(주)"]
+    nong = next(c for c in result.factories if "농심" in c.name)
+    assert nong.stock_code and nong.investment.startswith("2026-04")
+    assert result.knows_listed and result.has_unlisted
+    assert any("비상장" in line for line in lines)
+
+
+def test_search_needs_keys_or_file(tmp_path):
+    from prime_contractor.factory_search import SearchOptions
+    assert "인증키" in SearchOptions().problem()
+    assert "파일" in SearchOptions(factory_file=str(tmp_path / "없음.csv")).problem()
+    assert SearchOptions(data_key="a", dart_key="b").problem() == ""

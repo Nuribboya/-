@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, W, X, Y, StringVar, BooleanVar, Tk, filedialog, messagebox
 from tkinter import ttk, scrolledtext
@@ -40,9 +41,9 @@ SALES_COLUMNS = (("연월", 85), ("실제 매출", 120), ("목표", 130),
                  ("달성률", 75), ("모자란 돈", 120), ("손익", 130))
 REVIEW_COLUMNS = (("연월", 85), ("매출", 110), ("평소 대비", 90), ("손익", 110),
                   ("판정", 520))
-FACTORY_COLUMNS = (("#", 40), ("회사", 165), ("그룹", 115), ("분야", 105), ("경기", 50),
-                   ("규모", 90), ("투자", 65), ("생산품", 180), ("지역", 50), ("거리", 50),
-                   ("전화", 100))
+FACTORY_COLUMNS = (("#", 36), ("회사", 160), ("그룹", 100), ("분야", 100), ("경기", 46),
+                   ("규모", 90), ("투자", 62), ("생산품", 170), ("지역", 46), ("거리", 48),
+                   ("전화", 110))
 #: 공장 직원 수로 거르기. 100~300명 공장이 시설팀이 있어 판넬 물량이 꾸준하다.
 STAFF_CHOICES = {"직원 전체": 0, "직원 30명 이상": 30, "직원 50명 이상": 50,
                  "직원 100명 이상": 100, "직원 300명 이상": 300}
@@ -68,13 +69,6 @@ def _label_for(choices: dict, value) -> str:
     return next((k for k, v in choices.items() if v == value), list(choices)[0])
 
 
-def _ceo(company, code: str) -> str:
-    try:
-        return company(code).get("ceo_nm", "") or ""
-    except Exception:
-        return ""
-
-
 RUN_LOG = Path.home() / ".cache" / "prime_contractor" / "run_log.txt"
 #: 마지막으로 찾은 공장 표 — 다음에 켤 때 그대로 다시 띄운다.
 LAST_FACTORIES = Path.home() / ".cache" / "prime_contractor" / "last_factories.json"
@@ -89,18 +83,6 @@ def _write_run_log(text: str) -> None:
             fh.write(f"{time.strftime('%m-%d %H:%M:%S')} {redact_secrets(text)}\n")
     except OSError:
         pass
-
-
-class QueueLogHandler(logging.Handler):
-    """백그라운드 스레드의 로그를 화면 큐로 보낸다."""
-
-    def __init__(self, sink: queue.Queue) -> None:
-        super().__init__()
-        self.sink = sink
-
-    def emit(self, record: logging.LogRecord) -> None:
-        # 조회 실패 문구엔 인증키가 든 주소가 통째로 섞여 나온다. 화면에 찍기 전에 가린다.
-        self.sink.put(redact_secrets(self.format(record)))
 
 
 class App:
@@ -155,16 +137,17 @@ class App:
 
     def _restore_last_factories(self) -> None:
         """지난번 찾은 공장 표를 다시 띄운다 — 앱을 껐다 켜도 처음부터 안 찾게."""
+        from prime_contractor.factory_search import SearchResult
         from prime_contractor.makers import load_last_factories
         factories, meta = load_last_factories(LAST_FACTORIES)
         if not factories:
             return
-        self._factories_loaded(factories, meta.get("within"), meta.get("can_size", True),
-                               meta.get("knows_listed", True), save=False)
+        result = SearchResult(factories, meta.get("precise", False),
+                              knows_listed=meta.get("knows_listed", True),
+                              has_unlisted=meta.get("has_unlisted", False))
+        self._factories_loaded(result, meta.get("within"), save=False)
         self.say(f"지난번({meta.get('saved_at', '')})에 찾은 공장 {len(factories)}곳을 불러왔습니다. "
                  "새로 찾으려면 [공장 찾기]를 누르세요.")
-
-    # --- 자동저장 -------------------------------------------------------------
 
     def _autosave(self) -> None:
         """입력 칸을 조용히 저장한다. 실패해도 화면은 계속 써야 하니 그냥 넘어간다."""
@@ -210,7 +193,7 @@ class App:
             row=1, column=1, sticky=W, pady=4)
         ttk.Label(box, text="opendart.fss.or.kr — 상장사·계열사 확인", foreground="#666").grid(
             row=1, column=2, sticky=W, padx=6)
-        ttk.Label(box, text="안성에서 얼마나").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
+        ttk.Label(box, text="우리 공장에서 얼마나").grid(row=2, column=0, sticky=W, padx=(0, 8), pady=4)
         ttk.Combobox(box, textvariable=self.distance, values=list(DISTANCE_CHOICES),
                      state="readonly", width=18).grid(row=2, column=1, sticky=W, pady=4)
         self.kakao_key = StringVar(value=saved.get("kakao_key", ""))
@@ -225,8 +208,8 @@ class App:
         ttk.Button(box, text="파일 찾기", command=self.on_pick_factory_file).grid(
             row=4, column=2, sticky=W, padx=6)
         ttk.Label(box, foreground="#666", justify=LEFT, text=(
-            "인증키 두 개만 넣으면 상장사·계열사 공장을 바로 찾아옵니다. 파일은 비워 두세요 — "
-            "비상장 작은 공장까지 다 보고 싶을 때만 '전국등록공장현황' 파일을 고릅니다.")).grid(
+            "인증키 두 개로 상장사·계열사 공장을 찾습니다. 비상장 중견 공장(직원 50명+)까지 보려면\n"
+            "공공데이터포털 '전국등록공장현황' 파일도 고르세요 — 둘을 합쳐 보여 줍니다.")).grid(
             row=5, column=0, columnspan=4, sticky=W, pady=(4, 0))
 
         buttons = ttk.Frame(root)
@@ -691,8 +674,8 @@ class App:
             ("새 원청 한 곳당 월 발주", self.goal_per_client, "원  (처음엔 작게 시작 — 어림값)"),
             ("쓸 수 있는 현금", self.goal_cash, "원  (없어도 됨 — 몇 달 버티나 계산)"),
         ]
-        for row, (label, var, hint) in enumerate(fields):
-            ttk.Label(box, text=label).grid(row=row, column=0, sticky=W, pady=2)
+        for row, (name, var, hint) in enumerate(fields):
+            ttk.Label(box, text=name).grid(row=row, column=0, sticky=W, pady=2)
             ttk.Entry(box, textvariable=var, width=14).grid(row=row, column=1, sticky=W, pady=2)
             ttk.Label(box, text=hint, foreground="#666").grid(row=row, column=2, sticky=W, padx=6)
         _Button(box, text="  계산하기  ", command=self.on_goal,
@@ -827,52 +810,49 @@ class App:
         if path:
             self.factory_file.set(path)
 
+    def _search_options(self):
+        from prime_contractor.factory_search import SearchOptions
+        cfg = build_config(self.current_options())
+        return SearchOptions(
+            data_key=self.data_key.get().strip(), dart_key=self.dart_key.get().strip(),
+            kakao_key=self.kakao_key.get().strip(), factory_file=self.factory_file.get().strip(),
+            within_km=cfg.within_km, incumbent=cfg.incumbent)
+
     def on_find_factories(self) -> None:
-        """등록공장 파일에서 근처 공장을 고른다 — 판넬을 실제로 쓰는 곳."""
+        """공장 찾기: 상장사 공장(인증키) + 비상장 공장(파일, 선택) → 거리·상장·투자 표시."""
         if self.running:
             return
-        path = self.factory_file.get().strip()
-        if path and not Path(path).exists():
-            messagebox.showwarning("파일이 없습니다", f"{path}\n\n공장 목록 파일을 다시 고르거나 "
-                                   "칸을 비워 두세요(인증키로 찾습니다).")
+        opts = self._search_options()
+        problem = opts.problem()
+        if problem:
+            messagebox.showwarning("공장 찾기를 시작할 수 없습니다", problem)
             return
-        if not path and not (self.data_key.get().strip() and self.dart_key.get().strip()):
-            messagebox.showwarning(
-                "인증키가 필요합니다",
-                "'공공데이터포털 인증키'와 '기업정보 인증키'를 둘 다 넣어 주세요.\n\n"
-                "받는 곳은 도움말 탭에 적어 두었습니다.")
-            return
-        cfg = build_config(self.current_options())
         self.running = True
         self.run_button.configure(state="disabled")
         self.status.configure(text="찾는 중…")
-        if path:
-            self.say("공장 목록을 읽는 중입니다 (몇십만 줄이면 1분쯤 걸립니다)…")
-            target = self._load_factories
-            args = (path, cfg)
-        else:
-            self.say("시작합니다 — 저장해 둔 상장사 목록을 읽는 중입니다 (처음이면 DART 에서 받느라 "
-                     "1분쯤 걸립니다)…")
-            target = self._load_factories_by_key
-            args = (self.data_key.get().strip(), cfg)
-        worker = threading.Thread(target=self._guarded, args=(target, *args), daemon=True)
+        self.say("시작합니다 — 저장해 둔 자료를 읽는 중입니다 (처음이면 1분쯤 걸립니다)…")
+        worker = threading.Thread(target=self._search, args=(opts,), daemon=True)
         worker.start()
-        self._watch(worker, __import__("time").monotonic())
+        self._watch(worker, time.monotonic())
 
-    def _guarded(self, target, *args) -> None:
-        """작업 스레드가 예상 못 한 오류로 죽어도 화면이 '찾는 중'에 멈춰 있지 않게."""
+    def _search(self, opts) -> None:
+        """작업 스레드. 예상 못 한 오류로 죽어도 화면이 '찾는 중'에 멈춰 있지 않게 한다."""
+        from prime_contractor.factory_search import run_search
         try:
-            target(*args)
+            result = run_search(opts, say=self.say, log=_write_run_log)
         except BaseException as exc:          # noqa: BLE001 — 무엇이든 사용자에게 보여야 한다
             logging.getLogger(__name__).exception("공장 찾기 실패")
             _write_run_log(f"오류: {exc!r}")
-            self.root.after(0, self._factories_failed, redact_secrets(f"{type(exc).__name__}: {exc}"))
+            self.root.after(0, self._factories_failed,
+                            redact_secrets(f"{type(exc).__name__}: {exc}"))
+            return
+        self.root.after(0, self._factories_loaded, result, opts.within_km)
 
     def _watch(self, worker, started: float, dead_ticks: int = 0) -> None:
         """찾는 동안 걸린 시간을 상태 칸에 보여 준다 — 멈췄는지 도는 중인지 알 수 있게."""
         if not self.running:
             return
-        seconds = int(__import__("time").monotonic() - started)
+        seconds = int(time.monotonic() - started)
         self.status.configure(text=f"찾는 중… {seconds // 60}분 {seconds % 60:02d}초")
         if not worker.is_alive():
             # 정상으로 끝났으면 결과 표시가 곧 running 을 끈다. 몇 초 지나도 그대로면 멈춘 것.
@@ -883,220 +863,41 @@ class App:
             dead_ticks += 1
         self.root.after(1000, self._watch, worker, started, dead_ticks)
 
-    def _mark_investments(self, factories, dart) -> None:
-        """상장사 공장에 최근 시설투자 공시를 붙인다 — 라인을 늘리는 회사 = 판넬 일이 곧 나올 곳."""
-        from prime_contractor.makers import mark_investments
-        self.say("상장사들의 최근 2년 시설투자 공시를 확인합니다 (처음엔 몇 분, 일주일 동안 저장)…")
-        count, stopped = mark_investments(
-            factories, dart.facility_notices,
-            progress=lambda done, total: self.say(f"  투자 공시 확인 {done}/{total}"))
-        dart.save_notice_cache()
-        if stopped:
-            self.say(f"⚠ {stopped}")
-        self.say(f"  최근 시설투자 공시가 있는 회사 {count}곳 — '투자' 칸에 날짜가 붙습니다.")
-
-    def _coarse_within(self, cfg):
-        """번지 좌표로 다시 잴 거면 읍·면·동 거리로 미리 거를 때 여유를 둔다."""
-        from prime_contractor.makers import REFINE_MARGIN_KM
-        if cfg.within_km is None or not self.kakao_key.get().strip():
-            return cfg.within_km
-        return cfg.within_km + REFINE_MARGIN_KM
-
-    def _refine(self, factories, cfg):
-        """카카오 키가 있으면 공장마다 번지 단위로 거리를 다시 잰다. (공장들, 번지로 쟀는가)."""
-        from prime_contractor.makers import refine_distances
-        key = self.kakao_key.get().strip()
-        if not key:
-            return factories, False
-        if len(factories) > 5000:
-            self.say(f"공장이 {len(factories):,}곳이라 번지 단위 거리는 건너뜁니다(읍·면·동 기준).")
-            return [c for c in factories if cfg.within_km is None
-                    or c.distance_km <= cfg.within_km], False
-        from prime_contractor.sources.kakao_geo import KakaoGeocoder
-        geo = KakaoGeocoder(key, Path.home() / ".cache" / "prime_contractor")
-        self.say(f"공장 {len(factories)}곳의 정확한 위치를 카카오 지도로 찾습니다 "
-                 "(처음 한 번만 몇 분, 다음부터는 저장해 둔 걸 씁니다)…")
-        kept, exact, stopped = refine_distances(
-            factories, geo, cfg.within_km,
-            progress=lambda done, total: self.say(f"  위치 확인 {done}/{total}"))
-        geo.save()
-        if stopped:
-            self.say(f"⚠ {redact_secrets(stopped)}")
-        self.say(f"  {exact}곳은 번지 단위로, 나머지는 읍·면·동 중심으로 거리를 쟀습니다.")
-        return kept, exact > 0
-
-    def _load_factories(self, path: str, cfg) -> None:
-        from prime_contractor.makers import (
-            build_group_map, find_factories, has_size_columns, listed_names,
-            mark_dart_registered, mark_groups, read_factory_file)
-        try:
-            records = read_factory_file(path)
-            factories = find_factories(records, within_km=self._coarse_within(cfg))
-            factories, precise = self._refine(factories, cfg)
-        except (OSError, ValueError) as exc:
-            self.root.after(0, self._factories_failed, str(exc))
-            return
-        sized = has_size_columns(records)
-        knows_listed = False
-        if cfg.dart_api_key:
-            # 상장사(코스피·코스닥)인지, 금감원에 등록된 규모인지 DART 목록과 맞춰 본다.
-            # 거리는 이 파일의 '공장 주소'로 쟀으니 본사가 서울인 회사의 안성 공장도 잡힌다.
-            from prime_contractor.sources.dart import DartClient
-            try:
-                dart = DartClient(cfg.dart_api_key)
-                listed = dart.listed_companies
-                registered, on_market = mark_dart_registered(
-                    factories, dart.corp_index, listed_names(listed))
-                knows_listed = True
-                self.say(f"그중 상장사(코스피·코스닥) 공장 {on_market}곳, 금감원 등록 회사 "
-                         f"{registered}곳입니다.")
-                fresh = sum(1 for _n, code, stock in listed
-                            if stock and not dart.has_investments(code))
-                if fresh:
-                    self.say(f"상장사 {fresh}곳의 계열사(지분 가진 회사)를 확인합니다 — 처음 "
-                             "한 번은 10분쯤 걸리고, 다음부터는 저장해 둔 걸 씁니다…")
-                group_map = build_group_map(
-                    listed, dart.investments,
-                    progress=lambda done, total: self.say(f"  계열사 확인 {done}/{total}"))
-                dart.save_investment_cache()
-                tagged = mark_groups(factories, group_map, listed, cfg.incumbent)
-                self._mark_investments(factories, dart)
-                affiliates = sum(1 for c in factories if c.group.endswith(" 계열"))
-                self.say(f"상장사 계열사 공장 {affiliates}곳을 더 찾았습니다 "
-                         f"(그룹이 붙은 공장 모두 {tagged}곳).")
-            except Exception as exc:              # 상장·규모 표시만 빠지고 목록은 그대로
-                self.say(f"DART 확인 실패(목록은 그대로): {redact_secrets(exc)}")
-        else:
-            self.say("'기업정보 인증키'가 없어 상장사인지 확인하지 못했습니다. 키를 넣으면 "
-                     "상장사·계열사 공장만 골라 볼 수 있습니다.")
-        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외). "
-                 "연락은 그 공장 시설팀·공무팀(기계 제작사면 설계팀·생산팀)에 하세요.")
-        self.root.after(0, self._factories_loaded, factories, cfg.within_km,
-                        sized or knows_listed, knows_listed, True, precise)
-
-    def _load_factories_by_key(self, data_key: str, cfg) -> None:
-        """파일 없이: 상장사(제조업)·계열사 이름으로 공장등록 API 를 물어 공장을 모은다."""
-        from prime_contractor.makers import (
-            SUBSIDIARY_RATIO, affiliate_names, build_group_map, collect_by_name, find_factories,
-            drop_far_companies, near_first,
-            listed_names, mark_dart_registered, mark_groups, sort_listed)
-        from prime_contractor.sources.dart import DartClient
-        from prime_contractor.sources.factory_api import FactoryApi, QuotaExceeded
-        try:
-            _write_run_log("DART 준비")
-            dart = DartClient(cfg.dart_api_key)
-            _write_run_log("공장 API 준비")
-            api = FactoryApi(data_key, cache_dir=dart.cache_dir)
-            _write_run_log("상장사 목록 읽기")
-            listed = [row for row in dart.listed_companies if row[2]]
-            self.say(f"상장사 {len(listed)}곳 중 제조업만 고릅니다 — 처음 한 번은 몇 분 걸리고, "
-                     "다음부터는 저장해 둔 걸 씁니다…")
-            makers, heads = sort_listed(
-                listed, dart.company,
-                progress=lambda done, total: self.say(f"  업종 확인 {done}/{total}"))
-            dart.save_company_cache()
-            self.say(f"제조업 상장사 {len(makers)}곳. 이들과 지주회사 {len(heads) - len(makers)}곳의 "
-                     "계열사를 확인합니다…")
-            failed: list[str] = []
-
-            def group_progress(done: int, total: int) -> None:
-                self.say(f"  계열사 확인 {done}/{total}")
-                if done % 500 == 0:                # 중간에 창을 닫아도 받은 데까지는 남긴다
-                    dart.save_investment_cache()
-
-            group_map = build_group_map(heads, dart.investments, failed=failed,
-                                        progress=group_progress)
-            dart.save_investment_cache()
-            if dart.invest_stopped:
-                self.say(f"⚠ {dart.invest_stopped}")
-            elif failed:
-                self.say(f"  {len(failed)}곳은 DART 응답이 없어 건너뜀 — 다음에 누르면 다시 확인합니다.")
-            # 묻는 순서 = 받는 순서. 하루 1,000번에서 끊겨도 가까운 곳부터 채워진다.
-            near, far, dropped = near_first(makers, dart.company, cfg.within_km)
-            subsidiaries = affiliate_names(heads, dart.cached_investments,
-                                           min_ratio=SUBSIDIARY_RATIO)
-            self.say(f"  자회사 {len(subsidiaries)}곳의 본사 위치를 확인합니다…")
-            subsidiaries, dropped_subs = drop_far_companies(subsidiaries, dart.lookup)
-            dart.save_company_cache()
-            queries = list(dict.fromkeys([name for name, _c, _s in near + far] + subsidiaries))
-            self.say(f"  본사가 전라·경상·강원·제주인 {dropped + dropped_subs}곳은 뺐습니다.")
-            self.say(f"  조회 순서: 본사가 거리 안인 제조 상장사 {len(near)}곳 → 나머지 제조 상장사 "
-                     f"{len(far)}곳 → 자회사(지분 50%↑, 금융·유통·서비스 제외) {len(subsidiaries)}곳")
-            fresh = sum(1 for q in queries if not api.cached(q))
-            if fresh and not api.verified:
-                self.say("공장 조회 API 를 시험합니다…")
-                try:
-                    self.say(f"  시험 조회 성공 — 삼성전자 공장 {api.check()}곳을 읽었습니다.")
-                except QuotaExceeded:
-                    if not any(api.cached(q) for q in queries):
-                        raise
-                    self.say("  오늘 한도를 이미 다 써서, 받아 둔 공장만 보여 줍니다.")
-            self.say(f"회사 {len(queries)}곳의 공장을 공공데이터포털에 묻습니다"
-                     + (f" (새로 {fresh}곳 — 처음엔 오래 걸립니다)…" if fresh else "…"))
-            if fresh > 900:
-                self.say("  공공데이터포털 개발계정은 하루 1,000번까지라 며칠에 나눠 받습니다 — "
-                         "받은 건 저장되니 다음 날 다시 누르면 이어서 받습니다.")
-            # 이름만 같은 다른 회사를 거르려고 DART 대표자 이름을 같이 넘긴다(받아 둔 것만 쓴다).
-            ceo_of = {name: _ceo(dart.company, code) for name, code, _s in near + far}
-            for name in subsidiaries:
-                info = dart.lookup(name) or {}
-                ceo_of.setdefault(name, info.get("ceo_nm", ""))
-            records, stopped = collect_by_name(
-                queries, api.factories_of, ceo_of=ceo_of,
-                progress=lambda done, total: self.say(f"  공장 조회 {done}/{total}"))
-            api.save_cache()
-            if stopped:
-                self.say(f"⚠ {stopped} 받은 데까지만 보여 줍니다 — 내일 다시 누르면 이어서 받습니다.")
-            if not records and api.sample_keys:
-                self.say("공장 칸을 못 읽었습니다. 받은 칸 이름: " + ", ".join(api.sample_keys))
-            if not records and not stopped:
-                raise RuntimeError("공장을 하나도 받지 못했습니다. 이 창과 진행 기록을 캡처해 보내 주세요.")
-            factories = find_factories(records, within_km=self._coarse_within(cfg))
-            factories, precise = self._refine(factories, cfg)
-            registered, on_market = mark_dart_registered(
-                factories, dart.corp_index, listed_names(listed))
-            mark_groups(factories, group_map, listed, cfg.incumbent)
-            self._mark_investments(factories, dart)
-        except Exception as exc:
-            self.root.after(0, self._factories_failed, redact_secrets(exc))
-            return
-        self.say(f"공장 {len(records):,}곳 중 거리 안의 공장 {len(factories)}곳 (판넬 업체 제외, "
-                 f"상장사 공장 {on_market}곳). 연락은 그 공장 시설팀·공무팀에 하세요.")
-        self.root.after(0, self._factories_loaded, factories, cfg.within_km, True, True, True,
-                        precise)
-
     def _factories_failed(self, message: str) -> None:
         self.running = False
         self.run_button.configure(state="normal")
         self.status.configure(text="실패")
         messagebox.showerror("공장 목록을 읽지 못했습니다", message)
 
-    def _factories_loaded(self, factories, within, can_size: bool, knows_listed: bool,
-                          save: bool = True, precise: bool = False) -> None:
+    def _factories_loaded(self, result, within, save: bool = True) -> None:
         self.running = False
         self.run_button.configure(state="normal")
+        factories = result.factories
         if save:
             from prime_contractor.makers import save_last_factories
             try:
                 save_last_factories(LAST_FACTORIES, factories, within=within,
-                                    can_size=can_size, knows_listed=knows_listed,
-                                    precise=precise)
+                                    precise=result.precise, knows_listed=result.knows_listed,
+                                    has_unlisted=result.has_unlisted)
             except OSError:
                 pass
         # 가까운 순. 적합도 점수는 아직 없다 — 거리로만 줄 세운다.
         self.factories = sorted(factories, key=lambda c: (c.distance_km, c.name))
         self.factory_within = within
-        self.filter_boxes[0].configure(state="normal" if knows_listed else "disabled")
-        self.filter_boxes[1].configure(state="readonly" if can_size else "disabled")
+        knows_staff = any(c.employees for c in factories)
+        self.filter_boxes[0].configure(state="normal" if result.knows_listed else "disabled")
+        self.filter_boxes[1].configure(state="readonly" if knows_staff else "disabled")
         self.filter_boxes[2].configure(state="normal")
         self.filter_boxes[3].configure(
             state="normal" if any(c.investment for c in factories) else "disabled")
-        # 작은 공장은 수작업이 많아 판넬 수요가 적다 — 상장사·계열사 공장을 기본으로 본다.
-        self.only_listed.set(knows_listed)
+        # 비상장 공장도 받았으면 처음부터 같이 보여 준다(직원 수로 거른다).
+        self.only_listed.set(result.knows_listed and not result.has_unlisted)
+        if not knows_staff:
+            self.min_staff.set("직원 전체")
         self._refresh_factories()
         if not factories:
             messagebox.showinfo("공장 찾기", "거리 안에서 공장을 찾지 못했습니다.\n"
-                                          "'안성에서 얼마나'를 넓혀 보세요.")
+                                          "'우리 공장에서 얼마나'를 넓혀 보세요.")
 
     def _filter_rule(self) -> str:
         bits = []
@@ -1123,7 +924,7 @@ class App:
         for i, c in enumerate(self.shown, 1):
             self.tree.insert("", END, iid=str(i), values=(
                 i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
-                c.investment[:7] or "-", c.products, c.region, f"{c.distance_km:.0f}km",
+                c.investment[:7] or "-", c.products, c.region, f"{c.distance_km:.1f}km",
                 c.phone or "-"))
         if not self.factories:
             self.status.configure(text="준비됨")

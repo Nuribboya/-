@@ -438,7 +438,7 @@ def plan_to_close_gap(gap: int, candidates: list[Candidate], lookback_days: int 
     else:
         plan.note = (f"찾은 {len(plan.rows)}곳을 다 합쳐도 한 달 약 {total / 1e4:,.0f}만원이라, "
                      f"{plan.shortfall_left / 1e4:,.0f}만원이 여전히 모자랍니다. "
-                     f"'최근 며칠치'를 늘리거나 '안성에서 얼마나'를 넓혀서 다시 찾아 보세요.")
+                     f"'최근 며칠치'를 늘리거나 '우리 공장에서 얼마나'를 넓혀서 다시 찾아 보세요.")
     return plan
 
 
