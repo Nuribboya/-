@@ -3069,3 +3069,12 @@ def test_kakao_bad_key_falls_back_to_town_distance(tmp_path):
     assert kept == [c] and exact == 0 and "카카오" in stopped
     from prime_contractor.textutil import redact_secrets
     assert "secret" not in redact_secrets("Authorization: KakaoAK secret123")
+
+
+def test_hand_work_plants_are_left_out():
+    from prime_contractor.makers import classify
+    for products in ("전자부품조립", "진단키트 외", "체외진단 의료기기", "복강경 수술도구",
+                     "의료용니들", "마스크팩, 면봉", "안전보호구", "의약품, 화장품 소분 포장"):
+        assert classify(products)[0] == "", products
+    assert classify("자동차부품조립용 볼트 외")[0]          # 볼트 공장은 기계로 찍는다
+    assert classify("X-RAY 의료기기")[0]                      # 장비형 의료기기는 남긴다
