@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 rem Double-click to run the News Shorts app on Windows.
 cd /d "%~dp0\.."
 where ffmpeg >nul 2>nul || (echo [!] ffmpeg가 필요합니다. https://www.gyan.dev/ffmpeg/builds/ 에서 설치 후 PATH에 추가하세요. & pause & exit /b 1)
