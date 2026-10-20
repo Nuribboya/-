@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Korea Route Planner – best order to visit places in Seoul, Busan & beyond</title>
+<meta name="description" content="Add the places you want to visit in Korea and get the fastest visiting order with travel times. Plans changed? Re-plan from where you are in one tap.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 class="brand" data-i18n="title">Korea Route Planner</h1>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="en">EN</button>
+    <button type="button" data-lang="ko">한국어</button>
+  </div>
+</header>
+
+<main class="layout">
+  <div id="map" class="map" aria-label="Map"></div>
+
+  <section class="panel">
+    <p class="tagline" data-i18n="tagline"></p>
+
+    <div class="search">
+      <input id="search" type="search" autocomplete="off" data-i18n-ph="searchPh">
+      <ul id="suggestions" class="suggestions" hidden></ul>
+    </div>
+    <p class="hint" data-i18n="mapHint"></p>
+
+    <div class="presets">
+      <span data-i18n="tryExample"></span>
+      <button type="button" class="link" data-preset="busan" data-i18n="presetBusan"></button>
+      <button type="button" class="link" data-preset="southeast" data-i18n="presetSoutheast"></button>
+    </div>
+
+    <ol id="places" class="places"></ol>
+    <p id="empty" class="empty" data-i18n="empty"></p>
+
+    <div class="options">
+      <label class="field">
+        <span data-i18n="mode"></span>
+        <select id="mode">
+          <option value="transit" data-i18n="modeTransit"></option>
+          <option value="walk" data-i18n="modeWalk"></option>
+          <option value="car" data-i18n="modeCar"></option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="roundTrip"> <span data-i18n="roundTrip"></span></label>
+      <label class="check"><input type="checkbox" id="endAtLast"> <span data-i18n="endAtLast"></span></label>
+    </div>
+
+    <div class="actions">
+      <button type="button" id="optimize" class="primary" data-i18n="optimize"></button>
+      <button type="button" id="replan" data-i18n="replan"></button>
+    </div>
+    <p id="status" class="status" role="status"></p>
+
+    <div id="result" class="result" hidden>
+      <div id="summary" class="summary"></div>
+      <ol id="steps" class="steps"></ol>
+      <p class="note" data-i18n="estimateNote"></p>
+    </div>
+
+    <div class="footer-actions">
+      <button type="button" id="share" class="link" data-i18n="share"></button>
+      <button type="button" id="clear" class="link danger" data-i18n="clear"></button>
+    </div>
+    <p class="credits">Map data © OpenStreetMap contributors · Routing: OSRM · Search: Photon</p>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="optimizer.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
