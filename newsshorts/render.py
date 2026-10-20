@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from newsshorts.audience import GENERAL, Audience
 from newsshorts.tts import Cue
 
 WIDTH, HEIGHT = 1080, 1920
@@ -29,6 +30,7 @@ SUB_COLOR = (255, 228, 92)
 CARD_BG = (245, 245, 245)
 CARD_TEXT = (20, 20, 20)
 MUTED = (180, 186, 200)
+SUB_BOX = (0, 0, 0)
 
 
 def resolve_font(configured: str | None = None) -> str | None:
@@ -96,22 +98,24 @@ def _draw_lines(draw, lines, font, y, fill, spacing=1.25, stroke=0, stroke_fill=
     return y
 
 
-def base_frame(title: str, quote: str, source: str, font_path: str | None) -> Image.Image:
+def base_frame(title: str, quote: str, source: str, font_path: str | None,
+               audience: Audience = GENERAL) -> Image.Image:
     """Static part of every frame: badge, source, title and quote card."""
     img = _background()
     draw = ImageDraw.Draw(img)
     margin = 70
+    scale = audience.font_scale
 
     badge_font = _font(font_path, 52)
     draw.rounded_rectangle([margin, 150, margin + 190, 230], radius=14, fill=ACCENT)
     draw.text((margin + 95, 190), "속보", font=badge_font, fill=WHITE, anchor="mm")
     draw.text((margin + 220, 190), source, font=_font(font_path, 44), fill=MUTED, anchor="lm")
 
-    title_font = _font(font_path, 78)
+    title_font = _font(font_path, int(78 * scale))
     title_lines = wrap(title, title_font, WIDTH - 2 * margin)[:4]
     y = _draw_lines(draw, title_lines, title_font, 300, WHITE)
 
-    quote_font = _font(font_path, 54)
+    quote_font = _font(font_path, int(54 * scale))
     quote_lines = wrap(f"“{quote}”", quote_font, WIDTH - 2 * margin - 80)[:5]
     card_top = y + 60
     card_bottom = card_top + 60 + len(quote_lines) * int(quote_font.size * 1.35)
@@ -121,13 +125,22 @@ def base_frame(title: str, quote: str, source: str, font_path: str | None) -> Im
     return img
 
 
-def cue_frame(base: Image.Image, cue: Cue, progress: float, font_path: str | None) -> Image.Image:
+def cue_frame(base: Image.Image, cue: Cue, progress: float, font_path: str | None,
+              audience: Audience = GENERAL) -> Image.Image:
     img = base.copy()
     draw = ImageDraw.Draw(img)
-    sub_font = _font(font_path, 66)
-    lines = wrap(cue.text, sub_font, WIDTH - 140)[:3]
-    y = 1450 - (len(lines) - 1) * int(sub_font.size * 0.6)
-    _draw_lines(draw, lines, sub_font, y, SUB_COLOR, stroke=5)
+    sub_font = _font(font_path, int(66 * audience.font_scale))
+    lines = wrap(cue.text, sub_font, WIDTH - 140)
+    if len(lines) > audience.subtitle_lines:
+        # Shrink rather than cut off: a dropped subtitle line loses words the narrator says.
+        sub_font = _font(font_path, int(sub_font.size * 0.85))
+        lines = wrap(cue.text, sub_font, WIDTH - 140)
+    line_h = int(sub_font.size * 1.25)
+    y = 1450 - (len(lines) - 1) * line_h // 2
+    if audience.subtitle_box:
+        draw.rounded_rectangle([40, y - 30, WIDTH - 40, y + len(lines) * line_h + 10],
+                               radius=24, fill=SUB_BOX)
+    _draw_lines(draw, lines, sub_font, y, SUB_COLOR, stroke=0 if audience.subtitle_box else 5)
     draw.rectangle([0, HEIGHT - 16, int(WIDTH * progress), HEIGHT], fill=ACCENT)
     return img
 
@@ -141,11 +154,12 @@ def render_video(
     total: float,
     out_mp4: Path,
     font_path: str | None,
+    audience: Audience = GENERAL,
 ) -> Path:
     """Render one still per subtitle cue and stitch them to the narration with ffmpeg."""
     work = out_mp4.parent / "frames"
     work.mkdir(parents=True, exist_ok=True)
-    base = base_frame(title, quote, source, font_path)
+    base = base_frame(title, quote, source, font_path, audience)
 
     concat_lines = []
     # Hold the base frame until the first cue starts.
@@ -156,7 +170,7 @@ def render_video(
     for i, cue in enumerate(cues):
         end = cues[i + 1].start if i + 1 < len(cues) else total
         p = work / f"f{i + 1:03d}.png"
-        cue_frame(base, cue, min(1.0, end / total), font_path).save(p)
+        cue_frame(base, cue, min(1.0, end / total), font_path, audience).save(p)
         concat_lines += [f"file '{p.name}'", f"duration {max(0.04, end - cue.start):.3f}"]
     # The concat demuxer ignores the last entry's duration unless the file repeats.
     concat_lines.append(f"file '{p.name}'")

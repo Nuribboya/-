@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 
+from newsshorts.audience import GENERAL, Audience
 from newsshorts.sources import NewsItem
 
 SYSTEM_PROMPT = """너는 한국어 뉴스 쇼츠(30~50초) 대본 작가다. 주어진 기사 정보만으로 대본을 쓴다.
@@ -57,7 +58,7 @@ def _user_prompt(item: NewsItem) -> str:
     )
 
 
-def generate_with_claude(item: NewsItem, model: str) -> Script:
+def generate_with_claude(item: NewsItem, model: str, audience: Audience = GENERAL) -> Script:
     import anthropic
 
     client = anthropic.Anthropic()
@@ -66,7 +67,7 @@ def generate_with_claude(item: NewsItem, model: str) -> Script:
         max_tokens=16000,
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
-        system=SYSTEM_PROMPT,
+        system=SYSTEM_PROMPT + audience.prompt,
         output_config={
             "effort": "medium",
             "format": {"type": "json_schema", "schema": SCRIPT_SCHEMA},
@@ -88,7 +89,7 @@ def split_sentences(text: str) -> list[str]:
     return parts
 
 
-def generate_offline(item: NewsItem) -> Script:
+def generate_offline(item: NewsItem, audience: Audience = GENERAL) -> Script:
     """Template script used when no Claude credentials are configured.
 
     It only rearranges the feed's own title and summary, so it never adds facts —
@@ -101,15 +102,15 @@ def generate_offline(item: NewsItem) -> Script:
         title=item.title[:60],
         quote=item.title,
         sentences=sentences,
-        hashtags=["뉴스", "속보", "쇼츠"],
+        hashtags=list(audience.default_hashtags),
         description=f"출처: {item.source}\n{item.link}",
     )
 
 
-def make_script(item: NewsItem, model: str, use_claude: bool = True) -> Script:
+def make_script(item: NewsItem, model: str, use_claude: bool = True, audience: Audience = GENERAL) -> Script:
     if use_claude:
         try:
-            return generate_with_claude(item, model)
+            return generate_with_claude(item, model, audience)
         except Exception as exc:
             print(f"[warn] Claude script failed, using offline template: {exc}")
-    return generate_offline(item)
+    return generate_offline(item, audience)

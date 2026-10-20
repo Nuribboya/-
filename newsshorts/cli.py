@@ -4,6 +4,7 @@ import argparse
 import time
 from pathlib import Path
 
+from newsshorts.audience import get_audience, rank_items, topic_score
 from newsshorts.config import Config, load_config
 from newsshorts.notify import notify_draft
 from newsshorts.pipeline import list_drafts, load_draft, make_draft, save_draft
@@ -12,12 +13,12 @@ from newsshorts.sources import NewsItem, SeenStore, new_items
 SAMPLE_ITEM = NewsItem(
     id="demo",
     source="데모뉴스",
-    title="국회, 내년도 예산안 본회의 처리… 여야 막판 합의",
+    title="국회, 내년도 예산안 처리… 기초연금 월 2만 원 인상 포함",
     summary=(
         "국회는 오늘 본회의를 열고 내년도 예산안을 처리했다. "
-        "여야 원내대표는 전날 밤 늦게까지 협상을 이어간 끝에 감액 규모에 합의했다. "
-        "여당 원내대표는 '민생 예산을 지켜냈다'고 말했다. "
-        "야당은 '불필요한 예산을 걸러냈다'고 평가했다."
+        "예산안에는 65세 이상 기초연금 수급자의 월 지급액을 2만 원 올리는 내용이 담겼다. "
+        "인상분은 내년 1월 지급분부터 적용된다. "
+        "여당 원내대표는 '어르신 생활 안정을 위한 예산'이라고 말했다."
     ),
     link="https://example.com/news/demo",
 )
@@ -37,8 +38,11 @@ def cmd_watch(config: Config, args) -> None:
     if first_run and not args.include_backlog:
         new_items(config, seen, prime=True)
         print("[info] 첫 실행: 지금 피드에 있는 기사는 건너뛰고, 이후 새 기사부터 만듭니다.")
+    audience = get_audience(config.audience)
     while True:
-        for item in new_items(config, seen)[: args.max_per_poll]:
+        items = [i for i in rank_items(new_items(config, seen), audience)
+                 if topic_score(i, audience) >= config.min_topic_score]
+        for item in items[: args.max_per_poll]:
             try:
                 _process(item, config, args)
             except Exception as exc:

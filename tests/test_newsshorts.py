@@ -84,3 +84,28 @@ def test_make_draft_offline_end_to_end(tmp_path):
     assert (draft / "video.mp4").stat().st_size > 0
     assert meta["status"] == "pending" and meta["duration"] > 1
     assert list_drafts(config, "pending") == [draft]
+
+
+def test_senior_ranking_puts_relevant_topics_first():
+    from newsshorts.audience import SENIOR, rank_items, topic_score
+
+    sports = NewsItem(id="1", source="s", title="프로야구 개막전 결과", summary="", link="")
+    pension = NewsItem(id="2", source="s", title="기초연금 내년 인상", summary="65세 이상 대상", link="")
+    assert topic_score(sports, SENIOR) == 0
+    assert topic_score(pension, SENIOR) > 0
+    assert rank_items([sports, pension], SENIOR) == [pension, sports]
+
+
+def test_unknown_audience_rejected():
+    from newsshorts.audience import get_audience
+
+    with pytest.raises(ValueError):
+        get_audience("teen")
+
+
+def test_senior_prompt_and_hashtags_reach_script():
+    from newsshorts.audience import SENIOR
+    from newsshorts.script import SYSTEM_PROMPT
+
+    assert "50~70대" in SYSTEM_PROMPT + SENIOR.prompt
+    assert generate_offline(ITEM, SENIOR).hashtags == list(SENIOR.default_hashtags)

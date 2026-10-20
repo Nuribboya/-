@@ -29,9 +29,11 @@ pip install -r newsshorts/requirements.txt
 | --- | --- |
 | `sources` | 감시할 RSS 주소 목록. 소스별로 `keywords`를 달면 그 단어가 들어간 기사만 처리 |
 | `keywords` | 전체 공통 키워드 필터 (비우면 전부) |
+| `audience` | 시청자층. `senior`(50~70대, 기본값) 또는 `general` |
+| `min_topic_score` | 시청자층 관심 주제 점수가 이보다 낮은 기사는 건너뜀 (0이면 전부 처리) |
 | `poll_seconds` | 피드 확인 간격(초) |
 | `model` | 대본을 쓸 Claude 모델 |
-| `voice`, `voice_rate` | TTS 음성. `ko-KR-InJoonNeural`(남), `ko-KR-SunHiNeural`(여) |
+| `voice`, `voice_rate` | TTS 음성. `ko-KR-InJoonNeural`(남), `ko-KR-SunHiNeural`(여). `voice_rate`를 비우면 시청자층 기본 속도 사용 |
 | `telegram_bot_token`, `telegram_chat_id` | 넣으면 초안 영상을 텔레그램으로 바로 보내줌 |
 | `youtube_*` | 업로드 설정 |
 
@@ -72,6 +74,21 @@ python -m newsshorts.cli --config newsshorts/config.json reject  drafts/20261020
 - 기본 할당량으로는 하루 약 6개까지 업로드할 수 있습니다.
 - AI 음성을 쓰므로 업로드할 때 "합성 콘텐츠 포함" 표시를 자동으로 켭니다.
 
+## 중장년·노년층 맞춤 (`audience: "senior"`)
+
+`newsshorts/audience.py`의 `SENIOR` 설정이 아래를 한꺼번에 바꿉니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 기사 우선순위 | 연금·건강보험·세금·물가·부동산·의료·요양·보이스피싱·대통령/국회 같은 주제에 점수를 매겨, 한 번에 새 기사가 여러 개 뜨면 점수 높은 것부터 영상으로 만듦. 제목에 들어간 단어는 2배로 계산 |
+| 대본 말투 | 앵커식 '~습니다' 체, 유행어·영어 약어 금지, 어려운 제도 이름은 바로 풀어서 설명 |
+| 내용 | 첫 문장에서 시청자와 왜 관련 있는지 말하고, 기사에 근거가 있을 때만 "누가, 언제부터, 얼마나" 영향을 받는지 한 문장 추가 |
+| 제목 | "65세 이상 기초연금, 내년부터 이렇게 바뀝니다"처럼 대상과 변화가 바로 보이는 형태, 유명 인물·기관 이름을 앞에, 짧은 질문형 허용. 불안을 부풀리는 표현은 금지 |
+| 화면 | 글씨 15% 크게, 자막은 한 번에 최대 2줄, 검은 박스 위 노란 글씨로 대비 강화 |
+| 음성 | 일반 설정(+10%)보다 느린 기본 속도(+0%) |
+
+주제 점수표(`topic_weights`)는 채널 반응을 보면서 직접 고치면 됩니다. 관련 기사만 만들고 싶으면 `min_topic_score`를 3 정도로 올리세요.
+
 ## 대본 원칙 (Claude 프롬프트에 들어 있음)
 
 - 기사에 없는 사실·수치·발언은 만들지 않음
@@ -81,6 +98,7 @@ python -m newsshorts.cli --config newsshorts/config.json reject  drafts/20261020
 ## 구조
 
 - `config.py` — 설정 로드
+- `audience.py` — 시청자층 프리셋(대본 지시, 주제 점수, 화면·음성 설정)
 - `sources.py` — RSS 수집, 키워드 필터, 중복 방지(`seen.json`)
 - `script.py` — Claude 대본 생성(JSON 스키마 강제) + 오프라인 템플릿
 - `tts.py` — edge-tts 음성 + 문장별 자막 타이밍

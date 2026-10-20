@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from newsshorts.audience import get_audience
 from newsshorts.config import Config
 from newsshorts.render import render_video, resolve_font
 from newsshorts.script import make_script
@@ -23,19 +24,22 @@ def make_draft(item: NewsItem, config: Config, use_claude: bool = True, use_tts:
     draft = Path(config.output_dir) / f"{stamp}_{_slug(item.title)}"
     draft.mkdir(parents=True, exist_ok=True)
 
-    script = make_script(item, config.model, use_claude=use_claude)
+    audience = get_audience(config.audience)
+    script = make_script(item, config.model, use_claude=use_claude, audience=audience)
     audio = draft / "narration.mp3"
-    cues = synthesize(script.sentences, config.voice, config.voice_rate, audio, use_tts=use_tts)
+    rate = config.voice_rate or audience.voice_rate
+    cues = synthesize(script.sentences, config.voice, rate, audio, use_tts=use_tts)
     total = max(audio_duration(audio), cues[-1].end + 0.3)
 
     font = resolve_font(config.font_path)
     video = render_video(script.title, script.quote, item.source, cues, audio, total,
-                         draft / "video.mp4", font)
+                         draft / "video.mp4", font, audience)
 
     meta = {
         "status": "pending",
         "item": item.to_dict(),
         "script": script.to_dict(),
+        "audience": audience.name,
         "duration": round(total, 2),
         "video": video.name,
         "created_at": datetime.now().isoformat(timespec="seconds"),

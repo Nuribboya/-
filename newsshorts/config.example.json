@@ -1,15 +1,18 @@
 {
   "sources": [
-    {"name": "연합뉴스", "url": "https://www.yna.co.kr/rss/politics.xml"},
+    {"name": "연합뉴스 정치", "url": "https://www.yna.co.kr/rss/politics.xml"},
+    {"name": "연합뉴스 경제", "url": "https://www.yna.co.kr/rss/economy.xml"},
     {"name": "구글뉴스", "url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=ko&gl=KR&ceid=KR:ko"}
   ],
   "keywords": [],
+  "audience": "senior",
+  "min_topic_score": 0,
   "poll_seconds": 120,
   "output_dir": "drafts",
   "state_file": "drafts/seen.json",
   "model": "claude-opus-5-5",
   "voice": "ko-KR-InJoonNeural",
-  "voice_rate": "+10%",
+  "voice_rate": null,
   "font_path": null,
   "youtube_client_secret": "client_secret.json",
   "youtube_token": "youtube_token.json",
