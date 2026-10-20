@@ -2,6 +2,7 @@
 (function () {
   "use strict";
 
+  const CONFIG = window.APP_CONFIG || {};
   const STORAGE_KEY = "korea-route-v1";
   const END_SUFFIX = "__end"; // 왕복일 때 출발지를 복제한 도착점 id
   const KOREA_BBOX = "124.5,33.0,131.0,38.7";
@@ -405,9 +406,45 @@
   let suggestions = [];
   let activeIdx = -1;
 
-  async function search(q) {
-    const seq = ++searchSeq;
-    let items = [];
+  /* 카카오 장소 검색: 한국 가게/식당 데이터가 OSM보다 훨씬 풍부하다 (JS 키가 있을 때만) */
+  let kakaoPlaces = null;
+
+  function loadKakao() {
+    if (!CONFIG.kakaoJsKey) return Promise.resolve(null);
+    if (!kakaoPlaces) {
+      kakaoPlaces = new Promise((resolve) => {
+        const s = document.createElement("script");
+        s.src = "https://dapi.kakao.com/v2/maps/sdk.js?autoload=false&libraries=services&appkey=" + encodeURIComponent(CONFIG.kakaoJsKey);
+        s.onload = () => kakao.maps.load(() => resolve(new kakao.maps.services.Places()));
+        s.onerror = () => resolve(null);
+        document.head.appendChild(s);
+      });
+    }
+    return kakaoPlaces;
+  }
+
+  async function searchKakao(q) {
+    const places = await loadKakao();
+    if (!places) return null;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 6000);
+      places.keywordSearch(q, (data, status) => {
+        clearTimeout(timer);
+        const S = kakao.maps.services.Status;
+        if (status === S.ZERO_RESULT) return resolve([]);
+        if (status !== S.OK) return resolve(null);
+        resolve(data.map((d) => ({
+          name: d.place_name,
+          en: "",
+          sub: (d.road_address_name || d.address_name).split(" ").slice(0, 2).join(" "),
+          lat: +d.y,
+          lng: +d.x,
+        })));
+      }, { size: 6 });
+    });
+  }
+
+  async function searchOsm(q) {
     try {
       // Photon은 한 번에 한 언어만 돌려줘서, 현지어/영어를 각각 받아 OSM id로 합친다
       const base = "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) + "&limit=6&bbox=" + KOREA_BBOX;
@@ -417,7 +454,7 @@
       ]);
       const key = (p) => p.osm_type + p.osm_id;
       const enById = new Map(english.features.map((f) => [key(f.properties), f.properties]));
-      items = local.features.map((f) => {
+      return local.features.map((f) => {
         const p = f.properties;
         const pe = enById.get(key(p)) || {};
         const sub = [pe.district || p.district, pe.city || p.city || pe.county || p.county, pe.state || p.state]
@@ -431,18 +468,40 @@
           "https://nominatim.openstreetmap.org/search?format=jsonv2&namedetails=1&countrycodes=kr&limit=6&accept-language=" +
             state.lang + "&q=" + encodeURIComponent(q), 6000
         );
-        items = data.map((d) => ({
+        return data.map((d) => ({
           ...pickNames(d.namedetails, d.display_name.split(",")[0]),
           sub: d.display_name.split(",").slice(1, 3).join(","),
           lat: +d.lat,
           lng: +d.lon,
         }));
       } catch (e2) {
-        if (seq === searchSeq) showSuggestions(null);
-        return;
+        return null;
       }
     }
-    if (seq === searchSeq) showSuggestions(items);
+  }
+
+  /*
+   * 카카오와 OSM 결과를 합친다. 같은 장소(150m 이내)는 카카오 쪽을 남기고
+   * OSM 의 영어 이름만 가져온다. 한글로 검색하면 카카오 결과를 먼저 보여준다.
+   */
+  function mergeResults(q, kakaoItems, osmItems) {
+    const k = kakaoItems || [];
+    const rest = (osmItems || []).filter((o) => {
+      const same = k.find((x) => RouteOpt.haversineKm(x, o) < 0.15);
+      if (!same) return true;
+      if (!same.en && o.en) same.en = o.en;
+      return false;
+    });
+    const kakaoFirst = state.lang === "ko" || Romanize.hasHangul(q);
+    return (kakaoFirst ? k.concat(rest) : rest.concat(k)).slice(0, 8);
+  }
+
+  async function search(q) {
+    const seq = ++searchSeq;
+    const [kakaoItems, osmItems] = await Promise.all([searchKakao(q), searchOsm(q)]);
+    if (seq !== searchSeq) return;
+    if (kakaoItems === null && osmItems === null) return showSuggestions(null);
+    showSuggestions(mergeResults(q, kakaoItems, osmItems));
   }
 
   function showSuggestions(items) {
@@ -455,7 +514,8 @@
     } else {
       els.suggestions.innerHTML = items
         .map((s, i) => {
-          const sub = [localName(s), s.sub].filter(Boolean).join(" · ");
+          const area = state.lang === "en" && Romanize.hasHangul(s.sub) ? Romanize.romanize(s.sub) : s.sub;
+          const sub = [localName(s), area].filter(Boolean).join(" · ");
           return '<li data-i="' + i + '">' + esc(displayName(s)) + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</li>";
         })
         .join("");

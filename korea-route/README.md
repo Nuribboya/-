@@ -5,7 +5,10 @@
 
 ## 기능
 
-- 장소 검색(Photon, 실패 시 Nominatim) 또는 지도 클릭으로 추가
+- 장소 검색 또는 지도 클릭으로 추가
+  - 카카오 JS 키가 있으면 카카오 장소 검색 + OpenStreetMap(Photon, 실패 시 Nominatim) 검색을 합쳐서 보여준다.
+    같은 장소(150m 이내)는 카카오 결과를 남기고 OSM의 영어 이름을 붙인다.
+  - 키가 없으면 OpenStreetMap 검색만 쓴다.
 - 최적 방문 순서 계산 (`optimizer.js`)
   - 13곳 이하: Held-Karp 동적계획법으로 정확한 최적해
   - 그 이상: 최근접 이웃 + 2-opt 근사
@@ -30,6 +33,19 @@ python3 -m http.server 8000   # http://localhost:8000
 
 GitHub Pages, Cloudflare Pages 같은 무료 정적 호스팅에 이 폴더를 그대로 올리면 된다.
 
+## 카카오 장소 검색 켜기
+
+1. https://developers.kakao.com 로그인 → **내 애플리케이션 → 애플리케이션 추가하기**
+2. 만든 앱 → **앱 키**에서 **JavaScript 키** 복사 (REST API 키 아님)
+3. **플랫폼 → Web → 사이트 도메인**에 등록
+   - `https://nuribboya.github.io`
+   - 로컬 테스트용 `http://localhost:8000`
+4. **카카오맵 사용 설정**을 켠다 (앱 설정의 카카오맵 메뉴에서 활성화. 꺼져 있으면 키가 있어도 지도/검색 SDK가 거절된다)
+5. `config.js`의 `kakaoJsKey`에 붙여넣기
+
+JavaScript 키는 원래 브라우저에 노출되는 키라 저장소에 올려도 된다. 등록한 도메인에서만 동작한다.
+REST API 키와 Admin 키는 절대 `config.js`에 넣지 말 것.
+
 ## 테스트
 
 ```bash
@@ -38,6 +54,8 @@ node --test korea-route/optimizer.test.js korea-route/romanize.test.js
 
 ## 한계와 다음 단계
 
+- 카카오 길찾기(카카오모빌리티) API는 REST 키가 필요해서 브라우저에서 바로 부를 수 없다.
+  자동차 실제 이동시간을 카카오로 받으려면 키를 숨겨줄 작은 서버(예: Cloudflare Workers)가 필요하다.
 - 대중교통 시간은 직선거리 기반 추정치다. 실제 시간표/환승 반영은 카카오모빌리티나 ODsay 같은
   대중교통 API(키 필요)를 붙여야 한다.
 - 공개 데모 서버(OSRM, Photon, Nominatim, OSM 타일)를 쓰고 있어서, 트래픽이 늘면
