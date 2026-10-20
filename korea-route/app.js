@@ -9,23 +9,29 @@
     car: "https://router.project-osrm.org",
     walk: "https://routing.openstreetmap.de/routed-foot",
   };
+  // [한국어 이름, 영어 이름, 위도, 경도]
   const PRESETS = {
     busan: [
-      ["Busan Station", 35.1151, 129.0422],
-      ["Haeundae Beach", 35.1587, 129.1604],
-      ["Gamcheon Culture Village", 35.0975, 129.0106],
-      ["Gwangalli Beach", 35.1532, 129.1186],
-      ["Jagalchi Market", 35.0966, 129.0306],
-      ["Haedong Yonggungsa Temple", 35.1884, 129.2233],
-      ["Seomyeon", 35.1578, 129.06],
+      ["부산역", "Busan Station", 35.1151, 129.0422],
+      ["해운대해수욕장", "Haeundae Beach", 35.1587, 129.1604],
+      ["감천문화마을", "Gamcheon Culture Village", 35.0975, 129.0106],
+      ["광안리해수욕장", "Gwangalli Beach", 35.1532, 129.1186],
+      ["자갈치시장", "Jagalchi Market", 35.0966, 129.0306],
+      ["해동용궁사", "Haedong Yonggungsa Temple", 35.1884, 129.2233],
+      ["서면", "Seomyeon", 35.1578, 129.06],
     ],
     southeast: [
-      ["Busan Station", 35.1151, 129.0422],
-      ["Gyeongju (Bulguksa)", 35.7901, 129.3321],
-      ["Gimhae (Suro King's Tomb)", 35.2333, 128.8775],
-      ["Tongyeong", 34.8544, 128.4331],
-      ["Ulsan", 35.5384, 129.3114],
+      ["부산역", "Busan Station", 35.1151, 129.0422],
+      ["경주 불국사", "Gyeongju (Bulguksa)", 35.7901, 129.3321],
+      ["김해 수로왕릉", "Gimhae (Suro King's Tomb)", 35.2333, 128.8775],
+      ["통영", "Tongyeong", 34.8544, 128.4331],
+      ["울산", "Ulsan", 35.5384, 129.3114],
     ],
+  };
+  const TILES = {
+    // 영어: 라틴 문자 라벨 지도 / 한국어: OSM 기본(현지어 라벨)
+    en: ["https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", "© OpenStreetMap © CARTO"],
+    ko: ["https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "© OpenStreetMap"],
   };
 
   const I18N = {
@@ -172,7 +178,7 @@
       history.replaceState(null, "", location.pathname + location.search);
       return {
         mode: data.m,
-        places: data.p.map(([name, lat, lng]) => newPlace(String(name), +lat, +lng)),
+        places: data.p.map(([name, lat, lng, en]) => newPlace(String(name), +lat, +lng, en ? String(en) : "")),
       };
     } catch (e) {
       return null;
@@ -180,7 +186,10 @@
   }
 
   function shareUrl() {
-    const data = { m: state.mode, p: state.places.map((p) => [p.name, +p.lat.toFixed(5), +p.lng.toFixed(5)]) };
+    const data = {
+      m: state.mode,
+      p: state.places.map((p) => [p.name, +p.lat.toFixed(5), +p.lng.toFixed(5)].concat(p.en ? [p.en] : [])),
+    };
     const bytes = new TextEncoder().encode(JSON.stringify(data));
     const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     return location.origin + location.pathname + "#p=" + b64;
@@ -210,8 +219,29 @@
     return km < 1 ? Math.round(km * 1000) + " m" : km.toFixed(1) + " km";
   }
 
-  function newPlace(name, lat, lng) {
-    return { id: Math.random().toString(36).slice(2, 10), name, lat, lng, done: false };
+  /* name: 현지(한국어) 이름, en: 영어 이름(없으면 빈 문자열) */
+  function newPlace(name, lat, lng, en) {
+    return { id: Math.random().toString(36).slice(2, 10), name, en: en || "", lat, lng, done: false };
+  }
+
+  function displayName(p) {
+    if (state.lang === "ko") return p.name || p.en;
+    if (p.en) return p.en;
+    return Romanize.hasHangul(p.name) ? Romanize.romanize(p.name) : p.name;
+  }
+
+  /* 영어 화면에서 한글 이름을 같이 보여준다 (택시 기사/가게에 보여주기용) */
+  function localName(p) {
+    return state.lang === "en" && Romanize.hasHangul(p.name) ? p.name : "";
+  }
+
+  /* OSM 이름 태그에서 한국어/영어 이름을 고른다 */
+  function pickNames(tags, fallback) {
+    const t = tags || {};
+    const name = t["name:ko"] || t.name || fallback || "";
+    let en = t["name:en"] || "";
+    if (en === name || Romanize.hasHangul(en)) en = "";
+    return { name, en };
   }
 
   function setStatus(msg) { els.status.textContent = msg || ""; }
@@ -309,7 +339,7 @@
       }
       const geometry = await getGeometry(ordered, state.mode);
       state.result = {
-        stops: ordered.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lng: p.lng, here: !!p.here })),
+        stops: ordered.map((p) => ({ id: p.id, name: p.name, en: p.en || "", lat: p.lat, lng: p.lng, here: !!p.here })),
         legs,
         total: RouteOpt.routeCost(durations, order),
         naiveTotal: RouteOpt.routeCost(durations, naive),
@@ -340,8 +370,8 @@
 
   /* ---------- 장소 편집 ---------- */
 
-  function addPlace(name, lat, lng) {
-    state.places.push(newPlace(name, lat, lng));
+  function addPlace(name, lat, lng, en) {
+    state.places.push(newPlace(name, lat, lng, en));
     state.result = null;
     saveState();
     render();
@@ -379,23 +409,30 @@
     const seq = ++searchSeq;
     let items = [];
     try {
-      const lang = state.lang === "en" ? "&lang=en" : "";
-      const data = await fetchJson(
-        "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) + "&limit=6&bbox=" + KOREA_BBOX + lang, 6000
-      );
-      items = data.features.map((f) => {
+      // Photon은 한 번에 한 언어만 돌려줘서, 현지어/영어를 각각 받아 OSM id로 합친다
+      const base = "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) + "&limit=6&bbox=" + KOREA_BBOX;
+      const [local, english] = await Promise.all([
+        fetchJson(base, 6000),
+        fetchJson(base + "&lang=en", 6000).catch(() => ({ features: [] })),
+      ]);
+      const key = (p) => p.osm_type + p.osm_id;
+      const enById = new Map(english.features.map((f) => [key(f.properties), f.properties]));
+      items = local.features.map((f) => {
         const p = f.properties;
-        const sub = [p.street, p.district, p.city || p.county, p.state].filter(Boolean).join(", ");
-        return { name: p.name || sub, sub, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
+        const pe = enById.get(key(p)) || {};
+        const sub = [pe.district || p.district, pe.city || p.city || pe.county || p.county, pe.state || p.state]
+          .filter(Boolean).join(", ");
+        const names = pickNames({ name: p.name, "name:en": pe.name }, sub);
+        return { ...names, sub, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
       }).filter((x) => x.name);
     } catch (e) {
       try {
         const data = await fetchJson(
-          "https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=kr&limit=6&accept-language=" +
+          "https://nominatim.openstreetmap.org/search?format=jsonv2&namedetails=1&countrycodes=kr&limit=6&accept-language=" +
             state.lang + "&q=" + encodeURIComponent(q), 6000
         );
         items = data.map((d) => ({
-          name: d.name || d.display_name.split(",")[0],
+          ...pickNames(d.namedetails, d.display_name.split(",")[0]),
           sub: d.display_name.split(",").slice(1, 3).join(","),
           lat: +d.lat,
           lng: +d.lon,
@@ -417,7 +454,10 @@
       els.suggestions.innerHTML = "<li>" + esc(t("noResults")) + "</li>";
     } else {
       els.suggestions.innerHTML = items
-        .map((s, i) => '<li data-i="' + i + '">' + esc(s.name) + (s.sub ? "<small>" + esc(s.sub) + "</small>" : "") + "</li>")
+        .map((s, i) => {
+          const sub = [localName(s), s.sub].filter(Boolean).join(" · ");
+          return '<li data-i="' + i + '">' + esc(displayName(s)) + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</li>";
+        })
         .join("");
     }
     els.suggestions.hidden = false;
@@ -431,7 +471,7 @@
   function pickSuggestion(i) {
     const s = suggestions[i];
     if (!s) return;
-    addPlace(s.name, s.lat, s.lng);
+    addPlace(s.name, s.lat, s.lng, s.en);
     els.search.value = "";
     hideSuggestions();
   }
@@ -461,7 +501,7 @@
         else if (i === n - 1 && state.endAtLast && !state.roundTrip) badge = '<span class="badge">' + esc(t("end")) + "</span>";
         return (
           '<li data-id="' + p.id + '"' + (p.done ? ' class="done"' : "") + ">" +
-          '<span class="name">' + esc(p.name) + "</span>" + badge +
+          '<span class="name">' + esc(displayName(p)) + (localName(p) ? "<small>" + esc(localName(p)) + "</small>" : "") + "</span>" + badge +
           (i > 0 ? '<button type="button" class="icon" data-act="start" title="' + esc(t("setStart")) + '" aria-label="' + esc(t("setStart")) + '">★</button>' : "") +
           '<button type="button" class="icon" data-act="done" aria-pressed="' + p.done + '" title="' + esc(t("markDone")) + '" aria-label="' + esc(t("markDone")) + '">✓</button>' +
           '<button type="button" class="icon" data-act="remove" title="' + esc(t("remove")) + '" aria-label="' + esc(t("remove")) + '">✕</button>' +
@@ -505,10 +545,11 @@
     els.steps.innerHTML = r.stops
       .map((s, i) => {
         const label = s.here ? "●" : s.id.endsWith(END_SUFFIX) ? "↩" : String(++num);
-        const name = s.here ? t("youAreHere") : s.name;
+        const name = s.here ? t("youAreHere") : displayName(s);
+        const local = s.here ? "" : localName(s);
         const done = doneIds.has(s.id) ? ' style="text-decoration:line-through;opacity:.6"' : "";
         let html = '<li><div class="step-place"><span class="num' + (s.here ? " here" : "") + '">' + label + "</span>" +
-          "<span" + done + ">" + esc(name) + "</span></div>";
+          "<span" + done + ">" + esc(name) + (local ? "<small>" + esc(local) + "</small>" : "") + "</span></div>";
         if (i < r.legs.length) {
           const leg = r.legs[i];
           html += '<div class="leg">' + fmtDuration(leg.sec) + " · " + fmtKm(leg.km) + directionsLinks(s, r.stops[i + 1], r.mode) + "</div>";
@@ -523,32 +564,39 @@
   function initMap() {
     if (typeof L === "undefined") return;
     map = L.map("map", { zoomControl: true }).setView([36.3, 127.8], 7);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap",
-    }).addTo(map);
     layer = L.layerGroup().addTo(map);
     map.on("click", onMapClick);
   }
 
   async function onMapClick(e) {
     const { lat, lng } = e.latlng;
-    let name = t("pin") + " " + (state.places.length + 1);
+    let names = { name: t("pin") + " " + (state.places.length + 1), en: "" };
     try {
       const d = await fetchJson(
-        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=" + state.lang + "&lat=" + lat + "&lon=" + lng, 5000
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&namedetails=1&accept-language=ko&lat=" + lat + "&lon=" + lng, 5000
       );
-      if (d && (d.name || d.display_name)) name = d.name || d.display_name.split(",").slice(0, 2).join(",");
+      if (d && (d.namedetails || d.display_name)) {
+        names = pickNames(d.namedetails, d.display_name.split(",").slice(0, 2).join(","));
+      }
     } catch (err) { /* 기본 이름 사용 */ }
-    addPlace(name, lat, lng);
+    addPlace(names.name, lat, lng, names.en);
   }
 
   function pinIcon(label, cls) {
     return L.divIcon({ className: "", html: '<div class="pin ' + (cls || "") + '">' + esc(label) + "</div>", iconSize: [26, 26], iconAnchor: [13, 13] });
   }
 
+  let tiles = null;
+  let tilesLang = null;
+
   function renderMap() {
     if (!map) return;
+    if (tilesLang !== state.lang) {
+      if (tiles) map.removeLayer(tiles);
+      const [url, attribution] = TILES[state.lang] || TILES.en;
+      tiles = L.tileLayer(url, { maxZoom: 19, subdomains: "abc", attribution }).addTo(map);
+      tilesLang = state.lang;
+    }
     layer.clearLayers();
     const r = state.result;
     if (r) {
@@ -558,11 +606,11 @@
       r.stops.forEach((s) => {
         if (s.id.endsWith(END_SUFFIX)) return; // 왕복 도착점은 출발점과 같은 위치
         const label = s.here ? "●" : String(++num);
-        L.marker([s.lat, s.lng], { icon: pinIcon(label, s.here ? "here" : "") }).bindTooltip(s.here ? t("youAreHere") : s.name).addTo(layer);
+        L.marker([s.lat, s.lng], { icon: pinIcon(label, s.here ? "here" : "") }).bindTooltip(s.here ? t("youAreHere") : displayName(s)).addTo(layer);
       });
     } else {
       state.places.forEach((p) => {
-        L.marker([p.lat, p.lng], { icon: pinIcon("•", "pending") }).bindTooltip(p.name).addTo(layer);
+        L.marker([p.lat, p.lng], { icon: pinIcon("•", "pending") }).bindTooltip(displayName(p)).addTo(layer);
       });
     }
   }
@@ -612,7 +660,7 @@
 
     document.querySelectorAll("[data-preset]").forEach((b) =>
       b.addEventListener("click", () => {
-        state.places = PRESETS[b.dataset.preset].map(([name, lat, lng]) => newPlace(name, lat, lng));
+        state.places = PRESETS[b.dataset.preset].map(([name, en, lat, lng]) => newPlace(name, lat, lng, en));
         state.result = null;
         saveState();
         render();

@@ -177,3 +177,4 @@ button, input, select { font: inherit; color: inherit; }
 }
 .pin.here { background: var(--good); }
 .pin.pending { background: var(--muted); }
+.places .name small, .step-place small { display: block; color: var(--muted); font-size: 12px; }
