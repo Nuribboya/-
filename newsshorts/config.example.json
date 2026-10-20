@@ -22,6 +22,13 @@
   "youtube_token": "youtube_token.json",
   "youtube_privacy": "public",
   "youtube_category_id": "25",
+  "auto_publish": false,
+  "auto_regions": ["us"],
+  "auto_min_sources": 2,
+  "auto_window_minutes": 90,
+  "auto_min_topic_score": 4,
+  "auto_daily_limit": 5,
+  "recent_file": "drafts/recent.json",
   "telegram_bot_token": null,
   "telegram_chat_id": null
 }

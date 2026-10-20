@@ -39,6 +39,17 @@ class Config:
     youtube_token: str = "youtube_token.json"
     youtube_privacy: str = "public"
     youtube_category_id: str = "25"  # News & Politics
+    # Fully automatic publishing for big stories (see breaking.py). Off by default.
+    auto_publish: bool = False
+    auto_regions: list[str] = field(default_factory=lambda: ["us"])
+    # A story is "big" if flagged breaking or reported by this many distinct sources...
+    auto_min_sources: int = 2
+    # ...within this window.
+    auto_window_minutes: int = 90
+    auto_min_topic_score: int = 4
+    # Default YouTube API quota allows roughly 6 uploads a day.
+    auto_daily_limit: int = 5
+    recent_file: str = "drafts/recent.json"
     # Optional Telegram notification when a draft is ready.
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None

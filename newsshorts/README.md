@@ -53,9 +53,10 @@ python -m newsshorts.cli --config newsshorts/config.json watch
 # 3) 초안 목록 보기
 python -m newsshorts.cli --config newsshorts/config.json list --status pending
 
-# 4) 확인 후 업로드 / 버리기
+# 4) 확인 후 업로드 / 버리기 / 이미 올린 영상 내리기
 python -m newsshorts.cli --config newsshorts/config.json approve drafts/20261020_..._제목
 python -m newsshorts.cli --config newsshorts/config.json reject  drafts/20261020_..._제목
+python -m newsshorts.cli --config newsshorts/config.json takedown drafts/20261020_..._제목
 ```
 
 초안 폴더(`drafts/날짜_제목/`)에는 `video.mp4`, `narration.mp3`, `draft.json`이 생깁니다.
@@ -115,6 +116,30 @@ python -m newsshorts.cli demo --us   # 미국 샘플 기사로 확인
 | 소문 기사 건너뛰기 | 찌라시·루머·괴소문·미확인 소문이 주제인 기사는 처리하지 않음 (`skip_rumors: false`로 끌 수 있음) |
 | 금지 내용 | 출처 없는 소문, 정치인의 사생활·건강·가족 의혹은 기사에 있어도 대본에 옮기지 않도록 지시 |
 
+## 큰 소식 자동 공개 (`breaking.py`, 기본은 꺼짐)
+
+설정에서 `"auto_publish": true`로 켜면, 아래 조건을 **모두** 통과한 영상은 사람 승인 없이 바로 유튜브에 올라갑니다.
+하나라도 걸리면 지금처럼 승인 대기 초안으로 남고, 걸린 이유가 `draft.json`의 `auto_blockers`에 기록됩니다.
+
+| 조건 | 기본값 |
+| --- | --- |
+| 자동 공개 대상 지역 (`auto_regions`) | 미국 소스만 |
+| 큰 소식: 원문이 속보(Breaking)이거나, 90분(`auto_window_minutes`) 안에 서로 다른 매체 2곳(`auto_min_sources`) 이상이 같은 소식을 보도 | |
+| 전망·관측 기사가 아닌 확인된 보도 | |
+| 소문 관련 기사가 아님 | |
+| 시청자 관심 주제 점수 (`auto_min_topic_score`) | 4 이상 |
+| Claude가 쓴 대본 (템플릿 대본은 제외) | |
+| 사실 확인 통과: Claude가 한 번 더 원문과 대본을 대조해 없는 사실, 과장된 확신, 숫자·이름·번역 오류, 비하 표현을 검사 | |
+| 하루 자동 공개 한도 (`auto_daily_limit`) | 5개 |
+
+- 첫 매체 보도로 초안을 만들어 두고, 다른 매체가 같은 소식을 보도하면 **새 영상을 또 만들지 않고** 기존 초안을 공개합니다.
+- 자동 공개되면 텔레그램으로 링크와 내리는 명령을 보내 줍니다.
+- 문제가 있으면 바로 내릴 수 있습니다:
+  ```bash
+  python -m newsshorts.cli --config newsshorts/config.json takedown drafts/폴더명
+  ```
+- 구글 심사를 받지 않은 API 프로젝트는 업로드가 비공개로 잠기므로, 자동 공개를 제대로 쓰려면 YouTube API 심사(audit)를 먼저 받아야 합니다.
+
 ## 대본 원칙 (Claude 프롬프트에 들어 있음)
 
 - 기사에 없는 사실·수치·발언은 만들지 않음
@@ -126,6 +151,7 @@ python -m newsshorts.cli demo --us   # 미국 샘플 기사로 확인
 - `config.py` — 설정 로드
 - `audience.py` — 시청자층 프리셋(대본 지시, 주제 점수, 화면·음성 설정)
 - `labels.py` — 원문 기준 말머리, 보도/전망 구분, 소문 기사 거르기, 출처 문장 보장
+- `breaking.py` — 여러 매체 동시 보도 감지, 자동 공개 조건 판정
 - `sources.py` — RSS 수집, 키워드 필터, 중복 방지(`seen.json`)
 - `script.py` — Claude 대본 생성(JSON 스키마 강제) + 오프라인 템플릿
 - `tts.py` — edge-tts 음성 + 문장별 자막 타이밍

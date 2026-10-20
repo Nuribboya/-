@@ -4,7 +4,8 @@ from pathlib import Path
 
 from newsshorts.config import Config
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# `youtube` is needed for takedown (delete); asked once together with upload.
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube"]
 
 
 def _credentials(config: Config):
@@ -56,3 +57,10 @@ def upload_short(config: Config, video: Path, title: str, description: str, tags
     while response is None:
         _, response = request.next_chunk()
     return response["id"]
+
+
+def delete_video(config: Config, video_id: str) -> None:
+    from googleapiclient.discovery import build
+
+    youtube = build("youtube", "v3", credentials=_credentials(config))
+    youtube.videos().delete(id=video_id).execute()

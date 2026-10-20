@@ -50,6 +50,8 @@ class Script:
     sentences: list[str]
     hashtags: list[str] = field(default_factory=list)
     description: str = ""
+    # "claude" or "template"; only Claude scripts are eligible for auto-publish.
+    generator: str = "claude"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -114,7 +116,56 @@ def generate_offline(item: NewsItem, audience: Audience = GENERAL) -> Script:
         sentences=sentences,
         hashtags=list(audience.default_hashtags),
         description=f"출처: {item.source}\n{item.link}",
+        generator="template",
     )
+
+
+FACT_CHECK_PROMPT = """너는 뉴스 영상 검수자다. 원문 기사와 영상 대본을 비교해 문제를 찾는다.
+문제로 보는 것:
+- 원문에 없는 사실, 수치, 날짜, 인물, 발언
+- 원문보다 확신을 키운 표현 (검토 중 → 확정, 가능성 → 사실)
+- 이름, 직함, 숫자, 단위의 오류나 잘못된 번역
+- 출처 없는 소문, 사생활·건강·가족 의혹
+- 특정 집단·진영을 비하하거나 적대감을 부추기는 표현
+원문을 한국어로 자연스럽게 옮기거나 요약한 것은 문제가 아니다.
+문제가 하나라도 있으면 ok는 false다."""
+
+FACT_CHECK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"},
+        "problems": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["ok", "problems"],
+    "additionalProperties": False,
+}
+
+
+def fact_check(item: NewsItem, script: Script, model: str) -> dict:
+    """Second, independent Claude pass that compares the script with the source."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    script_text = "\n".join([f"제목: {script.title}", f"인용: {script.quote}", *script.sentences])
+    response = client.beta.messages.create(
+        model=model,
+        max_tokens=16000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        system=FACT_CHECK_PROMPT,
+        output_config={
+            "effort": "high",
+            "format": {"type": "json_schema", "schema": FACT_CHECK_SCHEMA},
+        },
+        messages=[{"role": "user", "content": (
+            f"[원문]\n출처: {item.source}\n제목: {item.title}\n본문: {item.summary}\n\n"
+            f"[대본]\n{script_text}"
+        )}],
+    )
+    if response.stop_reason == "refusal":
+        return {"ok": False, "problems": ["검수 모델이 응답을 거절함"]}
+    text = next(b.text for b in response.content if b.type == "text")
+    return json.loads(text)
 
 
 def make_script(item: NewsItem, model: str, use_claude: bool = True, audience: Audience = GENERAL) -> Script:

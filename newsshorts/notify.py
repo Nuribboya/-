@@ -5,6 +5,19 @@ from pathlib import Path
 from newsshorts.config import Config
 
 
+def notify_text(config: Config, text: str) -> None:
+    if not (config.telegram_bot_token and config.telegram_chat_id):
+        return
+    import requests
+
+    url = f"https://api.telegram.org/bot{config.telegram_bot_token}/sendMessage"
+    try:
+        requests.post(url, data={"chat_id": config.telegram_chat_id, "text": text[:4000]},
+                      timeout=30).raise_for_status()
+    except Exception as exc:
+        print(f"[warn] Telegram notify failed: {exc}")
+
+
 def notify_draft(config: Config, draft: Path, title: str) -> None:
     """Send the draft video to Telegram so it can be reviewed from a phone."""
     if not (config.telegram_bot_token and config.telegram_chat_id):

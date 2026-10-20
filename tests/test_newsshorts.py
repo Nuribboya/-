@@ -150,3 +150,53 @@ def test_us_topics_score_case_insensitive():
     from newsshorts.audience import SENIOR, topic_score
 
     assert topic_score(US_SPEC, SENIOR) > 0
+
+
+def _meta(ok=True, generator="claude"):
+    return {"script": {"generator": generator}, "fact_check": {"ok": ok, "problems": [] if ok else ["x"]}}
+
+
+BIG = NewsItem(id="b1", source="NPR", title="Trump announces new tariffs on Korean cars and steel imports",
+               summary="The president signed the order on Tuesday.", link="", region="us")
+BIG_2 = NewsItem(id="b2", source="폴리티코", title="Trump signs order imposing tariffs on Korean cars, steel",
+                 summary="", link="", region="us")
+
+
+def test_same_story_matches_different_wording_only():
+    from newsshorts.breaking import same_story
+
+    assert same_story(BIG.title, BIG_2.title)
+    assert not same_story(BIG.title, "Senate passes farm bill after long debate")
+
+
+def test_auto_publish_requires_corroboration_and_checks(tmp_path):
+    from newsshorts.audience import SENIOR
+    from newsshorts.breaking import RecentStore, auto_publish_blockers
+
+    config = Config(auto_publish=True, recent_file=str(tmp_path / "r.json"))
+    recent = RecentStore(config.recent_file, 90)
+    recent.add(BIG)
+    # One outlet only: held for a human.
+    assert any("큰 소식 아님" in r for r in auto_publish_blockers(BIG, _meta(), recent, config, SENIOR, 0))
+    recent.add(BIG_2)
+    assert auto_publish_blockers(BIG, _meta(), recent, config, SENIOR, 0) == []
+    # Every other check still holds it back.
+    assert auto_publish_blockers(BIG, _meta(ok=False), recent, config, SENIOR, 0)
+    assert auto_publish_blockers(BIG, _meta(generator="template"), recent, config, SENIOR, 0)
+    assert auto_publish_blockers(BIG, _meta(), recent, config, SENIOR, config.auto_daily_limit)
+    assert auto_publish_blockers(US_SPEC, _meta(), recent, config, SENIOR, 0)  # speculative
+    assert auto_publish_blockers(BIG, _meta(), recent, Config(), SENIOR, 0)  # auto_publish off
+
+
+def test_recent_store_dedupes_story_and_expires(tmp_path):
+    from newsshorts.breaking import RecentStore
+
+    recent = RecentStore(tmp_path / "r.json", 90)
+    recent.add(BIG, now=1000.0)
+    recent.mark_draft(BIG, tmp_path / "d1")
+    recent.add(BIG_2, now=1100.0)
+    assert recent.existing_draft(BIG_2) == str(tmp_path / "d1")
+    recent.save()
+    reloaded = RecentStore(tmp_path / "r.json", 90)
+    reloaded.prune(now=1000.0 + 91 * 60)
+    assert [e.id for e in reloaded.entries] == ["b2"]

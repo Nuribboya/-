@@ -4,11 +4,13 @@ import argparse
 import time
 from pathlib import Path
 
-from newsshorts.audience import get_audience, rank_items, topic_score
+from newsshorts.audience import Audience, get_audience, rank_items, topic_score
+from newsshorts.breaking import RecentStore, auto_publish_blockers
 from newsshorts.config import Config, load_config
 from newsshorts.labels import is_rumor
-from newsshorts.notify import notify_draft
-from newsshorts.pipeline import list_drafts, load_draft, make_draft, save_draft
+from newsshorts.notify import notify_draft, notify_text
+from newsshorts.pipeline import (auto_published_today, list_drafts, load_draft, make_draft,
+                                 publish_draft, save_draft)
 from newsshorts.sources import NewsItem, SeenStore, new_items
 
 SAMPLE_ITEM = NewsItem(
@@ -37,12 +39,35 @@ SAMPLE_US_ITEM = NewsItem(
 )
 
 
-def _process(item: NewsItem, config: Config, args) -> None:
+def _process(item: NewsItem, config: Config, args) -> Path:
     print(f"[new] {item.source}: {item.title}")
     draft = make_draft(item, config, use_claude=not args.no_claude, use_tts=not args.no_tts)
     meta = load_draft(draft)
     print(f"[draft] {draft / 'video.mp4'}  ({meta['duration']}s)  제목: {meta['script']['title']}")
-    notify_draft(config, draft, meta["script"]["title"])
+    return draft
+
+
+def _try_auto_publish(config: Config, draft: Path, recent: RecentStore, audience: Audience,
+                      notify_hold: bool = True) -> None:
+    """Publish a pending draft right away if it clears every auto-publish check."""
+    meta = load_draft(draft)
+    if meta["status"] != "pending":
+        return
+    item = NewsItem(**meta["item"])
+    blockers = auto_publish_blockers(item, meta, recent, config, audience, auto_published_today(config))
+    meta["auto_blockers"] = blockers
+    save_draft(draft, meta)
+    title = meta["script"]["title"]
+    if blockers:
+        if config.auto_publish:
+            print(f"[hold] 승인 대기: {'; '.join(blockers)}")
+        if notify_hold:
+            notify_draft(config, draft, title)
+        return
+    video_id = publish_draft(config, draft, auto=True)
+    print(f"[auto-published] https://youtube.com/shorts/{video_id}")
+    notify_text(config, f"자동 공개됨\n{title}\nhttps://youtube.com/shorts/{video_id}\n\n"
+                        f"내리기: python -m newsshorts.cli takedown {draft}")
 
 
 def cmd_watch(config: Config, args) -> None:
@@ -52,8 +77,13 @@ def cmd_watch(config: Config, args) -> None:
         new_items(config, seen, prime=True)
         print("[info] 첫 실행: 지금 피드에 있는 기사는 건너뛰고, 이후 새 기사부터 만듭니다.")
     audience = get_audience(config.audience)
+    recent = RecentStore(config.recent_file, config.auto_window_minutes)
     while True:
-        items = [i for i in rank_items(new_items(config, seen), audience)
+        fresh = new_items(config, seen)
+        recent.prune()
+        for i in fresh:
+            recent.add(i)
+        items = [i for i in rank_items(fresh, audience)
                  if topic_score(i, audience) >= config.min_topic_score]
         if config.skip_rumors:
             for i in filter(is_rumor, items):
@@ -61,16 +91,27 @@ def cmd_watch(config: Config, args) -> None:
             items = [i for i in items if not is_rumor(i)]
         for item in items[: args.max_per_poll]:
             try:
-                _process(item, config, args)
+                existing = recent.existing_draft(item)
+                if existing:
+                    # Same story already drafted: don't make a second video, but another
+                    # outlet confirming it may now make the first draft eligible.
+                    print(f"[dup] 같은 소식 추가 보도({item.source}): {item.title}")
+                    draft = Path(existing)
+                else:
+                    draft = _process(item, config, args)
+                    recent.mark_draft(item, draft)
+                _try_auto_publish(config, draft, recent, audience, notify_hold=not existing)
             except Exception as exc:
                 print(f"[error] {item.title}: {exc}")
+        recent.save()
         if args.once:
             return
         time.sleep(config.poll_seconds)
 
 
 def cmd_demo(config: Config, args) -> None:
-    _process(SAMPLE_US_ITEM if args.us else SAMPLE_ITEM, config, args)
+    draft = _process(SAMPLE_US_ITEM if args.us else SAMPLE_ITEM, config, args)
+    notify_draft(config, draft, load_draft(draft)["script"]["title"])
 
 
 def cmd_list(config: Config, args) -> None:
@@ -80,18 +121,19 @@ def cmd_list(config: Config, args) -> None:
 
 
 def cmd_approve(config: Config, args) -> None:
-    from newsshorts.upload import upload_short
+    video_id = publish_draft(config, Path(args.draft))
+    print(f"[uploaded] https://youtube.com/shorts/{video_id}")
+
+
+def cmd_takedown(config: Config, args) -> None:
+    from newsshorts.upload import delete_video
 
     draft = Path(args.draft)
     meta = load_draft(draft)
-    script = meta["script"]
-    # Title/description can be edited in draft.json before approving.
-    video_id = upload_short(config, draft / meta["video"], script["title"],
-                            f"{script['description']}\n\n원문: {meta['item']['link']}",
-                            script["hashtags"])
-    meta.update(status="uploaded", youtube_id=video_id)
+    delete_video(config, meta["youtube_id"])
+    meta["status"] = "taken_down"
     save_draft(draft, meta)
-    print(f"[uploaded] https://youtube.com/shorts/{video_id}")
+    print(f"[taken down] {meta['youtube_id']}")
 
 
 def cmd_reject(config: Config, args) -> None:
@@ -119,14 +161,14 @@ def main() -> None:
     watch.add_argument("--max-per-poll", type=int, default=3)
 
     p = sub.add_parser("list")
-    p.add_argument("--status", choices=["pending", "uploaded", "rejected"])
-    for name in ("approve", "reject"):
+    p.add_argument("--status", choices=["pending", "uploaded", "rejected", "taken_down"])
+    for name in ("approve", "reject", "takedown"):
         sub.add_parser(name).add_argument("draft")
 
     args = parser.parse_args()
     config = load_config(args.config)
     {"watch": cmd_watch, "demo": cmd_demo, "list": cmd_list,
-     "approve": cmd_approve, "reject": cmd_reject}[args.command](config, args)
+     "approve": cmd_approve, "reject": cmd_reject, "takedown": cmd_takedown}[args.command](config, args)
 
 
 if __name__ == "__main__":

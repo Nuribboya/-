@@ -9,7 +9,7 @@ from newsshorts.audience import get_audience
 from newsshorts.config import Config
 from newsshorts.labels import finalize, report_type, title_labels
 from newsshorts.render import render_video, resolve_font
-from newsshorts.script import make_script
+from newsshorts.script import fact_check, make_script
 from newsshorts.sources import NewsItem
 from newsshorts.tts import audio_duration, synthesize
 
@@ -28,6 +28,13 @@ def make_draft(item: NewsItem, config: Config, use_claude: bool = True, use_tts:
     audience = get_audience(config.audience)
     script = finalize(make_script(item, config.model, use_claude=use_claude, audience=audience), item)
     labels = title_labels(item)
+    if script.generator == "claude":
+        try:
+            check = fact_check(item, script, config.model)
+        except Exception as exc:
+            check = {"ok": False, "problems": [f"검수 실패: {exc}"]}
+    else:
+        check = {"ok": False, "problems": ["템플릿 대본이라 검수하지 않음"]}
     audio = draft / "narration.mp3"
     rate = config.voice_rate or audience.voice_rate
     cues = synthesize(script.sentences, config.voice, rate, audio, use_tts=use_tts)
@@ -45,6 +52,7 @@ def make_draft(item: NewsItem, config: Config, use_claude: bool = True, use_tts:
         "audience": audience.name,
         "labels": labels,
         "report_type": report_type(item),
+        "fact_check": check,
         "duration": round(total, 2),
         "video": video.name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -59,6 +67,29 @@ def load_draft(draft: Path) -> dict:
 
 def save_draft(draft: Path, meta: dict) -> None:
     (draft / "draft.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def publish_draft(config: Config, draft: Path, auto: bool = False) -> str:
+    from newsshorts.upload import upload_short
+
+    meta = load_draft(draft)
+    script = meta["script"]
+    # Title/description can be edited in draft.json before approving.
+    video_id = upload_short(config, draft / meta["video"], script["title"],
+                            f"{script['description']}\n\n원문: {meta['item']['link']}",
+                            script["hashtags"])
+    meta.update(status="uploaded", youtube_id=video_id, auto=auto,
+                uploaded_at=datetime.now().isoformat(timespec="seconds"))
+    save_draft(draft, meta)
+    return video_id
+
+
+def auto_published_today(config: Config) -> int:
+    today = datetime.now().date().isoformat()
+    return sum(
+        1 for d in list_drafts(config, "uploaded")
+        if (m := load_draft(d)).get("auto") and m.get("uploaded_at", "").startswith(today)
+    )
 
 
 def list_drafts(config: Config, status: str | None = None) -> list[Path]:
