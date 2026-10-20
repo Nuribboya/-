@@ -84,6 +84,22 @@ def publish_draft(config: Config, draft: Path, auto: bool = False) -> str:
     return video_id
 
 
+def reject_draft(draft: Path) -> None:
+    meta = load_draft(draft)
+    meta["status"] = "rejected"
+    save_draft(draft, meta)
+
+
+def takedown_draft(config: Config, draft: Path) -> str:
+    from newsshorts.upload import delete_video
+
+    meta = load_draft(draft)
+    delete_video(config, meta["youtube_id"])
+    meta["status"] = "taken_down"
+    save_draft(draft, meta)
+    return meta["youtube_id"]
+
+
 def auto_published_today(config: Config) -> int:
     today = datetime.now().date().isoformat()
     return sum(

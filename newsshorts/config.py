@@ -30,6 +30,8 @@ class Config:
     output_dir: str = "drafts"
     state_file: str = "drafts/seen.json"
     model: str = "claude-opus-5-5"
+    # Optional; the ANTHROPIC_API_KEY environment variable works too. Keep config.json private.
+    anthropic_api_key: str | None = None
     voice: str = "ko-KR-InJoonNeural"
     # None uses the audience preset's speaking rate.
     voice_rate: str | None = None

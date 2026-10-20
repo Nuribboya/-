@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>뉴스 쇼츠 관리</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d92633'/%3E%3Cpath d='M12 9l12 7-12 7z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #16181d; --muted: #646b78; --line: #e2e5ea;
+    --accent: #d92633; --accent-text: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --chip: #eef0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --panel: #1b1e24; --text: #eceef2; --muted: #9aa1ad; --line: #2c3038;
+      --accent: #ef4452; --ok: #3cc47a; --warn: #f0a83c; --chip: #262a32;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1100px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0 8px 0 0; }
+  .pill { padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--chip); color: var(--muted); }
+  .pill.on { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .spacer { flex: 1; }
+  .btns { display: flex; gap: 8px; }
+  @media (max-width: 640px) {
+    .bar .spacer { display: none; }
+    .btns { flex-basis: 100%; }
+    .btns button { flex: 1; }
+  }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.danger { color: var(--accent); }
+  button:disabled { opacity: .5; cursor: wait; }
+  nav { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; gap: 4px; }
+  nav button { border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; background: none; color: var(--muted); }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .notice { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+            padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; font-size: 14px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .seg button.active { background: var(--text); color: var(--panel); border-color: var(--text); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+          display: grid; grid-template-columns: 200px 1fr; gap: 16px; margin-bottom: 14px; }
+  @media (max-width: 640px) { .card { grid-template-columns: 1fr; } video { max-width: 240px; margin: 0 auto; } }
+  video { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 10px; display: block; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .tag { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--chip); color: var(--muted); }
+  .tag.red { background: var(--accent); color: var(--accent-text); }
+  .tag.ok { color: var(--ok); } .tag.warn { color: var(--warn); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+  input, textarea, select { width: 100%; font: inherit; color: var(--text); background: var(--bg);
+                            border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  textarea { min-height: 70px; resize: vertical; }
+  .meta { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .meta a { color: inherit; }
+  ul.reasons { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--warn); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  pre.log { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+            font: 12.5px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+            max-height: 70vh; overflow: auto; margin: 0; }
+  fieldset { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 12px 16px 16px; margin: 0 0 14px; }
+  legend { font-weight: 700; padding: 0 6px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+  .check { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--text); font-size: 15px; }
+  .check input { width: auto; }
+  .src { display: grid; grid-template-columns: 1fr 2fr 90px auto; gap: 6px; margin-bottom: 6px; }
+  @media (max-width: 640px) { .src { grid-template-columns: 1fr 80px auto; } .src .url { grid-column: 1 / -1; grid-row: 2; } }
+  .hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--panel);
+           padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>뉴스 쇼츠 관리</h1>
+    <span id="watchPill" class="pill">멈춤</span>
+    <span id="autoPill" class="pill"></span>
+    <span class="spacer"></span>
+    <div class="btns">
+      <button id="pollBtn">지금 확인</button>
+      <button id="watchBtn" class="primary">감시 시작</button>
+    </div>
+  </div>
+  <nav>
+    <button data-tab="drafts" class="active">초안</button>
+    <button data-tab="log">기록</button>
+    <button data-tab="settings">설정</button>
+  </nav>
+</header>
+
+<main>
+  <div id="notices"></div>
+
+  <section id="tab-drafts">
+    <div class="row">
+      <div class="seg row" style="margin:0" id="filters">
+        <button data-status="pending" class="active">승인 대기</button>
+        <button data-status="uploaded">업로드됨</button>
+        <button data-status="rejected">거절</button>
+        <button data-status="taken_down">내림</button>
+        <button data-status="">전체</button>
+      </div>
+      <span class="spacer"></span>
+      <button id="demoKr">샘플 만들기</button>
+      <button id="demoUs">샘플(미국)</button>
+    </div>
+    <div id="drafts"></div>
+  </section>
+
+  <section id="tab-log" hidden>
+    <pre class="log" id="log"></pre>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <form id="settings"></form>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let pin = "";
+try { pin = localStorage.getItem("newsshorts-pin") || ""; } catch {}
+let statusFilter = "pending";
+let status = {};
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", "x-app": "1", "x-pin": pin, ...(opts.headers || {}) } });
+  if (res.status === 401) {
+    pin = prompt("PIN을 입력하세요 (앱을 켠 PC 화면에 표시됨)") || "";
+    try { localStorage.setItem("newsshorts-pin", pin); } catch {}
+    return api(path, opts);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+async function busy(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } catch (e) { toast("오류: " + e.message); } finally { btn.disabled = false; }
+}
+
+// ---- status ----
+async function refreshStatus() {
+  try { status = await api("/api/status"); } catch { return; }
+  const w = $("#watchPill");
+  w.textContent = status.watching ? "감시 중" : "멈춤";
+  w.classList.toggle("on", status.watching);
+  $("#watchBtn").textContent = status.watching ? "감시 중지" : "감시 시작";
+  $("#watchBtn").classList.toggle("primary", !status.watching);
+  $("#autoPill").textContent = status.auto_publish
+    ? `자동 공개 켜짐 · 오늘 ${status.auto_published_today}/${status.auto_daily_limit}` : "자동 공개 꺼짐";
+  $("#autoPill").classList.toggle("on", status.auto_publish);
+  const notes = [];
+  if (!status.claude_ready) notes.push("Claude API 키가 없어서 기사 제목·요약을 그대로 읽는 템플릿 대본으로 만들어집니다. 설정 → 연결에서 키를 넣으세요.");
+  if (!status.youtube_ready) notes.push("client_secret.json이 없어서 유튜브 업로드를 할 수 없습니다. README의 '유튜브 업로드 준비'를 참고하세요.");
+  $("#notices").innerHTML = notes.map(n => `<div class="notice">${esc(n)}</div>`).join("");
+  const log = $("#log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = (status.log || []).join("\n") || "아직 기록이 없습니다.";
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+$("#watchBtn").onclick = e => busy(e.target, async () => {
+  await post(status.watching ? "/api/watch/stop" : "/api/watch/start");
+  await refreshStatus();
+});
+$("#pollBtn").onclick = e => busy(e.target, async () => {
+  toast("새 기사를 확인하는 중…");
+  await post("/api/poll"); await refreshStatus(); await refreshDrafts(); toast("확인 완료");
+});
+
+// ---- drafts ----
+const STATUS_TEXT = { pending: "승인 대기", uploaded: "업로드됨", rejected: "거절", taken_down: "내림" };
+
+function draftCard(d) {
+  const s = d.script, check = d.fact_check || {};
+  const tags = (d.labels || []).map(l => `<span class="tag red">${esc(l)}</span>`).join("")
+    + `<span class="tag">${esc(STATUS_TEXT[d.status] || d.status)}</span>`
+    + `<span class="tag">${esc(d.report_type || "")}</span>`
+    + (check.ok ? `<span class="tag ok">사실 확인 통과</span>` : `<span class="tag warn">사실 확인 미통과</span>`)
+    + (d.auto ? `<span class="tag ok">자동 공개</span>` : "");
+  const problems = (check.problems || []).map(p => `<li>${esc(p)}</li>`).join("");
+  const blockers = d.status === "pending" && (d.auto_blockers || []).length
+    ? `<div class="meta">자동 공개 안 된 이유</div><ul class="reasons">${d.auto_blockers.map(b => `<li>${esc(b)}</li>`).join("")}</ul>` : "";
+  const editable = d.status === "pending";
+  const pinQ = pin ? `?pin=${encodeURIComponent(pin)}` : "";
+  const yt = d.youtube_id ? ` · <a href="https://youtube.com/shorts/${esc(d.youtube_id)}" target="_blank" rel="noopener">유튜브에서 보기</a>` : "";
+  return `<article class="card" data-name="${esc(d.name)}">
+    <video src="/media/${encodeURIComponent(d.name)}/video.mp4${pinQ}" controls preload="metadata" playsinline></video>
+    <div>
+      <div class="tags">${tags}</div>
+      <label>제목</label>
+      <input class="title" value="${esc(s.title)}" ${editable ? "" : "disabled"} maxlength="100">
+      <label>설명</label>
+      <textarea class="desc" ${editable ? "" : "disabled"}>${esc(s.description)}</textarea>
+      <div class="meta">${esc(d.item.source)} · ${esc(d.duration)}초 · ${esc((d.created_at || "").replace("T", " "))}
+        · <a href="${esc(d.item.link)}" target="_blank" rel="noopener">원문</a>${yt}</div>
+      ${problems ? `<ul class="reasons">${problems}</ul>` : ""}
+      ${blockers}
+      <div class="actions">
+        ${editable ? `<button class="primary" data-act="approve">승인하고 업로드</button>
+                      <button data-act="save">제목·설명 저장</button>
+                      <button class="danger" data-act="reject">거절</button>` : ""}
+        ${d.status === "uploaded" ? `<button class="danger" data-act="takedown">유튜브에서 내리기</button>` : ""}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function refreshDrafts() {
+  const box = $("#drafts");
+  // Don't wipe what the user is typing or a playing video.
+  if (box.contains(document.activeElement) && document.activeElement.matches("input, textarea")) return;
+  if ([...box.querySelectorAll("video")].some(v => !v.paused)) return;
+  let list;
+  try { list = await api(`/api/drafts?status=${statusFilter}`); } catch (e) { box.innerHTML = `<p class="empty">${esc(e.message)}</p>`; return; }
+  box.innerHTML = list.length ? list.map(draftCard).join("")
+    : `<p class="empty">초안이 없습니다. 감시를 시작하거나 '샘플 만들기'로 시험해 보세요.</p>`;
+}
+
+$("#drafts").onclick = e => {
+  const btn = e.target.closest("button[data-act]"); if (!btn) return;
+  const card = btn.closest(".card"), name = encodeURIComponent(card.dataset.name), act = btn.dataset.act;
+  const confirms = { approve: "유튜브에 업로드할까요?", reject: "이 초안을 거절할까요?", takedown: "유튜브에서 이 영상을 삭제할까요? 되돌릴 수 없습니다." };
+  if (confirms[act] && !confirm(confirms[act])) return;
+  busy(btn, async () => {
+    if (act === "save" || act === "approve") {
+      await post(`/api/drafts/${name}/update`, { title: $(".title", card).value, description: $(".desc", card).value });
+    }
+    if (act !== "save") await post(`/api/drafts/${name}/${act}`);
+    toast({ save: "저장했습니다", approve: "업로드했습니다", reject: "거절했습니다", takedown: "내렸습니다" }[act]);
+    document.activeElement.blur(); await refreshDrafts(); refreshStatus();
+  });
+};
+
+$("#filters").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  statusFilter = b.dataset.status;
+  [...$("#filters").children].forEach(x => x.classList.toggle("active", x === b));
+  refreshDrafts();
+};
+$("#demoKr").onclick = e => busy(e.target, async () => { toast("샘플 영상을 만드는 중… (수십 초)"); await post("/api/demo"); await refreshDrafts(); toast("샘플 초안을 만들었습니다"); });
+$("#demoUs").onclick = e => busy(e.target, async () => { toast("미국 샘플 영상을 만드는 중… (수십 초)"); await post("/api/demo?us=true"); await refreshDrafts(); toast("샘플 초안을 만들었습니다"); });
+
+// ---- settings ----
+const field = (key, label, type = "text", extra = "") =>
+  `<div><label for="f-${key}">${label}</label><input id="f-${key}" name="${key}" type="${type}" ${extra}></div>`;
+const check = (key, label) => `<label class="check"><input type="checkbox" name="${key}"> ${label}</label>`;
+const select = (key, label, options) =>
+  `<div><label for="f-${key}">${label}</label><select id="f-${key}" name="${key}">${options.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join("")}</select></div>`;
+
+function sourceRow(s = { name: "", url: "", region: "kr" }) {
+  return `<div class="src">
+    <input placeholder="이름" value="${esc(s.name)}" data-k="name">
+    <input class="url" placeholder="RSS 주소" value="${esc(s.url)}" data-k="url">
+    <select data-k="region"><option value="kr" ${s.region !== "us" ? "selected" : ""}>한국</option><option value="us" ${s.region === "us" ? "selected" : ""}>미국</option></select>
+    <button type="button" class="danger" data-del>삭제</button>
+  </div>`;
+}
+
+async function loadSettings() {
+  const { config: c, audiences, voices } = await api("/api/config");
+  const aud = { senior: "중장년·노년층 (50~70대)", general: "일반" };
+  $("#settings").innerHTML = `
+    <fieldset><legend>기본</legend><div class="grid2">
+      ${select("audience", "시청자층", audiences.map(a => [a, aud[a] || a]))}
+      ${field("poll_seconds", "확인 간격(초)", "number", 'min="30"')}
+      ${field("min_topic_score", "최소 관심 주제 점수 (0이면 전부)", "number", 'min="0"')}
+      ${field("output_dir", "초안 저장 폴더")}
+    </div>${check("skip_rumors", "찌라시·루머가 주제인 기사 건너뛰기")}</fieldset>
+
+    <fieldset><legend>음성</legend><div class="grid2">
+      ${select("voice", "목소리", voices.map(v => [v, v.includes("InJoon") ? "인준 (남성, 앵커형)" : v.includes("SunHi") ? "선희 (여성)" : "현수 (남성)"]))}
+      ${field("voice_rate", "말하는 속도 (비우면 시청자층 기본값, 예: +5%)")}
+    </div></fieldset>
+
+    <fieldset><legend>큰 소식 자동 공개</legend>
+      ${check("auto_publish", "조건을 모두 통과한 큰 소식은 승인 없이 바로 공개")}
+      <div class="grid2">
+        ${field("auto_min_sources", "같은 소식을 보도한 매체 수 (이상)", "number", 'min="1"')}
+        ${field("auto_window_minutes", "동시 보도로 보는 시간(분)", "number", 'min="10"')}
+        ${field("auto_min_topic_score", "최소 관심 주제 점수", "number", 'min="0"')}
+        ${field("auto_daily_limit", "하루 자동 공개 한도", "number", 'min="0"')}
+      </div>
+      <p class="hint">자동 공개는 미국 소식 중 속보이거나 여러 매체가 보도한 확인된 소식이고, Claude 사실 확인을 통과한 것만 대상입니다.</p>
+    </fieldset>
+
+    <fieldset><legend>연결</legend><div class="grid2">
+      ${field("anthropic_api_key", "Claude API 키", "password", 'autocomplete="off" placeholder="sk-ant-…"')}
+      ${select("youtube_privacy", "업로드 공개 범위", [["public", "공개"], ["unlisted", "일부 공개"], ["private", "비공개"]])}
+      ${field("youtube_client_secret", "유튜브 client_secret 파일 경로")}
+      ${field("telegram_bot_token", "텔레그램 봇 토큰 (선택)")}
+      ${field("telegram_chat_id", "텔레그램 채팅 ID (선택)")}
+    </div></fieldset>
+
+    <fieldset><legend>뉴스 소스 (RSS)</legend>
+      <div id="sources">${c.sources.map(sourceRow).join("")}</div>
+      <button type="button" id="addSource">소스 추가</button>
+    </fieldset>
+    <button class="primary" type="submit">설정 저장</button>`;
+  const form = $("#settings");
+  for (const el of form.querySelectorAll("[name]")) {
+    const v = c[el.name];
+    if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? "";
+  }
+  $("#addSource").onclick = () => $("#sources").insertAdjacentHTML("beforeend", sourceRow());
+  $("#sources").onclick = e => { if (e.target.matches("[data-del]")) e.target.closest(".src").remove(); };
+}
+
+$("#settings").onsubmit = e => {
+  e.preventDefault();
+  const form = e.target, body = {};
+  for (const el of form.querySelectorAll("[name]")) {
+    if (el.type === "checkbox") body[el.name] = el.checked;
+    else if (el.type === "number") body[el.name] = Number(el.value);
+    else body[el.name] = el.value.trim() || null;
+  }
+  body.sources = [...form.querySelectorAll(".src")].map(r => Object.fromEntries(
+    [...r.querySelectorAll("[data-k]")].map(i => [i.dataset.k, i.value.trim()]))).filter(s => s.url);
+  busy(form.querySelector("[type=submit]"), async () => { await post("/api/config", body); toast("설정을 저장했습니다"); await loadSettings(); refreshStatus(); });
+};
+
+// ---- tabs ----
+document.querySelector("nav").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  for (const x of document.querySelectorAll("nav button")) x.classList.toggle("active", x === b);
+  for (const t of ["drafts", "log", "settings"]) $("#tab-" + t).hidden = t !== b.dataset.tab;
+  if (b.dataset.tab === "settings") loadSettings().catch(err => toast("오류: " + err.message));
+};
+
+refreshStatus(); refreshDrafts();
+setInterval(refreshStatus, 4000);
+setInterval(refreshDrafts, 15000);
+</script>
+</body>
+</html>

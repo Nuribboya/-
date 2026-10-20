@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from newsshorts.audience import GENERAL, Audience
+from newsshorts.log import log
 from newsshorts.tts import Cue
 
 WIDTH, HEIGHT = 1080, 1920
@@ -47,7 +48,7 @@ def resolve_font(configured: str | None = None) -> str | None:
         urllib.request.urlretrieve(FONT_URL, FONT_CACHE)
         return str(FONT_CACHE)
     except Exception as exc:
-        print(f"[warn] no Korean font available ({exc}); text will not render correctly")
+        log(f"[warn] no Korean font available ({exc}); text will not render correctly")
         return None
 
 

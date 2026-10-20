@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from newsshorts.log import log
+
 # Rough Korean narration speed used when real TTS timing isn't available.
 CHARS_PER_SECOND = 7.0
 
@@ -88,7 +90,7 @@ def synthesize(sentences: list[str], voice: str, rate: str, out_mp3: Path, use_t
             bounds = asyncio.run(_edge_tts(" ".join(sentences), voice, rate, out_mp3))
             return _align(sentences, bounds, audio_duration(out_mp3))
         except Exception as exc:
-            print(f"[warn] TTS failed, using silent track: {exc}")
+            log(f"[warn] TTS failed, using silent track: {exc}")
     cues = _estimate_cues(sentences)
     _silent_audio(cues[-1].end + 0.5, out_mp3)
     return cues

@@ -200,3 +200,70 @@ def test_recent_store_dedupes_story_and_expires(tmp_path):
     reloaded = RecentStore(tmp_path / "r.json", 90)
     reloaded.prune(now=1000.0 + 91 * 60)
     assert [e.id for e in reloaded.entries] == ["b2"]
+
+
+@pytest.fixture
+def app_client(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    # The app exports a configured key to the environment; keep it out of other tests.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    from fastapi.testclient import TestClient
+
+    from newsshorts.app import State, create_app
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"sources": [], "output_dir": str(tmp_path / "drafts"),
+                               "state_file": str(tmp_path / "drafts/seen.json"),
+                               "recent_file": str(tmp_path / "drafts/recent.json")}), encoding="utf-8")
+    state = State(cfg, use_claude=False, use_tts=False, pin=None)
+    return TestClient(create_app(state)), state
+
+
+H = {"x-app": "1"}
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_app_draft_review_flow(app_client):
+    client, _ = app_client
+    name = client.post("/api/demo", headers=H).json()["name"]
+    drafts = client.get("/api/drafts?status=pending").json()
+    assert [d["name"] for d in drafts] == [name]
+    assert client.get(f"/media/{name}/video.mp4").status_code == 200
+    assert client.post(f"/api/drafts/{name}/update", json={"title": "새 제목"}, headers=H).status_code == 200
+    assert client.get("/api/drafts").json()[0]["script"]["title"] == "새 제목"
+    assert client.post(f"/api/drafts/{name}/reject", headers=H).status_code == 200
+    assert client.get("/api/drafts?status=pending").json() == []
+
+
+def test_app_blocks_cross_site_posts_and_path_escape(app_client):
+    client, _ = app_client
+    assert client.post("/api/watch/start").status_code == 403  # no x-app header
+    assert client.get("/media/..%2F..%2Fetc/video.mp4").status_code == 404
+
+
+def test_app_settings_roundtrip_masks_key(app_client):
+    client, state = app_client
+    body = {"auto_publish": True, "anthropic_api_key": "sk-ant-secret1234",
+            "sources": [{"name": "NPR", "url": "https://feeds.npr.org/1014/rss.xml", "region": "us"}]}
+    assert client.post("/api/config", json=body, headers=H).status_code == 200
+    data = client.get("/api/config").json()["config"]
+    assert data["auto_publish"] is True and data["anthropic_api_key"] == "…1234"
+    assert state.config.sources[0].region == "us"
+    # Sending the masked value back must not overwrite the stored key.
+    client.post("/api/config", json={"anthropic_api_key": "…1234"}, headers=H)
+    assert state.config.anthropic_api_key == "sk-ant-secret1234"
+    bad = {"sources": [{"name": "x", "url": "u", "bogus": 1}]}
+    assert client.post("/api/config", json=bad, headers=H).status_code == 400
+
+
+def test_app_pin_required_in_lan_mode(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from newsshorts.app import State, create_app
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"output_dir": str(tmp_path / "d")}), encoding="utf-8")
+    client = TestClient(create_app(State(cfg, False, False, pin="123456")))
+    assert client.get("/api/status").status_code == 401
+    assert client.get("/api/status", headers={"x-pin": "123456"}).status_code == 200

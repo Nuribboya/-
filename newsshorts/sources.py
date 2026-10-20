@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from newsshorts.config import Config, Source
+from newsshorts.log import log
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -108,7 +109,7 @@ def new_items(config: Config, seen: SeenStore, prime: bool = False) -> list[News
         try:
             items = fetch_source(source)
         except Exception as exc:  # one broken feed shouldn't stop the others
-            print(f"[warn] {source.name}: {exc}")
+            log(f"[warn] {source.name}: {exc}")
             continue
         for item in items:
             if item.id in seen:

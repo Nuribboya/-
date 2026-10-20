@@ -5,6 +5,7 @@ import re
 from dataclasses import asdict, dataclass, field
 
 from newsshorts.audience import GENERAL, Audience
+from newsshorts.log import log
 from newsshorts.sources import NewsItem
 
 SYSTEM_PROMPT = """너는 한국어 뉴스 쇼츠(30~50초) 대본 작가다. 주어진 기사 정보만으로 대본을 쓴다.
@@ -173,5 +174,5 @@ def make_script(item: NewsItem, model: str, use_claude: bool = True, audience: A
         try:
             return generate_with_claude(item, model, audience)
         except Exception as exc:
-            print(f"[warn] Claude script failed, using offline template: {exc}")
+            log(f"[warn] Claude script failed, using offline template: {exc}")
     return generate_offline(item, audience)
