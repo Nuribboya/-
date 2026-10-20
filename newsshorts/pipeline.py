@@ -7,6 +7,7 @@ from pathlib import Path
 
 from newsshorts.audience import get_audience
 from newsshorts.config import Config
+from newsshorts.labels import finalize, report_type, title_labels
 from newsshorts.render import render_video, resolve_font
 from newsshorts.script import make_script
 from newsshorts.sources import NewsItem
@@ -25,21 +26,25 @@ def make_draft(item: NewsItem, config: Config, use_claude: bool = True, use_tts:
     draft.mkdir(parents=True, exist_ok=True)
 
     audience = get_audience(config.audience)
-    script = make_script(item, config.model, use_claude=use_claude, audience=audience)
+    script = finalize(make_script(item, config.model, use_claude=use_claude, audience=audience), item)
+    labels = title_labels(item)
     audio = draft / "narration.mp3"
     rate = config.voice_rate or audience.voice_rate
     cues = synthesize(script.sentences, config.voice, rate, audio, use_tts=use_tts)
     total = max(audio_duration(audio), cues[-1].end + 0.3)
 
     font = resolve_font(config.font_path)
-    video = render_video(script.title, script.quote, item.source, cues, audio, total,
-                         draft / "video.mp4", font, audience)
+    badge = next((l for l in labels if l != "전망"), "뉴스")
+    video = render_video(script.title, script.quote, f"{item.source} · {report_type(item)}", cues,
+                         audio, total, draft / "video.mp4", font, audience, badge=badge)
 
     meta = {
         "status": "pending",
         "item": item.to_dict(),
         "script": script.to_dict(),
         "audience": audience.name,
+        "labels": labels,
+        "report_type": report_type(item),
         "duration": round(total, 2),
         "video": video.name,
         "created_at": datetime.now().isoformat(timespec="seconds"),

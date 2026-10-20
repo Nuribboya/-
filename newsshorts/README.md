@@ -30,6 +30,7 @@ pip install -r newsshorts/requirements.txt
 | `sources` | 감시할 RSS 주소 목록. 소스별로 `keywords`를 달면 그 단어가 들어간 기사만 처리 |
 | `keywords` | 전체 공통 키워드 필터 (비우면 전부) |
 | `audience` | 시청자층. `senior`(50~70대, 기본값) 또는 `general` |
+| `skip_rumors` | 찌라시·루머가 주제인 기사 건너뛰기 (기본 true) |
 | `min_topic_score` | 시청자층 관심 주제 점수가 이보다 낮은 기사는 건너뜀 (0이면 전부 처리) |
 | `poll_seconds` | 피드 확인 간격(초) |
 | `model` | 대본을 쓸 Claude 모델 |
@@ -89,6 +90,31 @@ python -m newsshorts.cli --config newsshorts/config.json reject  drafts/20261020
 
 주제 점수표(`topic_weights`)는 채널 반응을 보면서 직접 고치면 됩니다. 관련 기사만 만들고 싶으면 `min_topic_score`를 3 정도로 올리세요.
 
+## 미국 정치 소스
+
+`sources`에 `"region": "us"`를 붙인 소스는 미국 소식으로 처리합니다. Claude가 한국어로 옮기고,
+기사에 근거가 있을 때만 환율·관세·수출·주한미군 같은 한국 쪽 영향을 한 문장 덧붙입니다.
+예시 설정에는 폴리티코, NPR, 구글뉴스(미국: Trump/tariff/Korea 검색)가 들어 있습니다.
+Claude 없이(`--no-claude`) 돌리면 번역이 안 되므로 영어 원문 그대로 나옵니다.
+
+```bash
+python -m newsshorts.cli demo --us   # 미국 샘플 기사로 확인
+```
+
+## 말머리와 찌라시 안전장치 (`labels.py`)
+
+"[단독]", "검토 중" 같은 보도는 찌라시만큼 클릭이 잘 나오면서, 언론사가 책임을 지고 낸 기사라
+출처만 밝히면 안전합니다. 이 방식을 자동으로 지키도록 했습니다.
+
+| 기능 | 내용 |
+| --- | --- |
+| 말머리 자동 부착 | 원문 제목에 속보/Breaking이 있으면 `[속보]`, 단독/Exclusive가 있으면 `[단독]`, 미국 소스면 `[미국]`, 검토·가능성·관측·전망·considering 같은 표현이 있으면 `[전망]` |
+| 지어낸 말머리 제거 | Claude가 제목에 넣은 말머리는 지우고 원문 기준 말머리만 붙임. 원문에 없는 "단독"이라는 단어도 제거 |
+| 확신 수준 유지 | 기사 유형(보도/전망)을 Claude에 알려 주고, 전망 기사는 "~할 가능성", "~검토 중"처럼 원문 수준으로만 쓰고 누가 그렇게 보는지 밝히게 함. 화면에도 "출처 · 전망"으로 표시 |
+| 출처 명시 | 대본에 언론사 이름이 한 번도 없으면 "OO 보도입니다." 문장을 자동으로 맨 앞에 추가 |
+| 소문 기사 건너뛰기 | 찌라시·루머·괴소문·미확인 소문이 주제인 기사는 처리하지 않음 (`skip_rumors: false`로 끌 수 있음) |
+| 금지 내용 | 출처 없는 소문, 정치인의 사생활·건강·가족 의혹은 기사에 있어도 대본에 옮기지 않도록 지시 |
+
 ## 대본 원칙 (Claude 프롬프트에 들어 있음)
 
 - 기사에 없는 사실·수치·발언은 만들지 않음
@@ -99,6 +125,7 @@ python -m newsshorts.cli --config newsshorts/config.json reject  drafts/20261020
 
 - `config.py` — 설정 로드
 - `audience.py` — 시청자층 프리셋(대본 지시, 주제 점수, 화면·음성 설정)
+- `labels.py` — 원문 기준 말머리, 보도/전망 구분, 소문 기사 거르기, 출처 문장 보장
 - `sources.py` — RSS 수집, 키워드 필터, 중복 방지(`seen.json`)
 - `script.py` — Claude 대본 생성(JSON 스키마 강제) + 오프라인 템플릿
 - `tts.py` — edge-tts 음성 + 문장별 자막 타이밍

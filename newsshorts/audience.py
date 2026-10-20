@@ -52,6 +52,10 @@ SENIOR = Audience(
         "보이스피싱": 5, "사기": 3,
         # 정치 큰 이슈
         "대통령": 3, "국회": 2, "선거": 3, "총리": 2, "개헌": 2,
+        # 미국 소식 중 한국 생활과 맞닿은 것
+        "트럼프": 3, "관세": 4, "환율": 4, "주한미군": 5, "방위비": 4, "연준": 3, "북한": 3,
+        "trump": 3, "tariff": 4, "korea": 5, "federal reserve": 3, "interest rate": 3,
+        "social security": 3, "medicare": 3,
     },
     voice_rate="+0%",
     font_scale=1.15,
@@ -71,9 +75,10 @@ def get_audience(name: str) -> Audience:
 
 
 def topic_score(item: NewsItem, audience: Audience) -> int:
-    text = f"{item.title} {item.summary}"
+    title = item.title.lower()
+    text = f"{title} {item.summary.lower()}"
     # Title hits count double: the title is what the viewer sees first.
-    return sum(w * (2 * (k in item.title) + (k in text)) for k, w in audience.topic_weights.items())
+    return sum(w * (2 * (k in title) + (k in text)) for k, w in audience.topic_weights.items())
 
 
 def rank_items(items: list[NewsItem], audience: Audience) -> list[NewsItem]:

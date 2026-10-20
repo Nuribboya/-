@@ -109,3 +109,44 @@ def test_senior_prompt_and_hashtags_reach_script():
 
     assert "50~70대" in SYSTEM_PROMPT + SENIOR.prompt
     assert generate_offline(ITEM, SENIOR).hashtags == list(SENIOR.default_hashtags)
+
+
+US_SPEC = NewsItem(id="u", source="폴리티코", title="Exclusive: White House weighing new tariffs on Korea",
+                   summary="Officials say no decision yet.", link="", region="us")
+
+
+def test_labels_come_from_source_not_model():
+    from newsshorts.labels import apply_labels, title_labels
+
+    assert title_labels(US_SPEC) == ["단독", "미국", "전망"]
+    assert title_labels(ITEM) == []
+    # Model-invented tags and a bare "단독" are removed when the source doesn't justify them.
+    assert apply_labels("[속보][단독] 단독 국회 예산안 처리", []) == "국회 예산안 처리"
+    assert apply_labels("Exclusive: tariffs", ["단독"]) == "[단독] tariffs"
+    assert apply_labels("백악관, 한국산 철강 관세 검토", ["단독", "미국", "전망"]) == \
+        "[단독][미국][전망] 백악관, 한국산 철강 관세 검토"
+
+
+def test_report_type_and_rumor_detection():
+    from newsshorts.labels import is_rumor, report_type
+
+    assert report_type(US_SPEC) == "전망"
+    assert report_type(ITEM) == "보도"
+    rumor = NewsItem(id="r", source="s", title="OO 의원 찌라시 확산", summary="", link="")
+    assert is_rumor(rumor) and not is_rumor(ITEM)
+
+
+def test_finalize_adds_attribution_once():
+    from newsshorts.labels import finalize
+    from newsshorts.script import Script
+
+    script = finalize(Script(title="[속보] 관세 검토", quote="q", sentences=["관세를 검토 중입니다."]), US_SPEC)
+    assert script.title.startswith("[단독][미국][전망]")
+    assert script.sentences[0] == "폴리티코 보도입니다."
+    assert finalize(script, US_SPEC).sentences.count("폴리티코 보도입니다.") == 1
+
+
+def test_us_topics_score_case_insensitive():
+    from newsshorts.audience import SENIOR, topic_score
+
+    assert topic_score(US_SPEC, SENIOR) > 0

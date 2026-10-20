@@ -6,6 +6,7 @@ from pathlib import Path
 
 from newsshorts.audience import get_audience, rank_items, topic_score
 from newsshorts.config import Config, load_config
+from newsshorts.labels import is_rumor
 from newsshorts.notify import notify_draft
 from newsshorts.pipeline import list_drafts, load_draft, make_draft, save_draft
 from newsshorts.sources import NewsItem, SeenStore, new_items
@@ -21,6 +22,18 @@ SAMPLE_ITEM = NewsItem(
         "여당 원내대표는 '어르신 생활 안정을 위한 예산'이라고 말했다."
     ),
     link="https://example.com/news/demo",
+)
+
+SAMPLE_US_ITEM = NewsItem(
+    id="demo-us",
+    source="데모뉴스(미국)",
+    title="Exclusive: White House weighing new tariffs on Korean steel, officials say",
+    summary=(
+        "The administration is considering raising tariffs on steel imports from South Korea, "
+        "two officials familiar with the discussions said. No final decision has been made."
+    ),
+    link="https://example.com/news/demo-us",
+    region="us",
 )
 
 
@@ -42,6 +55,10 @@ def cmd_watch(config: Config, args) -> None:
     while True:
         items = [i for i in rank_items(new_items(config, seen), audience)
                  if topic_score(i, audience) >= config.min_topic_score]
+        if config.skip_rumors:
+            for i in filter(is_rumor, items):
+                print(f"[skip] 미확인 소문 기사: {i.title}")
+            items = [i for i in items if not is_rumor(i)]
         for item in items[: args.max_per_poll]:
             try:
                 _process(item, config, args)
@@ -53,7 +70,7 @@ def cmd_watch(config: Config, args) -> None:
 
 
 def cmd_demo(config: Config, args) -> None:
-    _process(SAMPLE_ITEM, config, args)
+    _process(SAMPLE_US_ITEM if args.us else SAMPLE_ITEM, config, args)
 
 
 def cmd_list(config: Config, args) -> None:
@@ -94,6 +111,7 @@ def main() -> None:
         p = sub.add_parser(name)
         p.add_argument("--no-claude", action="store_true", help="Claude 없이 템플릿 대본 사용")
         p.add_argument("--no-tts", action="store_true", help="음성 없이 무음 트랙으로 초안 생성")
+    sub.choices["demo"].add_argument("--us", action="store_true", help="미국 샘플 기사 사용")
     watch = sub.choices["watch"]
     watch.add_argument("--once", action="store_true", help="한 번만 확인하고 종료")
     watch.add_argument("--include-backlog", action="store_true",

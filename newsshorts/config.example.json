@@ -2,11 +2,15 @@
   "sources": [
     {"name": "연합뉴스 정치", "url": "https://www.yna.co.kr/rss/politics.xml"},
     {"name": "연합뉴스 경제", "url": "https://www.yna.co.kr/rss/economy.xml"},
-    {"name": "구글뉴스", "url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=ko&gl=KR&ceid=KR:ko"}
+    {"name": "구글뉴스", "url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "폴리티코", "url": "https://rss.politico.com/politics-news.xml", "region": "us"},
+    {"name": "NPR", "url": "https://feeds.npr.org/1014/rss.xml", "region": "us"},
+    {"name": "구글뉴스(미국)", "url": "https://news.google.com/rss/search?q=Trump+OR+tariff+OR+Korea&hl=en-US&gl=US&ceid=US:en", "region": "us"}
   ],
   "keywords": [],
   "audience": "senior",
   "min_topic_score": 0,
+  "skip_rumors": true,
   "poll_seconds": 120,
   "output_dir": "drafts",
   "state_file": "drafts/seen.json",

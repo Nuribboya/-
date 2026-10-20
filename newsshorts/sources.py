@@ -20,6 +20,7 @@ class NewsItem:
     summary: str
     link: str
     published: str = ""
+    region: str = "kr"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -55,6 +56,7 @@ def parse_feed(source: Source, feed_text: str | bytes) -> list[NewsItem]:
                 summary=_clean(entry.get("summary", "")),
                 link=entry.get("link", ""),
                 published=entry.get("published", ""),
+                region=source.region,
             )
         )
     return items

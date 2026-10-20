@@ -9,6 +9,8 @@ from pathlib import Path
 class Source:
     name: str
     url: str
+    # "kr" or "us"; US items get a [미국] tag and are translated into Korean.
+    region: str = "kr"
     # Optional per-source keyword filter; empty means "take everything".
     keywords: list[str] = field(default_factory=list)
 
@@ -22,6 +24,8 @@ class Config:
     audience: str = "senior"
     # Skip items whose audience topic score is below this (0 = keep everything).
     min_topic_score: int = 0
+    # Skip articles whose subject is an unverified rumor (see labels.py).
+    skip_rumors: bool = True
     poll_seconds: int = 120
     output_dir: str = "drafts"
     state_file: str = "drafts/seen.json"

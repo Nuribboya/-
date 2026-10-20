@@ -99,7 +99,7 @@ def _draw_lines(draw, lines, font, y, fill, spacing=1.25, stroke=0, stroke_fill=
 
 
 def base_frame(title: str, quote: str, source: str, font_path: str | None,
-               audience: Audience = GENERAL) -> Image.Image:
+               audience: Audience = GENERAL, badge: str = "뉴스") -> Image.Image:
     """Static part of every frame: badge, source, title and quote card."""
     img = _background()
     draw = ImageDraw.Draw(img)
@@ -107,9 +107,10 @@ def base_frame(title: str, quote: str, source: str, font_path: str | None,
     scale = audience.font_scale
 
     badge_font = _font(font_path, 52)
-    draw.rounded_rectangle([margin, 150, margin + 190, 230], radius=14, fill=ACCENT)
-    draw.text((margin + 95, 190), "속보", font=badge_font, fill=WHITE, anchor="mm")
-    draw.text((margin + 220, 190), source, font=_font(font_path, 44), fill=MUTED, anchor="lm")
+    badge_w = int(badge_font.getlength(badge)) + 70
+    draw.rounded_rectangle([margin, 150, margin + badge_w, 230], radius=14, fill=ACCENT)
+    draw.text((margin + badge_w / 2, 190), badge, font=badge_font, fill=WHITE, anchor="mm")
+    draw.text((margin + badge_w + 30, 190), source, font=_font(font_path, 44), fill=MUTED, anchor="lm")
 
     title_font = _font(font_path, int(78 * scale))
     title_lines = wrap(title, title_font, WIDTH - 2 * margin)[:4]
@@ -155,11 +156,12 @@ def render_video(
     out_mp4: Path,
     font_path: str | None,
     audience: Audience = GENERAL,
+    badge: str = "뉴스",
 ) -> Path:
     """Render one still per subtitle cue and stitch them to the narration with ffmpeg."""
     work = out_mp4.parent / "frames"
     work.mkdir(parents=True, exist_ok=True)
-    base = base_frame(title, quote, source, font_path, audience)
+    base = base_frame(title, quote, source, font_path, audience, badge)
 
     concat_lines = []
     # Hold the base frame until the first cue starts.
