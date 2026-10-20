@@ -8,5 +8,5 @@
  *   - 비워두면 카카오 검색 없이 OpenStreetMap 검색만 사용한다.
  */
 window.APP_CONFIG = {
-  kakaoJsKey: "",
+  kakaoJsKey: "295c7f5f9414df82b6aa23b672017b1f",
 };
