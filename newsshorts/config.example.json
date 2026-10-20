@@ -1,0 +1,20 @@
+{
+  "sources": [
+    {"name": "연합뉴스", "url": "https://www.yna.co.kr/rss/politics.xml"},
+    {"name": "구글뉴스", "url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=ko&gl=KR&ceid=KR:ko"}
+  ],
+  "keywords": [],
+  "poll_seconds": 120,
+  "output_dir": "drafts",
+  "state_file": "drafts/seen.json",
+  "model": "claude-opus-5-5",
+  "voice": "ko-KR-InJoonNeural",
+  "voice_rate": "+10%",
+  "font_path": null,
+  "youtube_client_secret": "client_secret.json",
+  "youtube_token": "youtube_token.json",
+  "youtube_privacy": "public",
+  "youtube_category_id": "25",
+  "telegram_bot_token": null,
+  "telegram_chat_id": null
+}

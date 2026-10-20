@@ -1,0 +1,8 @@
+anthropic>=1.0
+feedparser
+requests
+pillow
+edge-tts
+# YouTube upload (only needed for `approve`)
+google-api-python-client
+google-auth-oauthlib

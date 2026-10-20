@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+drafts/
+client_secret*.json
+youtube_token.json
+newsshorts/config.json
