@@ -351,3 +351,12 @@ def test_reconcile_fills_missing_korean_price_and_dedupes_feeds(store):
 def test_keep_filter_drops_plain_colorways(store):
     out, _, _ = krify.reconcile([us_item("Nike Air Max 1 Triple White", 150)], store, keep=lambda r: " x " in r.name)
     assert out == []
+
+
+def test_calendar_items_are_remembered_until_release(store):
+    soon = us_item("Union x Air Jordan 1 Low Sail", 160, days=20)
+    past = us_item("Old x Shoe", 100, days=-5)
+    assert {r.name for r in store.remember_calendar([soon, past])} == {soon.name}
+    # Next run: the article has dropped off the feed, the item is still tracked.
+    [kept] = store.remember_calendar([])
+    assert kept.name == soon.name and kept.us_price == 160

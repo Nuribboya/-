@@ -81,6 +81,8 @@ def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
             name = r.name.lower()
             return bool(" x " in name or find_collaborators(name, tiers) or find_hot_silhouette(name, tiers))
 
+        calendar = store.remember_calendar([r for r in releases if r.source == "us_calendar"])
+        releases = [r for r in releases if r.source != "us_calendar"] + calendar
         releases, fx_factor, fx_pairs = reconcile(releases, store, keep=worth_tracking)
         estimator = build_estimator(home, tiers, store)
         results = evaluate(releases, tiers, settings, store, estimator)

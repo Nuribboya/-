@@ -22,6 +22,14 @@ CREATE TABLE IF NOT EXISTS prices (
     retail_price INTEGER,
     market_price INTEGER
 );
+CREATE TABLE IF NOT EXISTS calendar_items (
+    source_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    site TEXT NOT NULL,
+    release_at TEXT NOT NULL,
+    url TEXT NOT NULL,
+    us_price INTEGER
+);
 CREATE TABLE IF NOT EXISTS price_pairs (
     name TEXT PRIMARY KEY,
     usd INTEGER NOT NULL,
@@ -87,6 +95,33 @@ class Store:
         ).fetchall()
         latest = {name: Observation(name, level, retail, market) for name, level, retail, market in rows}
         return list(latest.values())
+
+    def remember_calendar(self, items: list[Release]) -> list[Release]:
+        """Keep US-calendar items until their release date.
+
+        RSS feeds only carry the newest few dozen articles, so a drop announced
+        weeks ahead would fall off the feed long before it releases.
+        Returns every remembered item that hasn't released yet.
+        """
+        for r in items:
+            self.conn.execute(
+                """INSERT INTO calendar_items (source_id, name, site, release_at, url, us_price)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(source_id) DO UPDATE SET name=excluded.name, release_at=excluded.release_at,
+                       us_price=COALESCE(excluded.us_price, calendar_items.us_price)""",
+                (r.source_id, r.name, r.brand, r.release_at.isoformat(), r.url, r.us_price),
+            )
+        self.conn.commit()
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+        out = []
+        for source_id, name, site, release_at, url, usd in self.conn.execute(
+            "SELECT source_id, name, site, release_at, url, us_price FROM calendar_items"
+        ):
+            when = datetime.fromisoformat(release_at)
+            if when >= since:
+                out.append(Release(source="us_calendar", source_id=source_id, name=name, brand=site,
+                                   release_at=when, url=url, us_price=usd))
+        return out
 
     def save_price_pair(self, name: str, usd: int, krw: int) -> None:
         self.conn.execute("INSERT OR REPLACE INTO price_pairs (name, usd, krw) VALUES (?, ?, ?)", (name, usd, krw))
