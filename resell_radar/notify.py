@@ -40,8 +40,7 @@ def format_message(release: Release, score: Score, kind: str) -> str:
     if release.retail_price:
         lines.append(f"정가 {release.retail_price:,}원")
     if score.est_profit is not None:
-        tag = "추정" if score.price_is_estimate else "시세 기준"
-        lines.append(f"예상 순수익 {score.est_profit:,}원 ({tag})")
+        lines.append(f"예상 순수익 {score.est_profit:,}원 ({score.price_basis})")
     lines.append(f"응모 {fmt_kst(release.entry_start)} ~ {fmt_kst(release.entry_end)}")
     lines.append("근거: " + " / ".join(score.reasons))
     if release.url:

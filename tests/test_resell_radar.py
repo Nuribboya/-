@@ -167,3 +167,46 @@ def test_html_report_escapes_and_counts(store):
     assert "Air Jordan 1 &lt;script&gt;" in page
     assert page.count('class="card ') == 2
     assert "나이키 수집 실패" in page
+
+
+from resell_radar.learning import Estimator, Observation, load_price_log, write_price_log_template
+
+
+def test_empty_history_reproduces_tier_table():
+    est = Estimator([], DEFAULT_TIERS).estimate("Union x Air Jordan 1", "S")
+    assert est.multiplier == pytest.approx(1.8)
+    assert est.basis == "등급표 추정"
+
+
+def test_estimate_moves_toward_records_as_they_accumulate():
+    def union_mult(n):
+        obs = [Observation(f"Union x Air Jordan 1 #{i}", "S", 100_000, 240_000) for i in range(n)]
+        return Estimator(obs, DEFAULT_TIERS).estimate("Union x Air Jordan 1 Low", "S").multiplier
+
+    m3, m10, m50 = union_mult(3), union_mult(10), union_mult(50)
+    assert 1.8 < m3 < m10 < m50 < 2.4
+    assert m50 == pytest.approx(2.4, rel=0.05)
+
+
+def test_unseen_group_follows_market_wide_correction():
+    obs = [Observation(f"Union x Dunk {i}", "S", 100_000, 90_000) for i in range(10)]  # market went cold
+    est = Estimator(obs, DEFAULT_TIERS).estimate("Fragment x Air Jordan 1", "S")
+    assert est.multiplier < 1.8
+    assert est.count == 0 and "전체 기록 10건" in est.basis
+
+
+def test_price_log_and_scoring_use_learned_basis(tmp_path):
+    path = tmp_path / "prices.csv"
+    write_price_log_template(path)
+    with path.open("a", encoding="utf-8-sig", newline="") as f:
+        f.write('Kith x New Balance 990,"259,000",320000,2026-10-01,\n')
+    obs = load_price_log(path, lambda name: "B")
+    assert obs == [Observation("Kith x New Balance 990", "B", 259_000, 320_000)]
+    s = score_release(rel("Kith x New Balance 991"), DEFAULT_TIERS, PROFIT, estimator=Estimator(obs, DEFAULT_TIERS))
+    assert s.price_basis == "Kith 기록 1건 반영"
+
+
+def test_recorded_market_prices_become_observations(store):
+    evaluate([rel("Union x Air Jordan 1", market_price=400_000)], DEFAULT_TIERS, Settings(), store)
+    [obs] = store.market_observations()
+    assert (obs.retail, obs.market, obs.level) == (200_000, 400_000, "S")

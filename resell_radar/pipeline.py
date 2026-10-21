@@ -43,7 +43,9 @@ def is_upcoming(release: Release, now: datetime) -> bool:
     return last is None or last >= now - timedelta(hours=1)
 
 
-def evaluate(releases: list[Release], tiers: dict, settings: Settings, store: Store) -> list[Result]:
+def evaluate(
+    releases: list[Release], tiers: dict, settings: Settings, store: Store, estimator=None
+) -> list[Result]:
     profit = ProfitSettings(
         min_profit=settings.min_profit,
         min_profit_ratio=settings.min_profit_ratio,
@@ -57,9 +59,12 @@ def evaluate(releases: list[Release], tiers: dict, settings: Settings, store: St
         if release.key in seen or not is_upcoming(release, now):
             continue
         seen.add(release.key)
-        first = score_release(release, tiers, profit)
+        first = score_release(release, tiers, profit, estimator=estimator)
         counts = store.recent_collab_counts(release, first.collaborators)
-        score = score_release(release, tiers, profit, counts) if any(counts.values()) else first
+        if any(counts.values()):
+            score = score_release(release, tiers, profit, counts, estimator=estimator)
+        else:
+            score = first
         store.save(release, score)
         results.append(Result(release, score))
     results.sort(key=lambda r: (VERDICT_ORDER[r.score.verdict], -(r.score.est_profit or 0)))
@@ -99,7 +104,7 @@ def write_report(results: list[Result], path: Path) -> None:
                 s.level,
                 rel.name,
                 rel.retail_price or "",
-                (f"{s.est_price}" + (" (추정)" if s.price_is_estimate else "")) if s.est_price else "",
+                f"{s.est_price} ({s.price_basis})" if s.est_price else "",
                 s.est_profit if s.est_profit is not None else "",
                 fmt_kst(rel.entry_start),
                 fmt_kst(rel.entry_end),

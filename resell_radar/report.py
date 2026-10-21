@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from html import escape
 
@@ -57,6 +58,14 @@ display:grid;place-items:center;background:var(--bg);border:1px solid var(--line
 a.go{margin-top:auto;text-align:center;text-decoration:none;background:var(--accent);color:var(--accent-text);
 border-radius:10px;padding:9px;font-weight:600;font-size:14px}
 .empty{color:var(--muted);text-align:center;padding:40px 0}
+.learn{margin-top:28px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+.learn h2{margin:0 0 4px;font-size:17px}
+.learn p{margin:0 0 12px;color:var(--muted);font-size:13px}
+.learn table{width:100%;border-collapse:collapse;font-size:14px}
+.learn td,.learn th{padding:7px 4px;border-top:1px solid var(--line);text-align:left}
+.learn th{color:var(--muted);font-weight:600;font-size:12px}
+.learn td.num,.learn th.num{text-align:right}
+.up{color:var(--up)}.down{color:var(--down)}
 """
 
 SCRIPT = """
@@ -108,7 +117,7 @@ def _card(result) -> str:
     if s.est_profit is not None:
         neg = " neg" if s.est_profit < 0 else ""
         ratio = f" · 수익률 {s.profit_ratio * 100:.0f}%" if s.profit_ratio is not None else ""
-        est = '<span class="est">추정</span>' if s.price_is_estimate else '<span class="est">시세 기준</span>'
+        est = f'<span class="est">{escape(s.price_basis)}</span>'
         money = (
             f'<div class="money"><span class="profit{neg}">{s.est_profit:+,}원</span>{est}</div>'
             f'<div class="meta">정가 {rel.retail_price:,}원 → 예상 {s.est_price:,}원{ratio}</div>'
@@ -133,7 +142,32 @@ def _card(result) -> str:
     )
 
 
-def render_html(results: list, errors: list[str], generated_at: datetime) -> str:
+def _learning(estimator) -> str:
+    if estimator is None:
+        return ""
+    if not estimator.total:
+        return (
+            '<section class="learn"><h2>시세 학습</h2>'
+            "<p>아직 시세 기록이 없어서 등급표 배수로만 추정하고 있어요. "
+            "prices.csv 에 이미 발매된 제품의 정가와 크림 시세를 적으면 추정이 그 기록에 맞춰 보정됩니다.</p></section>"
+        )
+    rows = []
+    for group, n, factor in [("시장 전체", estimator.total, math.exp(estimator.global_corr))] + estimator.summary():
+        pct = (factor - 1) * 100
+        cls = "up" if pct > 0.5 else "down" if pct < -0.5 else ""
+        rows.append(
+            f'<tr><td>{escape(group)}</td><td class="num">{n}건</td>'
+            f'<td class="num {cls}">{pct:+.0f}%</td></tr>'
+        )
+    return (
+        '<section class="learn"><h2>시세 학습</h2>'
+        "<p>기록된 시세가 등급표 추정보다 얼마나 높거나 낮았는지예요. 기록이 적은 항목은 시장 전체 쪽으로 당겨서 계산합니다.</p>"
+        '<table><tr><th>구분</th><th class="num">기록</th><th class="num">등급표 대비 보정</th></tr>'
+        f'{"".join(rows)}</table></section>'
+    )
+
+
+def render_html(results: list, errors: list[str], generated_at: datetime, estimator=None) -> str:
     counts = {v: sum(1 for r in results if r.score.verdict == v) for v in (RECOMMEND, MAYBE, PASS)}
     warn = "".join(f'<div class="warn">⚠ {escape(e)}</div>' for e in errors)
     stats = (
@@ -157,4 +191,5 @@ def render_html(results: list, errors: list[str], generated_at: datetime) -> str
 </div>
 <div class="grid">{"".join(_card(r) for r in results)}</div>
 <div class="empty" hidden>해당하는 발매가 없어요</div>
+{_learning(estimator)}
 </div><script>{SCRIPT}</script></body></html>"""

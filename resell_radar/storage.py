@@ -70,6 +70,19 @@ class Store:
         )
         self.conn.commit()
 
+    def market_observations(self):
+        """Latest recorded market price per release, as learning observations."""
+        from resell_radar.learning import Observation
+
+        rows = self.conn.execute(
+            """SELECT r.name, r.level, p.retail_price, p.market_price
+               FROM prices p JOIN releases r ON r.key = p.key
+               WHERE p.market_price > 0 AND p.retail_price > 0 AND r.level IS NOT NULL
+               ORDER BY p.seen_at"""
+        ).fetchall()
+        latest = {name: Observation(name, level, retail, market) for name, level, retail, market in rows}
+        return list(latest.values())
+
     def was_notified(self, key: str, kind: str) -> bool:
         row = self.conn.execute("SELECT 1 FROM notifications WHERE key=? AND kind=?", (key, kind)).fetchone()
         return row is not None

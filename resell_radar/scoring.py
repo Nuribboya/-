@@ -28,11 +28,14 @@ def score_release(
     tiers: dict,
     profit: ProfitSettings,
     recent_collab_counts: dict[str, int] | None = None,
+    estimator=None,
 ) -> Score:
     """Grade a release S..C from scarcity signals, then gate it on expected profit.
 
     recent_collab_counts maps collaborator -> how many *other* releases with
     that partner were seen in the past year (from local history).
+    estimator (learning.Estimator) replaces the fixed tier multipliers with
+    ones corrected by recorded resale prices.
     """
     recent_collab_counts = recent_collab_counts or {}
     rules = tiers["rules"]
@@ -84,6 +87,11 @@ def score_release(
     if release.market_price:
         est_price = release.market_price
         score.price_is_estimate = False
+        score.price_basis = "시세 기준"
+    elif estimator is not None:
+        est = estimator.estimate(release.name, grade)
+        est_price = round(release.retail_price * est.multiplier)
+        score.price_basis = est.basis
     else:
         est_price = round(release.retail_price * tiers["price_multiplier"][grade])
     net = round(est_price * (1 - profit.sell_fee_rate)) - profit.shipping_cost - release.retail_price

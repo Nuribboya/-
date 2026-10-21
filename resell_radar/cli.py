@@ -8,11 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from resell_radar.config import Settings, app_dir, load_settings, save_settings
+from resell_radar.learning import Estimator, load_price_log, write_price_log_template
+from resell_radar.models import Release
 from resell_radar.models import fmt_kst
 from resell_radar.notify import Telegram, find_chat_id
 from resell_radar.pipeline import collect, evaluate, notify, write_report
 from resell_radar.report import render_html
-from resell_radar.scoring import PASS
+from resell_radar.scoring import PASS, ProfitSettings, score_release
 from resell_radar.sources import manual
 from resell_radar.storage import Store
 from resell_radar.tiers import load_tiers
@@ -54,16 +56,26 @@ def setup(home: Path) -> Settings:
     return settings
 
 
+def build_estimator(home: Path, tiers: dict, store: Store) -> Estimator:
+    def grade_of(name: str) -> str:
+        return score_release(Release("log", name, name), tiers, ProfitSettings()).level
+
+    return Estimator(load_price_log(home / "prices.csv", grade_of) + store.market_observations(), tiers)
+
+
 def run(home: Path, quiet: bool = False) -> int:
     settings = load_settings(home / "settings.json") or Settings()
     tiers = load_tiers(home / "tiers.json")
     if not (home / "releases.csv").exists():
         manual.write_template(home / "releases.csv")
+    if not (home / "prices.csv").exists():
+        write_price_log_template(home / "prices.csv")
 
     releases, errors = collect(settings, home)
     store = Store(home / "resell_radar.db")
     try:
-        results = evaluate(releases, tiers, settings, store)
+        estimator = build_estimator(home, tiers, store)
+        results = evaluate(releases, tiers, settings, store, estimator)
         sent = 0
         if settings.has_telegram:
             tg = Telegram(settings.telegram_token, settings.telegram_chat_id)
@@ -75,7 +87,7 @@ def run(home: Path, quiet: bool = False) -> int:
         store.close()
     write_report(results, home / "latest_report.csv")
     report = home / "report.html"
-    report.write_text(render_html(results, errors, datetime.now(timezone.utc)), encoding="utf-8")
+    report.write_text(render_html(results, errors, datetime.now(timezone.utc), estimator), encoding="utf-8")
 
     for err in errors:
         print(f"[경고] {err}")
@@ -86,7 +98,7 @@ def run(home: Path, quiet: bool = False) -> int:
     print(f"\n수집 {len(results)}건 → 추천/애매 {len(shown)}건 (패스 {len(results) - len(shown)}건)\n")
     for r in shown:
         s, rel = r.score, r.release
-        profit = f"{s.est_profit:,}원{'(추정)' if s.price_is_estimate else ''}" if s.est_profit is not None else "-"
+        profit = f"{s.est_profit:,}원({s.price_basis})" if s.est_profit is not None else "-"
         print(f"[{s.verdict} {s.level}] {rel.name}")
         print(f"    예상순수익 {profit} | 응모마감 {fmt_kst(rel.entry_end)} | {' / '.join(s.reasons)}")
     print(f"\n결과 화면: {report}")

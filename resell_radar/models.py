@@ -42,6 +42,7 @@ class Score:
     est_profit: int | None = None
     profit_ratio: float | None = None
     price_is_estimate: bool = True
+    price_basis: str = "등급표 추정"
     reasons: list[str] = field(default_factory=list)
 
 
