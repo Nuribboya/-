@@ -34,7 +34,7 @@ def test_silhouette_does_not_match_other_numbers():
 
 def test_s_collab_on_hot_silhouette_is_recommended():
     s = score_release(rel("Union x Air Jordan 1 Low", method=DRAW), DEFAULT_TIERS, PROFIT)
-    assert s.level == "S" and s.verdict == RECOMMEND
+    assert s.level == "S+" and s.verdict == RECOMMEND
     assert s.est_profit > 30_000
 
 
@@ -49,12 +49,12 @@ def test_penalties_stack():
         DEFAULT_TIERS,
         PROFIT,
     )
-    assert s.level == "C" and s.verdict == PASS
+    assert s.level == "C-" and s.verdict == PASS  # A -2 -3 -2 = 7 notches down
 
 
 def test_repeat_collab_drops_a_grade():
     s = score_release(rel("Travis Scott x Air Jordan 1 Low"), DEFAULT_TIERS, PROFIT, {"Travis Scott": 4})
-    assert s.level == "B"
+    assert s.level == "B"  # B +2 (silhouette) -2 (repeat)
 
 
 def test_real_market_price_overrides_estimate():
@@ -209,4 +209,33 @@ def test_price_log_and_scoring_use_learned_basis(tmp_path):
 def test_recorded_market_prices_become_observations(store):
     evaluate([rel("Union x Air Jordan 1", market_price=400_000)], DEFAULT_TIERS, Settings(), store)
     [obs] = store.market_observations()
-    assert (obs.retail, obs.market, obs.level) == (200_000, 400_000, "S")
+    assert (obs.retail, obs.market, obs.level) == (200_000, 400_000, "S+")
+
+
+def test_single_soft_penalty_keeps_s_collab_recommended():
+    # Under whole-letter grading FCFS alone dropped an S collab straight to A.
+    s = score_release(rel("Fragment x Nike Air Force 1", method=FCFS), DEFAULT_TIERS, PROFIT)
+    assert s.level == "A+" and s.verdict == RECOMMEND  # S -2 notches, still recommended
+    assert "선착순 판매 -2칸" in s.reasons
+
+
+def test_b_plus_is_still_not_recommended():
+    s = score_release(rel("Kith x Nike Kobe 6", market_price=400_000), DEFAULT_TIERS, PROFIT)
+    assert s.level == "A-"  # B +2
+    s = score_release(rel("Kith x New Balance 990", market_price=400_000), DEFAULT_TIERS, PROFIT)
+    assert s.level == "B" and s.verdict == MAYBE
+
+
+def test_old_tiers_file_is_upgraded(tmp_path):
+    import json
+
+    from resell_radar.tiers import load_tiers
+
+    old = {k: v for k, v in DEFAULT_TIERS.items() if k not in ("adjust",)}
+    old["price_multiplier"] = {"S": 2.0, "A": 1.4, "B": 1.15, "C": 1.0}
+    path = tmp_path / "tiers.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    tiers = load_tiers(path)
+    assert tiers["price_multiplier"]["S"] == 2.0  # user's edit kept
+    assert tiers["price_multiplier"]["A+"] == DEFAULT_TIERS["price_multiplier"]["A+"]
+    assert tiers["adjust"] == DEFAULT_TIERS["adjust"]

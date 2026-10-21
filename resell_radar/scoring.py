@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from resell_radar.models import FCFS, Release, Score
-from resell_radar.tiers import GRADES, find_collaborators, find_hot_silhouette
+from resell_radar.tiers import NOTCHES, find_collaborators, find_hot_silhouette, notch
 
 RECOMMEND = "추천"
 MAYBE = "애매"
@@ -18,9 +18,15 @@ class ProfitSettings:
     shipping_cost: int = 4_000
 
 
+RECOMMEND_FROM = notch("A-")
+
+
 def _shift(grade: str, delta: int) -> str:
-    i = max(0, min(len(GRADES) - 1, GRADES.index(grade) + delta))
-    return GRADES[i]
+    return NOTCHES[max(0, min(len(NOTCHES) - 1, notch(grade) + delta))]
+
+
+def _fmt(delta: int) -> str:
+    return f"{delta:+d}칸"
 
 
 def score_release(
@@ -30,7 +36,7 @@ def score_release(
     recent_collab_counts: dict[str, int] | None = None,
     estimator=None,
 ) -> Score:
-    """Grade a release S..C from scarcity signals, then gate it on expected profit.
+    """Grade a release C-..S+ from scarcity signals, then gate it on expected profit.
 
     recent_collab_counts maps collaborator -> how many *other* releases with
     that partner were seen in the past year (from local history).
@@ -39,11 +45,17 @@ def score_release(
     """
     recent_collab_counts = recent_collab_counts or {}
     rules = tiers["rules"]
+    adjust = tiers["adjust"]
     reasons: list[str] = []
+
+    def apply(key: str, label: str) -> None:
+        nonlocal grade
+        grade = _shift(grade, adjust[key])
+        reasons.append(f"{label} {_fmt(adjust[key])}")
 
     collabs = find_collaborators(release.name, tiers)
     if collabs:
-        grade = max((g for _, g in collabs), key=GRADES.index)
+        grade = max((g for _, g in collabs), key=notch)
         names = ", ".join(f"{n}({g})" for n, g in collabs)
         reasons.append(f"협업: {names}")
     else:
@@ -51,36 +63,30 @@ def score_release(
         reasons.append("알려진 협업 상대 없음")
 
     if len(collabs) >= 2:
-        grade = _shift(grade, +1)
-        reasons.append("다자 협업 +1")
+        apply("multi_collab", "다자 협업")
 
     silhouette = find_hot_silhouette(release.name, tiers)
     if silhouette:
-        grade = _shift(grade, +1)
-        reasons.append(f"인기 실루엣({silhouette}) +1")
+        apply("hot_silhouette", f"인기 실루엣({silhouette})")
 
     for name, _ in collabs:
         if recent_collab_counts.get(name, 0) >= rules["repeat_collab_count"]:
-            grade = _shift(grade, -1)
-            reasons.append(f"{name} 최근 1년 협업 {recent_collab_counts[name]}회 -1")
+            apply("repeat_collab", f"{name} 최근 1년 협업 {recent_collab_counts[name]}회")
             break
 
     if release.is_restock:
-        grade = _shift(grade, -1)
-        reasons.append("재발매 -1")
+        apply("restock", "재발매")
 
     if release.retailer_count is not None and release.retailer_count >= rules["many_retailers"]:
-        grade = _shift(grade, -1)
-        reasons.append(f"발매처 {release.retailer_count}곳 -1")
+        apply("many_retailers", f"발매처 {release.retailer_count}곳")
 
     if release.method == FCFS:
-        grade = _shift(grade, -1)
-        reasons.append("선착순 판매 -1")
+        apply("fcfs", "선착순 판매")
 
     score = Score(level=grade, verdict=PASS, collaborators=[n for n, _ in collabs], reasons=reasons)
 
     if not release.retail_price:
-        score.verdict = MAYBE if grade in ("S", "A") else PASS
+        score.verdict = MAYBE if notch(grade) >= RECOMMEND_FROM else PASS
         reasons.append("정가 정보 없음 — 수익 계산 불가")
         return score
 
@@ -102,7 +108,7 @@ def score_release(
     if net < profit.min_profit or score.profit_ratio < profit.min_profit_ratio:
         reasons.append(f"예상 순수익 {net:,}원 — 기준 미달")
         score.verdict = PASS
-    elif grade in ("S", "A"):
+    elif notch(grade) >= RECOMMEND_FROM:
         score.verdict = RECOMMEND
     else:
         score.verdict = MAYBE

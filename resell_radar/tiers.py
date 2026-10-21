@@ -37,31 +37,60 @@ DEFAULT_TIERS: dict = {
         "Prada": {"grade": "C", "aliases": ["prada", "프라다"]},
         "Uniqlo": {"grade": "C", "aliases": ["uniqlo", "유니클로"]},
     },
-    # Silhouettes whose demand reliably carries a collab (or a limited
-    # general release) one grade higher.
+    # Silhouettes whose demand reliably lifts a collab (or a limited general release).
     "hot_silhouettes": {
         "Air Jordan 1": ["jordan 1", "조던 1", "aj1"],
         "SB Dunk": ["sb dunk", "dunk sb", "sb 덩크", "덩크 sb"],
         "Kobe": ["kobe", "코비"],
     },
     "rules": {
-        "repeat_collab_count": 3,  # this many releases with the same partner in a year -> -1 grade
-        "many_retailers": 5,  # released through this many shops or more -> -1 grade
+        "repeat_collab_count": 3,  # this many releases with the same partner in a year -> penalty
+        "many_retailers": 5,  # released through this many shops or more -> penalty
     },
-    # Expected resale / retail ratio per grade, only used when no real market
-    # price is known for the item.
-    "price_multiplier": {"S": 1.8, "A": 1.4, "B": 1.15, "C": 1.0},
+    # Grade moves in notches (C- .. S+); 3 notches = one whole letter grade.
+    # Strong signals move a full letter, softer ones two notches.
+    "adjust": {
+        "multi_collab": 2,
+        "hot_silhouette": 2,
+        "repeat_collab": -2,
+        "restock": -3,
+        "many_retailers": -2,
+        "fcfs": -2,
+    },
+    # Expected resale / retail ratio per notch, only used when no real market
+    # price is known. The +/- steps sit a third of the way (geometrically)
+    # toward the neighbouring letter.
+    "price_multiplier": {
+        "C-": 0.97, "C": 1.0, "C+": 1.05,
+        "B-": 1.10, "B": 1.15, "B+": 1.23,
+        "A-": 1.31, "A": 1.4, "A+": 1.52,
+        "S-": 1.66, "S": 1.8, "S+": 1.98,
+    },
 }
 
-GRADES = ["C", "B", "A", "S"]
+NOTCHES = ["C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+", "S-", "S", "S+"]
+
+
+def notch(grade: str) -> int:
+    return NOTCHES.index(grade)
 
 
 def load_tiers(path: Path) -> dict:
-    """Load tiers.json, writing the defaults out on first run so the user can edit them."""
+    """Load tiers.json, writing the defaults out on first run so the user can edit them.
+
+    Files written by older versions (plain S/A/B/C, no "adjust") get the
+    missing keys filled in from the defaults rather than failing.
+    """
     if not path.exists():
         path.write_text(json.dumps(DEFAULT_TIERS, ensure_ascii=False, indent=2), encoding="utf-8")
         return DEFAULT_TIERS
-    return json.loads(path.read_text(encoding="utf-8"))
+    tiers = json.loads(path.read_text(encoding="utf-8"))
+    for key, value in DEFAULT_TIERS.items():
+        tiers.setdefault(key, value)
+    for key in ("adjust", "price_multiplier", "rules"):
+        for k, v in DEFAULT_TIERS[key].items():
+            tiers[key].setdefault(k, v)
+    return tiers
 
 
 def _alias_pattern(alias: str) -> re.Pattern:

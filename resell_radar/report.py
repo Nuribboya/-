@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from html import escape
 
@@ -41,7 +42,7 @@ display:flex;flex-direction:column;gap:10px;border-top:4px solid var(--pass)}
 .top{display:flex;align-items:center;gap:8px}
 .badge{font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--pass-bg);color:var(--pass)}
 .rec .badge{background:var(--rec-bg);color:var(--rec)}.maybe .badge{background:var(--maybe-bg);color:var(--maybe)}
-.grade{margin-left:auto;font-weight:800;font-size:20px;width:36px;height:36px;border-radius:10px;
+.grade{margin-left:auto;font-weight:800;font-size:20px;min-width:36px;height:36px;padding:0 6px;border-radius:10px;
 display:grid;place-items:center;background:var(--bg);border:1px solid var(--line)}
 .name{font-weight:700;font-size:16px}
 .shop{color:var(--muted);font-size:13px}
@@ -102,9 +103,9 @@ def _ms(dt: datetime | None) -> str:
 
 
 def _chip(reason: str) -> str:
-    if "+1" in reason:
+    if re.search(r"\+\d+칸", reason):
         cls = "chip up"
-    elif "-1" in reason or "미달" in reason:
+    elif re.search(r"-\d+칸", reason) or "미달" in reason:
         cls = "chip down"
     else:
         cls = "chip"

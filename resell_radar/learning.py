@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from resell_radar.tiers import GRADES, find_collaborators, find_hot_silhouette
+from resell_radar.tiers import find_collaborators, find_hot_silhouette, notch
 
 # Hand-kept log of resale prices for items that already dropped (look them up
 # on KREAM). Every row teaches the estimator how far the tier table is off.
@@ -69,7 +69,7 @@ def load_price_log(path: Path, grade_of) -> list[Observation]:
 def _group(name: str, tiers: dict) -> str:
     collabs = find_collaborators(name, tiers)
     if collabs:
-        return max(collabs, key=lambda c: GRADES.index(c[1]))[0]
+        return max(collabs, key=lambda c: notch(c[1]))[0]
     return find_hot_silhouette(name, tiers) or "일반 발매"
 
 
