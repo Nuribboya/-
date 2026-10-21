@@ -1,0 +1,55 @@
+name: Build ResellRadar.exe
+
+on:
+  push:
+    paths:
+      - "resell_radar/**"
+      - "tests/test_resell_radar.py"
+      - ".github/workflows/resell-radar-exe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install pyinstaller pytest
+
+      - name: Test
+        run: python -m pytest tests/test_resell_radar.py -q
+
+      - name: Build exe
+        run: pyinstaller --onefile --console --name ResellRadar --paths . resell_radar/__main__.py
+
+      - name: Smoke run
+        shell: pwsh
+        run: |
+          $env:RESELL_RADAR_HOME = "$env:RUNNER_TEMP\rr"
+          .\dist\ResellRadar.exe run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "$env:RUNNER_TEMP\rr\tiers.json")) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ResellRadar
+          path: |
+            dist/ResellRadar.exe
+            resell_radar/README.md
+
+      - name: Publish as "resell-radar-latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: resell-radar-latest
+          name: ResellRadar (latest build)
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          files: dist/ResellRadar.exe
