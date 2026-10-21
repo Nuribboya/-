@@ -112,10 +112,11 @@ def test_nike_feed_parsing():
 def test_manual_csv_roundtrip(tmp_path):
     path = tmp_path / "releases.csv"
     manual.write_template(path)
-    assert manual.load(path) == []  # the example row is ignored
+    starter = manual.load(path)
+    assert len(starter) == len(manual.STARTER_ROWS)  # the example row is ignored
     with path.open("a", encoding="utf-8-sig", newline="") as f:
         f.write("CPFM x Nike Dunk,무신사,2026-11-01 10:00,2026-11-02 23:59,,\"159,000원\",선착순,1,Y,250000,\n")
-    [r] = manual.load(path)
+    [r] = [x for x in manual.load(path) if x.name == "CPFM x Nike Dunk"]
     assert r.retail_price == 159_000 and r.market_price == 250_000
     assert r.method == FCFS and r.is_restock and r.retailer_count == 1
     assert r.entry_end.hour == 23
@@ -239,3 +240,46 @@ def test_old_tiers_file_is_upgraded(tmp_path):
     assert tiers["price_multiplier"]["S"] == 2.0  # user's edit kept
     assert tiers["price_multiplier"]["A+"] == DEFAULT_TIERS["price_multiplier"]["A+"]
     assert tiers["adjust"] == DEFAULT_TIERS["adjust"]
+
+
+def test_pharrell_is_a_default_collaborator():
+    s = score_release(rel("Pharrell x adidas Adistar Jellyfish", price=345_000), DEFAULT_TIERS, PROFIT)
+    assert s.level == "A" and s.verdict == RECOMMEND
+
+
+def test_apparel_sits_two_notches_lower():
+    shoe = score_release(rel("Supreme x Nike SB Dunk Low"), DEFAULT_TIERS, PROFIT)
+    hoodie = score_release(rel("Supreme x Nike Hooded Sweatshirt"), DEFAULT_TIERS, PROFIT)
+    feed = score_release(rel("Supreme x Nike Top", is_apparel=True), DEFAULT_TIERS, PROFIT)
+    assert shoe.level == "S-"  # A +2 (SB Dunk)
+    assert hoodie.level == feed.level == "B+"  # A -2
+    assert "의류 -2칸" in hoodie.reasons
+
+
+def test_untouched_template_from_older_version_gets_starter_rows(tmp_path):
+    path = tmp_path / "releases.csv"
+    path.write_text("상품명,발매처\n(예시) Fragment x Union,무신사\n", encoding="utf-8-sig")
+    manual.ensure_template(path)
+    assert len(manual.load(path)) == len(manual.STARTER_ROWS)
+
+
+def test_user_schedule_is_never_overwritten(tmp_path):
+    path = tmp_path / "releases.csv"
+    path.write_text("상품명,발매처\nUnion x Air Jordan 1,무신사\n", encoding="utf-8-sig")
+    manual.ensure_template(path)
+    assert [r.name for r in manual.load(path)] == ["Union x Air Jordan 1"]
+
+
+def test_old_tiers_file_gains_new_default_collaborators_but_keeps_edits(tmp_path):
+    import json
+
+    from resell_radar.tiers import load_tiers
+
+    old = json.loads(json.dumps(DEFAULT_TIERS))
+    del old["collaborators"]["Pharrell"]
+    old["collaborators"]["Kith"]["grade"] = "A"
+    path = tmp_path / "tiers.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    tiers = load_tiers(path)
+    assert tiers["collaborators"]["Pharrell"]["grade"] == "A"
+    assert tiers["collaborators"]["Kith"]["grade"] == "A"

@@ -24,6 +24,7 @@ class Release:
     method: str = UNKNOWN
     retailer_count: int | None = None
     is_restock: bool = False
+    is_apparel: bool = False
     market_price: int | None = None  # KRW, known resale price (e.g. typed in from KREAM)
     url: str = ""
     brand: str = ""
@@ -35,7 +36,7 @@ class Release:
 
 @dataclass
 class Score:
-    level: str  # S / A / B / C
+    level: str  # C- .. S+
     verdict: str  # 추천 / 애매 / 패스
     collaborators: list[str] = field(default_factory=list)
     est_price: int | None = None

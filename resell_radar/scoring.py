@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from resell_radar.models import FCFS, Release, Score
-from resell_radar.tiers import NOTCHES, find_collaborators, find_hot_silhouette, notch
+from resell_radar.tiers import NOTCHES, find_collaborators, find_hot_silhouette, is_apparel, notch
 
 RECOMMEND = "추천"
 MAYBE = "애매"
@@ -82,6 +82,9 @@ def score_release(
 
     if release.method == FCFS:
         apply("fcfs", "선착순 판매")
+
+    if release.is_apparel or is_apparel(release.name, tiers):
+        apply("apparel", "의류")
 
     score = Score(level=grade, verdict=PASS, collaborators=[n for n, _ in collabs], reasons=reasons)
 

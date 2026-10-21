@@ -65,6 +65,7 @@ def parse_feed(payload: dict) -> list[Release]:
                     method=METHODS.get(launch.get("method", ""), UNKNOWN),
                     # SNKRS is a single shop; other KR retailers aren't visible here.
                     retailer_count=None,
+                    is_apparel=merch.get("productType") == "APPAREL",
                     url=LAUNCH_URL.format(slug=slug) if slug else "",
                 )
             )

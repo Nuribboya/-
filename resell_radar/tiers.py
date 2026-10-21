@@ -24,6 +24,7 @@ DEFAULT_TIERS: dict = {
         "Awake NY": {"grade": "A", "aliases": ["awake ny", "awake", "어웨이크"]},
         "Bad Bunny": {"grade": "A", "aliases": ["bad bunny", "배드 버니", "배드버니"]},
         "Satoshi Nakamoto": {"grade": "A", "aliases": ["satoshi nakamoto", "사토시 나카모토"]},
+        "Pharrell": {"grade": "A", "aliases": ["pharrell", "퍼렐", "humanrace"]},
         "JJJJound": {"grade": "A", "aliases": ["jjjjound", "자운드"]},
         "PEACEMINUSONE": {"grade": "A", "aliases": ["peaceminusone", "g-dragon", "피스마이너스원", "지드래곤", "권도"]},
         "Concepts": {"grade": "A", "aliases": ["concepts", "컨셉츠"]},
@@ -43,6 +44,13 @@ DEFAULT_TIERS: dict = {
         "SB Dunk": ["sb dunk", "dunk sb", "sb 덩크", "덩크 sb"],
         "Kobe": ["kobe", "코비"],
     },
+    # Clothing resells for smaller premiums than shoes from the same partner
+    # (size spread, lower trade volume), so apparel sits two notches lower.
+    "apparel_keywords": [
+        "hoodie", "hooded", "sweatshirt", "crewneck", "tee", "t-shirt", "shirt", "jacket", "pants",
+        "shorts", "jersey", "fleece", "beanie", "cap", "후디", "후드", "스웨트셔츠", "맨투맨", "크루넥",
+        "티셔츠", "반팔", "긴팔", "셔츠", "재킷", "자켓", "팬츠", "바지", "반바지", "저지", "플리스", "비니", "모자",
+    ],
     "rules": {
         "repeat_collab_count": 3,  # this many releases with the same partner in a year -> penalty
         "many_retailers": 5,  # released through this many shops or more -> penalty
@@ -56,6 +64,7 @@ DEFAULT_TIERS: dict = {
         "restock": -3,
         "many_retailers": -2,
         "fcfs": -2,
+        "apparel": -2,
     },
     # Expected resale / retail ratio per notch, only used when no real market
     # price is known. The +/- steps sit a third of the way (geometrically)
@@ -87,7 +96,8 @@ def load_tiers(path: Path) -> dict:
     tiers = json.loads(path.read_text(encoding="utf-8"))
     for key, value in DEFAULT_TIERS.items():
         tiers.setdefault(key, value)
-    for key in ("adjust", "price_multiplier", "rules"):
+    # New default partners are added; grades the user already edited are kept.
+    for key in ("adjust", "price_multiplier", "rules", "collaborators"):
         for k, v in DEFAULT_TIERS[key].items():
             tiers[key].setdefault(k, v)
     return tiers
@@ -110,6 +120,11 @@ def find_collaborators(title: str, tiers: dict) -> list[tuple[str, str]]:
         if any(_alias_pattern(a).search(text) for a in info["aliases"]):
             found.append((name, info["grade"]))
     return found
+
+
+def is_apparel(title: str, tiers: dict) -> bool:
+    text = title.lower()
+    return any(_alias_pattern(k).search(text) for k in tiers["apparel_keywords"])
 
 
 def find_hot_silhouette(title: str, tiers: dict) -> str | None:

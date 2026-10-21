@@ -50,8 +50,7 @@ def setup(home: Path) -> Settings:
         settings.min_profit_ratio = float(value) / 100
 
     save_settings(home / "settings.json", settings)
-    if not (home / "releases.csv").exists():
-        manual.write_template(home / "releases.csv")
+    manual.ensure_template(home / "releases.csv")
     print(f"저장 완료: {home / 'settings.json'}")
     return settings
 
@@ -66,8 +65,7 @@ def build_estimator(home: Path, tiers: dict, store: Store) -> Estimator:
 def run(home: Path, quiet: bool = False) -> int:
     settings = load_settings(home / "settings.json") or Settings()
     tiers = load_tiers(home / "tiers.json")
-    if not (home / "releases.csv").exists():
-        manual.write_template(home / "releases.csv")
+    manual.ensure_template(home / "releases.csv")
     if not (home / "prices.csv").exists():
         write_price_log_template(home / "prices.csv")
 

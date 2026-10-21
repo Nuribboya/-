@@ -10,7 +10,7 @@ from resell_radar.models import DRAW, FCFS, KST, UNKNOWN, Release
 # Hand-maintained schedule (any shop: 무신사, 크림 드로우, 편집숍, 해외 등).
 # Also the place to type a real KREAM price into 예상시세 — when present it
 # replaces the grade-based estimate.
-COLUMNS = ["상품명", "발매처", "응모시작", "응모마감", "발매일", "정가", "방식", "발매처수", "재발매", "예상시세", "링크"]
+COLUMNS = ["상품명", "발매처", "응모시작", "응모마감", "발매일", "정가", "방식", "발매처수", "재발매", "예상시세", "링크", "메모"]
 EXAMPLE_ROW = {
     "상품명": "(예시) Fragment x Union x Air Jordan 1 High",
     "발매처": "무신사",
@@ -23,7 +23,36 @@ EXAMPLE_ROW = {
     "재발매": "N",
     "예상시세": "",
     "링크": "",
+    "메모": "예시 줄은 무시됩니다",
 }
+
+# Collabs found in public release calendars (Sneaker News, Sneakerfiles, Foot
+# Locker etc.) as of 2026-10-21, so a first run shows something real. KR
+# prices are US retail x 1,150 where only the US price was known; dates and
+# prices should be checked on the shop's own page. Past dates drop out of the
+# results automatically.
+EST = "정가는 미국 정가 x1,150 추정"
+STARTER_ROWS = [
+    ("JJJJound x New Balance 990v3", "JJJJound 선발매", "2026-10-22", "", "", "https://sneakernews.com/2026/10/18/sneaker-releases-october-18-24-2026/", "다음 주 확대 발매 예정"),
+    ("SZA x Vans", "Vans", "2026-10-22", "", "", "https://sneakernews.com/2026/10/18/sneaker-releases-october-18-24-2026/", ""),
+    ("APB x Air Jordan 11 Low", "Jordan", "2026-10-23", "", "", "https://sneakernews.com/2026/10/18/sneaker-releases-october-18-24-2026/", ""),
+    ("Nike Dunk Low Shibuya Halloween", "Nike", "2026-10-23", "149500", "", "https://sneakernews.com/2026/10/18/sneaker-releases-october-18-24-2026/", EST),
+    ("Nike Kobe 3 Low Protro Mamba Eterno", "Nike", "2026-10-30", "218500", "", "https://sneakernews.com/category/release-dates/", EST),
+    ("Air Jordan 4 Light Army", "Jordan", "2026-10-31", "", "", "https://sneakernews.com/air-jordan-release-dates/", ""),
+    ("Space Jam x Air Jordan 1 Mid", "Jordan", "2026-11-05", "", "", "https://www.sneakerfiles.com/release-dates/", ""),
+    ("Space Jam x Air Jordan 3 Lola Bunny", "Jordan", "2026-11-05", "", "", "https://www.sneakerfiles.com/release-dates/", ""),
+    ("Victor Wembanyama x Nike GT Cut 4 Statue of Liberty", "Nike", "2026-11-05", "241500", "", "https://www.sneakerfiles.com/release-dates/", EST),
+    ("Chainsaw Man x Crocs Classic Clog", "Crocs", "2026-11-11", "", "", "https://www.footlocker.com/release-calendar.html", ""),
+    ("Pokemon x Puma", "Puma", "2026-11-12", "", "", "https://sneakernews.com/2026/08/03/adidas-pokemon-30th-anniversary-collection/", ""),
+    ("Air Jordan 4 OG Bred", "Jordan", "2026-11-27", "", "Y", "https://sneakerreleasedates.net/calendar", ""),
+    ("Slam Jam x Nike Air Max 97", "Nike", "2026-11-28", "", "", "https://www.sneakerfiles.com/release-dates/", ""),
+    ("Pharrell x adidas Adistar Jellyfish Auburn Timber", "adidas", "2026-12-05", "345000", "", "https://www.sneakerfiles.com/release-dates/", EST),
+    ("Marvel Avengers Doomsday x adidas Superstar Pack (12월 미정)", "adidas", "", "", "", "https://sneakernews.com/2026/09/30/marvel-adidas-superstar-avengers-doomsday/", "날짜 나오면 발매일 채우기"),
+    ("Travis Scott x Nike Air Force 1 Low Ice Blue (날짜 미정)", "Nike", "", "", "", "https://www.sneakerfreaker.com/releases/travis-scott-nike-air-force-1-zoom-vapor-12-2026-price-buy-release-date", "날짜 나오면 발매일 채우기"),
+    ("Satoshi Nakamoto x Vans Era 95 (날짜 미정)", "Vans", "", "", "", "https://www.soleretriever.com/sneaker-release-dates/vans", "날짜 나오면 발매일 채우기"),
+    ("Sean Wotherspoon x Mizuno Wave MG4 (날짜 미정)", "Mizuno", "", "", "", "https://sneakernews.com/2026/10/20/sean-wotherspoon-mizuno-wave-mg4-ls", "날짜 나오면 발매일 채우기"),
+    ("Supreme x Dyson FW26 (주간 드롭)", "Supreme", "", "", "", "https://www.highsnobiety.com/p/supreme-fw26/", "품목·정가 확인 필요"),
+]
 METHOD_WORDS = {"응모": DRAW, "드로우": DRAW, "draw": DRAW, "선착순": FCFS, "fcfs": FCFS}
 
 
@@ -32,6 +61,21 @@ def write_template(path: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writeheader()
         writer.writerow(EXAMPLE_ROW)
+        for name, shop, date, price, restock, link, memo in STARTER_ROWS:
+            writer.writerow({
+                "상품명": name, "발매처": shop, "발매일": date, "정가": price,
+                "재발매": restock or "N", "링크": link, "메모": memo,
+            })
+
+
+def ensure_template(path: Path) -> None:
+    """Create releases.csv, or refill one an older version left with only the example row."""
+    if path.exists():
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            rows = [r for r in csv.DictReader(f) if (r.get("상품명") or "").strip()]
+        if any(not r["상품명"].startswith("(예시)") for r in rows):
+            return
+    write_template(path)
 
 
 def _int(value: str | None) -> int | None:
