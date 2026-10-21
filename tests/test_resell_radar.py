@@ -283,3 +283,71 @@ def test_old_tiers_file_gains_new_default_collaborators_but_keeps_edits(tmp_path
     tiers = load_tiers(path)
     assert tiers["collaborators"]["Pharrell"]["grade"] == "A"
     assert tiers["collaborators"]["Kith"]["grade"] == "A"
+
+
+from resell_radar import krify
+from resell_radar.sources import us_calendar
+
+RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<item><title>Union x Air Jordan 1 Low &#8220;Sail&#8221; Release Date</title>
+<link>https://example.com/union-aj1</link>
+<content:encoded><![CDATA[<p>Look for it soon.</p><p><strong>Union x Air Jordan 1 Low</strong><br>
+Release Date: November 21st, 2026<br>Price: $160</p>]]></content:encoded></item>
+<item><title>Nike Air Max 1 Official Images</title><link>https://example.com/am1</link>
+<description>Release Date: Saturday, December 5, 2026 ($150)</description></item>
+<item><title>Opinion: the best shoes of the year</title><link>https://example.com/op</link>
+<description>No date here, $200 though.</description></item>
+</channel></rss>"""
+
+
+def test_rss_feed_parsing():
+    items = us_calendar.parse_feed(RSS, "Sneaker News")
+    assert [(r.name, r.us_price) for r in items] == [
+        ("Union x Air Jordan 1 Low “Sail”", 160),
+        ("Nike Air Max 1", 150),
+    ]
+    assert items[0].release_at.date().isoformat() == "2026-11-21"
+    assert items[1].release_at.date().isoformat() == "2026-12-05"
+
+
+def us_item(name, usd, days=10):
+    return Release(source="us_calendar", source_id=name, name=name, us_price=usd,
+                   release_at=datetime.now(timezone.utc) + timedelta(days=days))
+
+
+def test_reconcile_estimates_unmatched_us_items(store):
+    out, factor, n = krify.reconcile([us_item("Union x Air Jordan 1 Low Sail", 160)], store)
+    [r] = out
+    assert factor == krify.DEFAULT_FACTOR and n == 0
+    assert r.retail_price == 184_000
+    assert "나이키 SNKRS 한국" in r.channels and "Union 공식몰" in r.channels
+    assert "추정" in r.note
+
+
+def test_reconcile_learns_factor_from_matched_korean_prices(store):
+    pairs = [("Kobe 6 Protro Reverse Grinch", 190, 239_000), ("Air Jordan 4 Bred", 215, 269_000),
+             ("Nike SB Dunk Low Concepts Lobster", 135, 169_000)]
+    releases = []
+    for name, usd, krw in pairs:
+        releases.append(us_item(name, usd))
+        releases.append(rel(name, price=krw))
+    out, factor, n = krify.reconcile(releases + [us_item("Travis Scott x AF1 Ice Blue", 160)], store)
+    assert n == 3 and 1240 < factor < 1260  # median of 1258 / 1251 / 1252
+    assert len(out) == 4  # matched US duplicates dropped
+    ts = [r for r in out if r.source == "us_calendar"][0]
+    assert ts.retail_price == round(160 * factor, -2)
+    assert "실제 3건 학습" in ts.note
+
+
+def test_reconcile_fills_missing_korean_price_and_dedupes_feeds(store):
+    kr = rel("JJJJound x New Balance 990v3", price=None)
+    out, _, _ = krify.reconcile(
+        [kr, us_item("JJJJound x New Balance 990v3 Brown", 230), us_item("JJJJound x New Balance 990v3", 230)], store)
+    assert out == [kr] and kr.retail_price == 264_500
+    assert store.price_pairs() == []  # an estimated price never becomes training data
+
+
+def test_keep_filter_drops_plain_colorways(store):
+    out, _, _ = krify.reconcile([us_item("Nike Air Max 1 Triple White", 150)], store, keep=lambda r: " x " in r.name)
+    assert out == []

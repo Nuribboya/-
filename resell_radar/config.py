@@ -33,7 +33,7 @@ class Settings:
     shipping_cost: int = 4_000
     notify_maybe: bool = False  # also alert on 애매 items, not just 추천
     remind_hours_before_end: int = 3
-    sources: dict = field(default_factory=lambda: {"nike": True, "manual": True})
+    sources: dict = field(default_factory=lambda: {"nike": True, "us_calendar": True, "manual": True})
 
     @property
     def has_telegram(self) -> bool:

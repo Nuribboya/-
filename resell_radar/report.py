@@ -59,6 +59,8 @@ display:grid;place-items:center;background:var(--bg);border:1px solid var(--line
 a.go{margin-top:auto;text-align:center;text-decoration:none;background:var(--accent);color:var(--accent-text);
 border-radius:10px;padding:9px;font-weight:600;font-size:14px}
 .empty{color:var(--muted);text-align:center;padding:40px 0}
+.note{font-size:12px}
+.badge.est{background:var(--maybe-bg);color:var(--maybe)}
 .learn{margin-top:28px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
 .learn h2{margin:0 0 4px;font-size:17px}
 .learn p{margin:0 0 12px;color:var(--muted);font-size:13px}
@@ -131,16 +133,30 @@ def _card(result) -> str:
             f'<div><div class="time"></div>'
             f'<div class="meta">응모 {fmt_kst(rel.entry_start)} ~ {fmt_kst(rel.entry_end)}</div></div>'
         )
+    extra = ""
+    if rel.channels:
+        extra += f'<div class="meta">🛒 {escape(rel.channels)}</div>'
+    if rel.note:
+        extra += f'<div class="meta note">{escape(rel.note)}</div>'
     shop = escape(rel.brand or rel.source)
+    est_tag = '<span class="badge est">일정 추정</span>' if rel.source == "us_calendar" else ""
     link = f'<a class="go" href="{escape(rel.url)}" target="_blank" rel="noopener">응모하러 가기</a>' if rel.url else ""
     return (
         f'<article class="card {cls}" data-v="{cls}" data-profit="{s.est_profit or 0}" '
         f'data-start="{_ms(rel.entry_start)}" data-end="{_ms(rel.entry_end)}">'
-        f'<div class="top"><span class="badge">{s.verdict}</span><span class="shop">{shop}</span>'
+        f'<div class="top"><span class="badge">{s.verdict}</span>{est_tag}<span class="shop">{shop}</span>'
         f'<span class="grade">{s.level}</span></div>'
-        f'<div class="name">{escape(rel.name)}</div>{money}{when}'
+        f'<div class="name">{escape(rel.name)}</div>{money}{when}{extra}'
         f'<div class="chips">{"".join(_chip(r) for r in s.reasons)}</div>{link}</article>'
     )
+
+
+def _fx_line(fx) -> str:
+    if not fx:
+        return ""
+    factor, pairs = fx
+    learned = f"실제 {pairs}건 학습" if pairs >= 3 else f"기본값, 학습 {pairs}건"
+    return f" · 미국→국내 정가 환산 1달러당 {factor:,.0f}원 ({learned})"
 
 
 def _learning(estimator) -> str:
@@ -168,7 +184,7 @@ def _learning(estimator) -> str:
     )
 
 
-def render_html(results: list, errors: list[str], generated_at: datetime, estimator=None) -> str:
+def render_html(results: list, errors: list[str], generated_at: datetime, estimator=None, fx=None) -> str:
     counts = {v: sum(1 for r in results if r.score.verdict == v) for v in (RECOMMEND, MAYBE, PASS)}
     warn = "".join(f'<div class="warn">⚠ {escape(e)}</div>' for e in errors)
     stats = (
@@ -183,7 +199,7 @@ def render_html(results: list, errors: list[str], generated_at: datetime, estima
 <title>리셀 레이더</title><style>{STYLE}</style></head>
 <body><div class="wrap">
 <header><h1>리셀 레이더</h1>
-<div class="sub">{generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M")} 기준 · 응모 가치가 있는 발매만 골라 보여줍니다</div></header>
+<div class="sub">{generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M")} 기준 · 응모 가치가 있는 발매만 골라 보여줍니다{_fx_line(fx)}</div></header>
 <div class="stats">{stats}</div>{warn}
 <div class="bar">
 <div class="tabs"><button class="on" data-filter="active">추천+애매</button><button data-filter="rec">추천</button>

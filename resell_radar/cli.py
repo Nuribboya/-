@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from resell_radar.config import Settings, app_dir, load_settings, save_settings
+from resell_radar.krify import reconcile
 from resell_radar.learning import Estimator, load_price_log, write_price_log_template
 from resell_radar.models import Release
 from resell_radar.models import fmt_kst
@@ -17,7 +18,7 @@ from resell_radar.report import render_html
 from resell_radar.scoring import PASS, ProfitSettings, score_release
 from resell_radar.sources import manual
 from resell_radar.storage import Store
-from resell_radar.tiers import load_tiers
+from resell_radar.tiers import find_collaborators, find_hot_silhouette, load_tiers
 
 TASK_NAME = "ResellRadar"
 
@@ -62,7 +63,7 @@ def build_estimator(home: Path, tiers: dict, store: Store) -> Estimator:
     return Estimator(load_price_log(home / "prices.csv", grade_of) + store.market_observations(), tiers)
 
 
-def run(home: Path, quiet: bool = False) -> int:
+def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
     settings = load_settings(home / "settings.json") or Settings()
     tiers = load_tiers(home / "tiers.json")
     manual.ensure_template(home / "releases.csv")
@@ -70,8 +71,17 @@ def run(home: Path, quiet: bool = False) -> int:
         write_price_log_template(home / "prices.csv")
 
     releases, errors = collect(settings, home)
+    by_source = {}
+    for r in releases:
+        by_source[r.source] = by_source.get(r.source, 0) + 1
     store = Store(home / "resell_radar.db")
     try:
+        # From US calendars keep collabs and hot silhouettes; plain colorways are noise here.
+        def worth_tracking(r: Release) -> bool:
+            name = r.name.lower()
+            return bool(" x " in name or find_collaborators(name, tiers) or find_hot_silhouette(name, tiers))
+
+        releases, fx_factor, fx_pairs = reconcile(releases, store, keep=worth_tracking)
         estimator = build_estimator(home, tiers, store)
         results = evaluate(releases, tiers, settings, store, estimator)
         sent = 0
@@ -85,13 +95,14 @@ def run(home: Path, quiet: bool = False) -> int:
         store.close()
     write_report(results, home / "latest_report.csv")
     report = home / "report.html"
-    report.write_text(render_html(results, errors, datetime.now(timezone.utc), estimator), encoding="utf-8")
+    report.write_text(render_html(results, errors, datetime.now(timezone.utc), estimator, (fx_factor, fx_pairs)), encoding="utf-8")
 
     for err in errors:
         print(f"[경고] {err}")
     if quiet:
         return 0
 
+    print("sources: " + " ".join(f"{k}={v}" for k, v in sorted(by_source.items())))
     shown = [r for r in results if r.score.verdict != PASS]
     print(f"\n수집 {len(results)}건 → 추천/애매 {len(shown)}건 (패스 {len(results) - len(shown)}건)\n")
     for r in shown:
@@ -100,7 +111,8 @@ def run(home: Path, quiet: bool = False) -> int:
         print(f"[{s.verdict} {s.level}] {rel.name}")
         print(f"    예상순수익 {profit} | 응모마감 {fmt_kst(rel.entry_end)} | {' / '.join(s.reasons)}")
     print(f"\n결과 화면: {report}")
-    webbrowser.open(report.as_uri())
+    if open_report:
+        webbrowser.open(report.as_uri())
     if settings.has_telegram:
         print(f"텔레그램 알림 {sent}건 전송")
     return 0
@@ -160,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
     run_p = sub.add_parser("run", help="수집 → 판정 → 알림 1회 실행")
     run_p.add_argument("--quiet", action="store_true", help="콘솔 출력 생략 (자동 실행용)")
+    run_p.add_argument("--no-open", action="store_true", help="결과 화면을 브라우저로 열지 않음")
     sub.add_parser("setup", help="텔레그램/기준값 설정")
     sch = sub.add_parser("schedule", help="윈도우 작업 스케줄러에 자동 실행 등록")
     sch.add_argument("--hours", type=int, default=3)
@@ -168,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
 
     home = app_dir()
     if args.command == "run":
-        return run(home, quiet=args.quiet)
+        return run(home, quiet=args.quiet, open_report=not args.no_open)
     if args.command == "setup":
         setup(home)
         return 0

@@ -119,6 +119,7 @@ def load(path: Path) -> list[Release]:
                     is_restock=(row.get("재발매") or "").strip().upper() in ("Y", "O", "예", "YES"),
                     market_price=_int(row.get("예상시세")),
                     url=(row.get("링크") or "").strip(),
+                    note=(row.get("메모") or "").strip(),
                 )
             )
     return releases

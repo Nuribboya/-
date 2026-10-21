@@ -28,6 +28,9 @@ class Release:
     market_price: int | None = None  # KRW, known resale price (e.g. typed in from KREAM)
     url: str = ""
     brand: str = ""
+    us_price: int | None = None  # USD, from US release calendars
+    note: str = ""  # e.g. what was estimated and how
+    channels: str = ""  # where to enter in Korea (estimated for US-calendar items)
 
     @property
     def key(self) -> str:

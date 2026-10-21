@@ -9,7 +9,7 @@ from resell_radar.config import Settings
 from resell_radar.models import Release, Score, fmt_kst
 from resell_radar.notify import format_message
 from resell_radar.scoring import MAYBE, PASS, RECOMMEND, ProfitSettings, score_release
-from resell_radar.sources import manual, nike
+from resell_radar.sources import manual, nike, us_calendar
 from resell_radar.storage import Store
 
 VERDICT_ORDER = {RECOMMEND: 0, MAYBE: 1, PASS: 2}
@@ -30,6 +30,10 @@ def collect(settings: Settings, home: Path) -> tuple[list[Release], list[str]]:
             releases.extend(nike.fetch())
         except Exception as exc:  # network / format change on Nike's side
             errors.append(f"나이키 SNKRS 수집 실패: {exc}")
+    if settings.sources.get("us_calendar", True):
+        found, failed = us_calendar.fetch()
+        releases.extend(found)
+        errors.extend(failed)
     if settings.sources.get("manual", True):
         try:
             releases.extend(manual.load(home / "releases.csv"))

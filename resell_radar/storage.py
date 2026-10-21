@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS prices (
     retail_price INTEGER,
     market_price INTEGER
 );
+CREATE TABLE IF NOT EXISTS price_pairs (
+    name TEXT PRIMARY KEY,
+    usd INTEGER NOT NULL,
+    krw INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notifications (
     key TEXT NOT NULL,
     kind TEXT NOT NULL,
@@ -82,6 +87,13 @@ class Store:
         ).fetchall()
         latest = {name: Observation(name, level, retail, market) for name, level, retail, market in rows}
         return list(latest.values())
+
+    def save_price_pair(self, name: str, usd: int, krw: int) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO price_pairs (name, usd, krw) VALUES (?, ?, ?)", (name, usd, krw))
+        self.conn.commit()
+
+    def price_pairs(self) -> list[tuple[str, int, int]]:
+        return self.conn.execute("SELECT name, usd, krw FROM price_pairs").fetchall()
 
     def was_notified(self, key: str, kind: str) -> bool:
         row = self.conn.execute("SELECT 1 FROM notifications WHERE key=? AND kind=?", (key, kind)).fetchone()
