@@ -34,9 +34,9 @@ jobs:
         shell: pwsh
         run: |
           $env:RESELL_RADAR_HOME = "$env:RUNNER_TEMP\rr"
-          .\dist\ResellRadar.exe run
+          .\dist\ResellRadar.exe run --quiet
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path "$env:RUNNER_TEMP\rr\tiers.json")) { exit 1 }
+          if (-not (Test-Path "$env:RUNNER_TEMP\rr\report.html")) { exit 1 }
 
       - uses: actions/upload-artifact@v4
         with:

@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 
 from resell_radar.config import Settings, app_dir, load_settings, save_settings
 from resell_radar.models import fmt_kst
 from resell_radar.notify import Telegram, find_chat_id
 from resell_radar.pipeline import collect, evaluate, notify, write_report
+from resell_radar.report import render_html
 from resell_radar.scoring import PASS
 from resell_radar.sources import manual
 from resell_radar.storage import Store
@@ -71,6 +74,8 @@ def run(home: Path, quiet: bool = False) -> int:
     finally:
         store.close()
     write_report(results, home / "latest_report.csv")
+    report = home / "report.html"
+    report.write_text(render_html(results, errors, datetime.now(timezone.utc)), encoding="utf-8")
 
     for err in errors:
         print(f"[경고] {err}")
@@ -84,7 +89,8 @@ def run(home: Path, quiet: bool = False) -> int:
         profit = f"{s.est_profit:,}원{'(추정)' if s.price_is_estimate else ''}" if s.est_profit is not None else "-"
         print(f"[{s.verdict} {s.level}] {rel.name}")
         print(f"    예상순수익 {profit} | 응모마감 {fmt_kst(rel.entry_end)} | {' / '.join(s.reasons)}")
-    print(f"\n전체 결과(패스 포함): {home / 'latest_report.csv'}")
+    print(f"\n결과 화면: {report}")
+    webbrowser.open(report.as_uri())
     if settings.has_telegram:
         print(f"텔레그램 알림 {sent}건 전송")
     return 0
@@ -117,7 +123,8 @@ def menu(home: Path) -> int:
     if load_settings(home / "settings.json") is None:
         setup(home)
     while True:
-        print("\n1) 지금 확인하기   2) 설정   3) 3시간마다 자동 실행 등록   4) 자동 실행 해제   0) 종료")
+        print("\n1) 지금 확인하기   2) 설정   3) 3시간마다 자동 실행 등록   4) 자동 실행 해제")
+        print("5) 마지막 결과 화면 열기   0) 종료")
         choice = input("선택: ").strip()
         if choice == "1":
             run(home)
@@ -127,6 +134,11 @@ def menu(home: Path) -> int:
             schedule(3)
         elif choice == "4":
             unschedule()
+        elif choice == "5":
+            if (home / "report.html").exists():
+                webbrowser.open((home / "report.html").as_uri())
+            else:
+                print("아직 결과가 없어요. 1번으로 먼저 확인하세요.")
         elif choice == "0":
             return 0
 

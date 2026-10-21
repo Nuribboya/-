@@ -151,3 +151,19 @@ def test_history_feeds_repeat_penalty(store):
 def test_past_releases_are_skipped(store):
     old = rel("Union x Air Jordan 1", entry_end=datetime.now(timezone.utc) - timedelta(days=2))
     assert evaluate([old], DEFAULT_TIERS, Settings(), store) == []
+
+
+def test_html_report_escapes_and_counts(store):
+    from resell_radar.report import render_html
+
+    now = datetime.now(timezone.utc)
+    releases = [
+        rel("Union x Air Jordan 1 <script>", entry_end=now + timedelta(hours=2), url="https://example.com/a"),
+        rel("Nike Air Max 90"),
+    ]
+    results = evaluate(releases, DEFAULT_TIERS, Settings(), store)
+    page = render_html(results, ["나이키 수집 실패"], now)
+    assert "Air Jordan 1 <script>" not in page
+    assert "Air Jordan 1 &lt;script&gt;" in page
+    assert page.count('class="card ') == 2
+    assert "나이키 수집 실패" in page
