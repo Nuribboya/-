@@ -9,44 +9,45 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Find raffle list endpoint and recent raffle ids
+      - name: List recent raffles
         shell: python
         run: |
-          import json, re, urllib.request
+          import json, re, urllib.request, urllib.error
           UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-                "Accept-Language": "ko-KR,ko;q=0.9"}
+                "Accept-Language": "ko-KR,ko;q=0.9", "Accept": "application/json, text/html"}
           def get(url):
               req = urllib.request.Request(url, headers=UA)
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       return r.status, r.read().decode("utf-8", "replace")
               except urllib.error.HTTPError as e:
-                  return e.code, ""
+                  return e.code, e.read().decode("utf-8", "replace")[:300]
               except Exception as e:
                   return str(e), ""
-          st, html = get("https://www.musinsa.com/events/raffle")
-          chunks = re.findall(r'src="(https://static\.msscdn\.net/[^"]+\.js)"', html)
-          print("chunks", len(chunks))
-          seen = set()
-          for c in chunks:
-              s, js = get(c)
-              for m in re.finditer(r'["`]((?:https?:)?//[a-z0-9.-]+\.(?:musinsa\.com|msscdn\.net)[^"`]{0,60}|/api2?/[^"`]{0,80}raffle[^"`]{0,60})["`]', js):
-                  u = m.group(1)
-                  if u not in seen:
-                      seen.add(u); print("url:", c.rsplit("/",1)[-1][:40], u)
-              for m in re.finditer(r'raffle[A-Za-z]*\W{0,5}', js):
-                  pass
-              for m in list(re.finditer(r'.{0,120}api2/raffle.{0,160}', js))[:6]:
-                  print("ctx:", m.group(0))
+          for u in ["https://api.musinsa.com/api2/campaign/raffle/raffles",
+                    "https://api.musinsa.com/api2/campaign/raffle/raffles?page=1&size=20",
+                    "https://api.musinsa.com/api2/campaign/raffle/v1/raffles",
+                    "https://api.musinsa.com/api2/campaign/raffle/raffles/1000",
+                    "https://api.musinsa.com/api2/campaign/v1/raffles"]:
+              s, b = get(u); print("API", s, u, "|", b[:400].replace("\n", " "))
           def detail(i):
               s, h = get(f"https://www.musinsa.com/events/raffle/{i}")
               m = re.search(r'"raffleData":(\{.*?\}),"isGoodsPdpLinkEnabled"', h)
-              if not m:
-                  return s, None
-              try:
-                  d = json.loads(m.group(1))
-              except Exception:
-                  return s, "parse-fail"
-              return s, (d.get("title"), d.get("entryStartTime"), d.get("raffleStateMessage"), d.get("price"), d.get("entryCount"), d.get("winnerCount"), d.get("brandName"))
-          for i in [300, 500, 800, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 7000, 10000, 20000]:
-              print("id", i, detail(i))
+              if not m: return None
+              try: return json.loads(m.group(1))
+              except Exception: return None
+          lo, hi = 1000, 1500
+          while hi - lo > 1:
+              mid = (lo + hi) // 2
+              if detail(mid): lo = mid
+              else:
+                  # allow small gaps
+                  if any(detail(mid + k) for k in (1, 2, 3)): lo = mid
+                  else: hi = mid
+          print("max id ~", lo)
+          for i in range(lo, max(lo - 40, 1000), -1):
+              d = detail(i)
+              if not d: print(i, "-"); continue
+              print(i, "|", d.get("title"), "|", d.get("brandName"), "|", d.get("normalPrice"), "->", d.get("price"),
+                    "|", d.get("entryStartTime"), "~", d.get("entryEndTime"), "|", d.get("raffleStateMessage"),
+                    "| entries", d.get("entryCount"), "winners", d.get("winnerCount"))
