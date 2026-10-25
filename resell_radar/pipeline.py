@@ -9,7 +9,7 @@ from resell_radar.config import Settings
 from resell_radar.models import Release, Score, fmt_kst
 from resell_radar.notify import format_message
 from resell_radar.scoring import MAYBE, PASS, RECOMMEND, ProfitSettings, score_release
-from resell_radar.sources import manual, nike, us_calendar
+from resell_radar.sources import manual, musinsa, nike, us_calendar
 from resell_radar.storage import Store
 
 VERDICT_ORDER = {RECOMMEND: 0, MAYBE: 1, PASS: 2}
@@ -21,7 +21,7 @@ class Result:
     score: Score
 
 
-def collect(settings: Settings, home: Path) -> tuple[list[Release], list[str]]:
+def collect(settings: Settings, home: Path, store: Store | None = None) -> tuple[list[Release], list[str]]:
     """Gather releases from every enabled source. A failing source is reported, not fatal."""
     releases: list[Release] = []
     errors: list[str] = []
@@ -34,6 +34,14 @@ def collect(settings: Settings, home: Path) -> tuple[list[Release], list[str]]:
         found, failed = us_calendar.fetch()
         releases.extend(found)
         errors.extend(failed)
+    if settings.sources.get("musinsa", True) and store is not None:
+        try:
+            last = store.get_meta("musinsa_last_raffle")
+            found, highest = musinsa.fetch(int(last) if last else None)
+            releases.extend(found)
+            store.set_meta("musinsa_last_raffle", str(highest))
+        except Exception as exc:
+            errors.append(f"무신사 래플 수집 실패: {exc}")
     if settings.sources.get("manual", True):
         try:
             releases.extend(manual.load(home / "releases.csv"))

@@ -360,3 +360,50 @@ def test_calendar_items_are_remembered_until_release(store):
     # Next run: the article has dropped off the feed, the item is still tracked.
     [kept] = store.remember_calendar([])
     assert kept.name == soon.name and kept.us_price == 160
+
+
+from resell_radar.sources import musinsa
+
+
+def musinsa_page(no, state="진행중", end="2099-01-01T00:00:00", price=259000, normal=259000):
+    import json
+
+    data = {"props": {"pageProps": {"raffleData": {
+        "raffleNo": no, "title": f"[미즈노] 와디 웨이브 {no}", "brandName": "미즈노",
+        "normalPrice": normal, "price": price,
+        "entryStartTime": "2026-10-20T11:00:00", "entryEndTime": end,
+        "entryCount": 34434, "winnerCount": 1, "raffleStateMessage": state,
+    }}}}
+    return f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data, ensure_ascii=False)}</script></html>'
+
+
+def test_musinsa_detail_parsing():
+    r = musinsa.to_release(musinsa.parse_detail(musinsa_page(1279, price=1000, normal=139000)))
+    assert r.source_id == "1279" and r.retail_price == 1000
+    assert (r.entries, r.winners) == (34434, 1)
+    assert r.entry_start.utcoffset() == timedelta(hours=9) and r.entry_start.hour == 11
+    assert "이벤트가 1,000원" in r.note and r.url.endswith("/1279")
+
+
+def test_musinsa_scan_finds_new_open_raffles_and_stops_past_newest():
+    pages = {1276: musinsa_page(1276, state="래플 종료"), 1278: musinsa_page(1278, state="래플 종료"),
+             1280: musinsa_page(1280), 1281: musinsa_page(1281, end="2020-01-01T00:00:00")}
+    asked = []
+
+    def get(no):
+        asked.append(no)
+        return pages.get(no)
+
+    found, highest = musinsa.fetch(1278, get=get)
+    assert [r.source_id for r in found] == ["1280"]  # ended / past-deadline raffles skipped
+    assert highest == 1281
+    assert max(asked) == 1285  # four misses after the newest raffle, then stop
+
+
+def test_raffle_odds_show_in_reasons_and_card(store):
+    from resell_radar.report import render_html
+
+    r = musinsa.to_release(musinsa.parse_detail(musinsa_page(1280)))
+    results = evaluate([r], DEFAULT_TIERS, Settings(), store)
+    assert "당첨 1명 / 응모 34,434명" in results[0].score.reasons
+    assert "확률 0.0029%" in render_html(results, [], datetime.now(timezone.utc))

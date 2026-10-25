@@ -70,12 +70,13 @@ def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
     if not (home / "prices.csv").exists():
         write_price_log_template(home / "prices.csv")
 
-    releases, errors = collect(settings, home)
-    by_source = {}
-    for r in releases:
-        by_source[r.source] = by_source.get(r.source, 0) + 1
     store = Store(home / "resell_radar.db")
     try:
+        releases, errors = collect(settings, home, store)
+        by_source = {}
+        for r in releases:
+            by_source[r.source] = by_source.get(r.source, 0) + 1
+
         # From US calendars keep collabs and hot silhouettes; plain colorways are noise here.
         def worth_tracking(r: Release) -> bool:
             name = r.name.lower()

@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS calendar_items (
     url TEXT NOT NULL,
     us_price INTEGER
 );
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS price_pairs (
     name TEXT PRIMARY KEY,
     usd INTEGER NOT NULL,
@@ -122,6 +126,14 @@ class Store:
                 out.append(Release(source="us_calendar", source_id=source_id, name=name, brand=site,
                                    release_at=when, url=url, us_price=usd))
         return out
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+        self.conn.commit()
 
     def save_price_pair(self, name: str, usd: int, krw: int) -> None:
         self.conn.execute("INSERT OR REPLACE INTO price_pairs (name, usd, krw) VALUES (?, ?, ?)", (name, usd, krw))

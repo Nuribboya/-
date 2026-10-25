@@ -86,6 +86,9 @@ def score_release(
     if release.is_apparel or is_apparel(release.name, tiers):
         apply("apparel", "의류")
 
+    if release.winners and release.entries:
+        reasons.append(f"당첨 {release.winners:,}명 / 응모 {release.entries:,}명")
+
     score = Score(level=grade, verdict=PASS, collaborators=[n for n, _ in collabs], reasons=reasons)
 
     if not release.retail_price:

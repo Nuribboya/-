@@ -134,6 +134,9 @@ def _card(result) -> str:
             f'<div class="meta">응모 {fmt_kst(rel.entry_start)} ~ {fmt_kst(rel.entry_end)}</div></div>'
         )
     extra = ""
+    if rel.winners and rel.entries:
+        odds = rel.winners / rel.entries * 100
+        extra += f'<div class="meta">🎟 당첨 {rel.winners:,}명 · 응모 {rel.entries:,}명 (확률 {odds:.3g}%)</div>'
     if rel.channels:
         extra += f'<div class="meta">🛒 {escape(rel.channels)}</div>'
     if rel.note:

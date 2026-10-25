@@ -31,6 +31,8 @@ class Release:
     us_price: int | None = None  # USD, from US release calendars
     note: str = ""  # e.g. what was estimated and how
     channels: str = ""  # where to enter in Korea (estimated for US-calendar items)
+    entries: int | None = None  # raffle entrants so far (Musinsa publishes this)
+    winners: int | None = None  # raffle winners = actual allocation
 
     @property
     def key(self) -> str:
