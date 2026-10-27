@@ -9,39 +9,36 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect luck-d product pages and terms
+      - name: Extract luck-d product fields compactly
         shell: python
         run: |
-          import re, urllib.request, urllib.error
+          import re, html as H, urllib.request, urllib.error
           UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
                 "Accept-Language": "ko-KR,ko;q=0.9"}
           def get(url):
               req = urllib.request.Request(url, headers=UA)
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as r:
-                      return r.status, r.read().decode("utf-8", "replace")
-              except urllib.error.HTTPError as e:
-                  return e.code, ""
-          def text(h):
-              t = re.sub(r"<script.*?</script>|<style.*?</style>", " ", h, flags=re.S)
-              t = re.sub(r"<[^>]+>", " ", t); return re.sub(r"\s+", " ", t)
-          s, h = get("https://www.luck-d.com/release/")
-          t = text(h)
-          for kw in ["크롤", "자동화", "수집", "스크래", "로봇", "복제", "무단"]:
-              for m in list(re.finditer(kw, t))[:3]:
-                  print("TERMS[%s]:" % kw, t[max(0, m.start()-200): m.end()+200])
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read().decode("utf-8", "replace")
+          def squash(s): return re.sub(r"\s+", " ", s)
+          h = get("https://www.luck-d.com/release/")
+          t = squash(re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", " ", h, flags=re.S)))
+          for kw in ["크롤링", "자동화된", "무단 수집", "스크래핑", "복제"]:
+              for m in list(re.finditer(kw, t))[:2]:
+                  print("TERMS[%s]:" % kw, t[max(0, m.start()-150): m.end()+150])
           ids = list(dict.fromkeys(re.findall(r'href="/products/(\d+)"', h)))
-          print("ids on page 1:", len(ids), ids[:30])
-          # how the list block for one product looks in raw html
-          i = h.find('/products/%s"' % ids[0])
-          print("RAW LIST BLOCK:", h[max(0, i-600): i+1200])
-          for pid in ids[:2] + ["72000"]:
-              s2, h2 = get("https://www.luck-d.com/products/%s" % pid)
-              print("=" * 10, pid, s2, len(h2))
-              print(text(h2)[:3500])
-              j = h2.find("응모")
-              print("RAW AROUND 응모:", h2[max(0, j-1500): j+2500] if j > 0 else "none")
-              outs = re.findall(r'href="(https?://[^"]+)"', h2)
-              print("outbound:", [o[:100] for o in outs if "luck-d" not in o][:30])
-          s3, h3 = get("https://www.luck-d.com/release/?page=2")
-          print("page2", s3, len(re.findall(r'href="/products/(\d+)"', h3)))
+          i = h.find('href="/products/%s"' % ids[0])
+          print("LIST BLOCK:", squash(h[max(0, i-300): i+900])[:1400])
+          # pick a few products incl. sneakers with raffles
+          picks = ids[:3]
+          h_sn = get("https://www.luck-d.com/release/?category=1")
+          picks += list(dict.fromkeys(re.findall(r'href="/products/(\d+)"', h_sn)))[:3]
+          for pid in picks:
+              p = get("https://www.luck-d.com/products/%s" % pid)
+              desc = re.search(r'<meta name="description" content="([^"]+)"', p)
+              title = re.search(r"<title>([^<]+)</title>", p)
+              print("=" * 8, pid, "|", title and squash(title.group(1)))
+              print("DESC:", desc and H.unescape(desc.group(1)))
+              body = p[p.find("<body"):]
+              body = re.sub(r"<script.*?</script>|<style.*?</style>|<svg.*?</svg>", "", body, flags=re.S)
+              j = body.find("응모") if "응모" in body else body.find("선착순")
+              print("VENUE HTML:", squash(body[max(0, j-1200): j+1800])[:3000])
