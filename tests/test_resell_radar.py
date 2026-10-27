@@ -460,7 +460,7 @@ def test_luckd_fetch_uses_cache(store):
     assert [r.source_id for r in luckd.fetch(store, get=get, pause=0)] == ["90001"]
     n = len(calls)
     luckd.fetch(store, get=get, pause=0)
-    assert len(calls) - n == luckd.LIST_PAGES  # second run: list pages only, product from cache
+    assert not any("/products/" in u for u in calls[n:])  # second run: product comes from the cache
 
 
 def test_venue_grades_and_card_link():
@@ -495,3 +495,30 @@ def test_merge_korean_prefers_luckd(store):
 def test_news_links_are_labelled_as_articles():
     from resell_radar.report import _link_label
     assert _link_label(rel("Pharrell x adidas", url="https://www.sneakerfiles.com/release-dates/")) == "발매 정보 보기"
+
+
+def test_luckd_title_fallback_and_duplicate_shops(store):
+    page = (
+        '<title>메종 마르지엘라 x 젠틀몬스터 MM324 블랙 MM324-01 | 2026년 10월 29일 발매·가격·응모 - 럭드</title>'
+        '<span class="product_info_content">EYEWEAR</span><span>최저가 바로 구매 · 390,000 KRW</span>'
+        '<h2>온/오프라인 선착순 발매정보</h2>' + luckd_card("젠틀몬스터", "10월 29일 11:00 발매")
+        + '<h2>일반 판매 정보</h2>' + luckd_card("젠틀몬스터", "390,000 KRW")
+        + '<h2>젠틀몬스터 다가오는 발매</h2>' + luckd_card("다른상품샵", "10월 30일 10:00 발매")
+    )
+    r = luckd.to_release(luckd.parse_product(page, "72652"))
+    assert r.name.startswith("메종 마르지엘라 x 젠틀몬스터") and r.style_code == "MM324-01"
+    assert r.retail_price == 390_000 and r.release_at.isoformat() == "2026-10-29T23:59:00+09:00"
+    assert [v.name for v in r.venues] == ["젠틀몬스터"] and r.venues[0].start is not None
+
+
+def test_unreadable_luckd_pages_are_not_refetched(store):
+    calls = []
+
+    def get(url):
+        calls.append(url)
+        return '<a href="/products/1">' if "release" in url else "<html>nothing</html>"
+
+    assert luckd.fetch(store, get=get, pause=0) == []
+    n = len(calls)
+    luckd.fetch(store, get=get, pause=0)
+    assert not any("/products/" in u for u in calls[n:])

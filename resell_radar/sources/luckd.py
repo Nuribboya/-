@@ -15,14 +15,17 @@ from resell_radar.models import DRAW, FCFS, KST, UNKNOWN, Release, Venue
 # (/api/ and /search are the disallowed paths), and its terms have no
 # scraping clause. Pages are server-rendered HTML.
 SITE = "https://www.luck-d.com"
-LIST_URL = SITE + "/release/?page={page}"
+LIST_URL = SITE + "/release/?category={category}&page={page}"
 PRODUCT_URL = SITE + "/products/{pid}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     "Accept-Language": "ko-KR,ko;q=0.9",
 }
-LIST_PAGES = 5
+# The list runs from today forward and is dominated by accessories, so read
+# the footwear and clothing categories a few pages deep instead of "all".
+CATEGORIES = {1: 8, 2: 3}  # category id -> pages
+LIST_PAGES = sum(CATEGORIES.values())
 REFRESH_SOON = timedelta(hours=6)  # re-read items releasing within a few days this often
 REFRESH_LATER = timedelta(hours=24)
 
@@ -34,6 +37,12 @@ DATE_RE = re.compile(r"발매일은 (\d{4})년 (\d{1,2})월 (\d{1,2})일")
 CODE_RE = re.compile(r"제품 코드는 ([^,]+),")
 PRICE_RE = re.compile(r"발매가는 ([\d,]+) KRW")
 SECTION_OR_CARD = re.compile(r'<h2[^>]*>([^<]*)</h2>|class="release__container__card"')
+TITLE_RE = re.compile(r"<title>([^<|]+)\|[^<]*?(\d{4})년 (\d{1,2})월 (\d{1,2})일")
+BUY_PRICE_RE = re.compile(r"바로 구매 · ([\d,]+) KRW")
+# Only these page sections list where *this* product sells; the rest are
+# recommendations for other products.
+VENUE_SECTIONS = ("응모", "선착순", "판매")
+SKIP_SECTIONS = ("비슷한", "다가오는", "최근 발매")
 WHEN_RE = re.compile(r"(\d{1,2})월 (\d{1,2})일\s*(\d{1,2}):(\d{2})")
 DRAW_WORDS = ("응모", "드로우", "래플", "추첨")
 
@@ -71,21 +80,33 @@ def _when(text: str, year: int, month: int) -> list[str]:
 
 def parse_product(html: str, pid: str) -> dict | None:
     m = SUMMARY.search(html)
-    if not m:
-        return None
-    summary = _strip(m.group(1))
+    summary = _strip(m.group(1)) if m else ""
     name = NAME_RE.search(summary)
     date = DATE_RE.search(summary)
     code = CODE_RE.search(summary)
-    price = PRICE_RE.search(summary)
-    year = int(date.group(1)) if date else datetime.now(KST).year
-    month = int(date.group(2)) if date else datetime.now(KST).month
+    price = PRICE_RE.search(summary) or BUY_PRICE_RE.search(html)
+    if not (name and date):
+        # Some categories (eyewear etc.) have no summary sentence; the title
+        # still reads "<name> | 2026년 10월 29일 발매·가격·응모 - 럭드".
+        t = TITLE_RE.search(html)
+        if not t:
+            return None
+        name = name or re.match(r"(.+)", _strip(t.group(1)))
+        date = date or t
+        if not code:
+            code = re.search(r"(\S+)$", _strip(t.group(1)))
+    year = int(date.group(1) if date.re is DATE_RE else date.group(2))
+    month = int(date.group(2) if date.re is DATE_RE else date.group(3))
+    day = int(date.group(3) if date.re is DATE_RE else date.group(4))
 
-    venues, section = [], ""
+    venues: dict[str, dict] = {}
+    section = ""
     marks = list(SECTION_OR_CARD.finditer(html))
     for i, mk in enumerate(marks):
         if mk.group(1) is not None:
             section = _strip(mk.group(1))
+            continue
+        if any(w in section for w in SKIP_SECTIONS) or not any(w in section for w in VENUE_SECTIONS):
             continue
         chunk = html[mk.end(): marks[i + 1].start() if i + 1 < len(marks) else mk.end() + 4000]
         title = re.search(r'button_card__contents_title">\s*<span>([^<]+)</span>', chunk)
@@ -105,22 +126,30 @@ def parse_product(html: str, pid: str) -> dict | None:
                 end = times[0]
             else:
                 start = times[0]
-        venues.append({
+        venue = {
             "name": _strip(title.group(1)),
             "url": _real_url(link.group(1)) if link else "",
-            "method": DRAW if is_draw else FCFS if "선착순" in section or "발매" in cnt else UNKNOWN,
+            "method": DRAW if is_draw else FCFS,
             "start": start,
             "end": end,
             "online": "오프라인" not in badges,
             "overseas": "해외" in badges,
-        })
+        }
+        # A shop often shows up twice (e.g. drop time + regular sale); keep
+        # one row per shop, preferring its raffle and then a timed drop.
+        prev = venues.get(venue["name"])
+        if prev is None or (venue["method"] == DRAW and prev["method"] != DRAW) or (
+            prev["method"] == venue["method"] and not (prev["start"] or prev["end"]) and (start or end)
+        ):
+            venues[venue["name"]] = venue
     return {
         "pid": pid,
-        "name": name.group(1).strip() if name else summary[:60],
-        "date": datetime(year, int(date.group(2)), int(date.group(3)), tzinfo=KST).isoformat() if date else None,
+        "name": name.group(1).strip(),
+        # Date-only: keep the release listed through the end of its day.
+        "date": datetime(year, month, day, 23, 59, tzinfo=KST).isoformat(),
         "code": code.group(1).strip() if code else "",
         "price": int(price.group(1).replace(",", "")) if price else None,
-        "venues": venues,
+        "venues": list(venues.values()),
     }
 
 
@@ -168,8 +197,12 @@ def fetch(store, get=None, pause: float = 0.5, timeout: float = 20) -> list[Rele
     get = get or (lambda url: _get(url, timeout))
     now = datetime.now(timezone.utc)
     ids: list[str] = []
-    for page in range(1, LIST_PAGES + 1):
-        ids += [i for i in parse_list(get(LIST_URL.format(page=page))) if i not in ids]
+    for category, pages in CATEGORIES.items():
+        for page in range(1, pages + 1):
+            new = [i for i in parse_list(get(LIST_URL.format(category=category, page=page))) if i not in ids]
+            if not new:
+                break
+            ids += new
 
     releases = []
     for pid in ids:
@@ -185,9 +218,10 @@ def fetch(store, get=None, pause: float = 0.5, timeout: float = 20) -> list[Rele
         if d is None:
             if pause:
                 time.sleep(pause)
-            d = parse_product(get(PRODUCT_URL.format(pid=pid)), pid)
-            if d is None:
-                continue
+            d = parse_product(get(PRODUCT_URL.format(pid=pid)), pid) or {"pid": pid, "unreadable": True}
+            # Unreadable pages are cached too, so they aren't re-fetched every run.
             store.luckd_cache(pid, json.dumps(d, ensure_ascii=False))
+        if d.get("unreadable"):
+            continue
         releases.append(to_release(d))
     return releases

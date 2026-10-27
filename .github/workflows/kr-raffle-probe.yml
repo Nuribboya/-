@@ -4,47 +4,34 @@ on:
   push:
     paths:
       - ".github/workflows/kr-raffle-probe.yml"
-      - "resell_radar/sources/luckd.py"
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Diagnose luck-d parsing on live pages
+      - name: Run the luck-d source against live pages
         shell: python
         run: |
-          import re, sys, time, urllib.request
+          import sys, tempfile
           from collections import Counter
+          from pathlib import Path
           sys.path.insert(0, ".")
           from resell_radar.sources import luckd
-          get = lambda url: luckd._get(url, 30)
-          ids = []
-          for page in range(1, 6):
-              ids += [i for i in luckd.parse_list(get(luckd.LIST_URL.format(page=page))) if i not in ids]
-          print("ids", len(ids))
-          fails, sections, cnts = [], Counter(), Counter()
-          for pid in ids:
-              time.sleep(0.3)
-              h = get(luckd.PRODUCT_URL.format(pid=pid))
-              d = luckd.parse_product(h, pid)
-              if d is None:
-                  t = re.search(r"<title>([^<]+)</title>", h)
-                  m = re.search(r'class="product_info_content">([^<]{0,200})', h)
-                  fails.append((pid, t and t.group(1)[:60], m and re.sub(r"\s+", " ", m.group(1))[:160]))
-                  continue
-              for s in re.findall(r'<h2[^>]*>([^<]*)</h2>', h):
-                  sections[s.strip()] += 1
-              r = luckd.to_release(d)
-              for v in d["venues"]:
-                  cnts[re.sub(r"\d", "9", v.get("name") and "" or "")] += 0
-              print(pid, "|", d["date"], "|", r.method, "| venues", len(d["venues"]), "|", d["name"][:50])
-              for v in d["venues"][:3]:
-                  card_cnt = None
-              raw = re.findall(r'button_card__contents_cnt">\s*<span>([^<]*)</span>', h)
-              for c in raw[:3]:
-                  cnts[re.sub(r"\d+", "9", re.sub(r"\s+", " ", c).strip())] += 1
-          print("FAILS", len(fails))
-          for f in fails[:12]: print("  ", f)
-          print("SECTIONS", sections.most_common(20))
-          print("CNT PATTERNS", cnts.most_common(25))
+          from resell_radar.storage import Store
+          from resell_radar.tiers import DEFAULT_TIERS
+          from resell_radar.venues import apply_grades
+          for cat in (1, 2):
+              h = luckd._get(luckd.LIST_URL.format(category=cat, page=1), 30)
+              print("category", cat, "first ids", luckd.parse_list(h)[:5])
+          store = Store(Path(tempfile.mkdtemp()) / "db.sqlite")
+          rs = luckd.fetch(store, pause=0.3)
+          unreadable = store.conn.execute("SELECT count(*) FROM luckd_cache WHERE data LIKE '%unreadable%'").fetchone()[0]
+          print("releases", len(rs), "unreadable", unreadable)
+          print("dates", Counter(r.release_at.date().isoformat() for r in rs).most_common())
+          print("methods", Counter(r.method for r in rs))
+          print("venue counts", Counter(r.retailer_count for r in rs))
+          apply_grades(rs, DEFAULT_TIERS, {})
+          print("venue names", Counter(v.name + ":" + v.grade for r in rs for v in r.venues).most_common(30))
+          for r in rs[:25]:
+              print(" -", r.release_at.date(), r.method, r.retailer_count, r.retail_price, "|", r.name[:55], "|", r.url[:70])
