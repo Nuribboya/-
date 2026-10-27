@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from resell_radar.config import Settings, app_dir, load_settings, save_settings
-from resell_radar.krify import reconcile
+from resell_radar.krify import merge_korean, reconcile
 from resell_radar.learning import Estimator, load_price_log, write_price_log_template
 from resell_radar.models import Release
 from resell_radar.models import fmt_kst
@@ -18,6 +18,7 @@ from resell_radar.report import render_html
 from resell_radar.scoring import PASS, ProfitSettings, score_release
 from resell_radar.sources import manual
 from resell_radar.storage import Store
+from resell_radar.venues import apply_grades, venue_table
 from resell_radar.tiers import find_collaborators, find_hot_silhouette, load_tiers
 
 TASK_NAME = "ResellRadar"
@@ -77,16 +78,26 @@ def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
         for r in releases:
             by_source[r.source] = by_source.get(r.source, 0) + 1
 
-        # From US calendars keep collabs and hot silhouettes; plain colorways are noise here.
+        # From the wide feeds (US calendars, luck-d) keep collabs, known partners,
+        # hot silhouettes and anything sold by raffle; plain colorways are noise here.
         def worth_tracking(r: Release) -> bool:
             name = r.name.lower()
-            return bool(" x " in name or find_collaborators(name, tiers) or find_hot_silhouette(name, tiers))
+            return bool(" x " in name or r.method == "draw" or find_collaborators(name, tiers)
+                        or find_hot_silhouette(name, tiers))
 
+        releases = [r for r in releases if r.source != "luckd" or worth_tracking(r)]
+        releases = merge_korean(releases, {row[0] for row in manual.STARTER_ROWS})
+        venue_history = store.venue_history()
+        apply_grades(releases, tiers, venue_history)
         calendar = store.remember_calendar([r for r in releases if r.source == "us_calendar"])
         releases = [r for r in releases if r.source != "us_calendar"] + calendar
         releases, fx_factor, fx_pairs = reconcile(releases, store, keep=worth_tracking)
         estimator = build_estimator(home, tiers, store)
         results = evaluate(releases, tiers, settings, store, estimator)
+        for res in results:
+            if res.release.venues:
+                store.record_venues(res.release.key, [v.name for v in res.release.venues], res.score.level)
+        venues = venue_table(results, tiers, store.venue_history())
         sent = 0
         if settings.has_telegram:
             tg = Telegram(settings.telegram_token, settings.telegram_chat_id)
@@ -98,7 +109,7 @@ def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
         store.close()
     write_report(results, home / "latest_report.csv")
     report = home / "report.html"
-    report.write_text(render_html(results, errors, datetime.now(timezone.utc), estimator, (fx_factor, fx_pairs)), encoding="utf-8")
+    report.write_text(render_html(results, errors, datetime.now(timezone.utc), estimator, (fx_factor, fx_pairs), venues), encoding="utf-8")
 
     for err in errors:
         print(f"[경고] {err}")
@@ -106,6 +117,13 @@ def run(home: Path, quiet: bool = False, open_report: bool = True) -> int:
         return 0
 
     print("sources: " + " ".join(f"{k}={v}" for k, v in sorted(by_source.items())))
+    lk = [r.release for r in results if r.release.source == "luckd"]
+    grades = {}
+    for row in venues:
+        grades[row["grade"]] = grades.get(row["grade"], 0) + 1
+    print(f"luckd kept={len(lk)} draw={sum(r.method == 'draw' for r in lk)} "
+          f"with_venues={sum(bool(r.venues) for r in lk)} | venues by grade: "
+          + " ".join(f"{g}={grades.get(g, 0)}" for g in "SABC"))
     shown = [r for r in results if r.score.verdict != PASS]
     print(f"\n수집 {len(results)}건 → 추천/애매 {len(shown)}건 (패스 {len(results) - len(shown)}건)\n")
     for r in shown:

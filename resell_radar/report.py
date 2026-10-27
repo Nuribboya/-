@@ -60,6 +60,11 @@ a.go{margin-top:auto;text-align:center;text-decoration:none;background:var(--acc
 border-radius:10px;padding:9px;font-weight:600;font-size:14px}
 .empty{color:var(--muted);text-align:center;padding:40px 0}
 .note{font-size:12px}
+.venues{display:flex;gap:6px;flex-wrap:wrap}
+.venue{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);
+color:var(--text);text-decoration:none}
+.venue.gS{border-color:var(--rec);color:var(--rec)}.venue.gA{border-color:var(--maybe);color:var(--maybe)}
+.venue.gC{color:var(--muted)}
 .badge.est{background:var(--maybe-bg);color:var(--maybe)}
 .learn{margin-top:28px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
 .learn h2{margin:0 0 4px;font-size:17px}
@@ -141,9 +146,11 @@ def _card(result) -> str:
         extra += f'<div class="meta">🛒 {escape(rel.channels)}</div>'
     if rel.note:
         extra += f'<div class="meta note">{escape(rel.note)}</div>'
+    if rel.venues:
+        extra += _venue_chips(rel.venues)
     shop = escape(rel.brand or rel.source)
     est_tag = '<span class="badge est">일정 추정</span>' if rel.source == "us_calendar" else ""
-    link = f'<a class="go" href="{escape(rel.url)}" target="_blank" rel="noopener">응모하러 가기</a>' if rel.url else ""
+    link = f'<a class="go" href="{escape(rel.url)}" target="_blank" rel="noopener">{_link_label(rel)}</a>' if rel.url else ""
     return (
         f'<article class="card {cls}" data-v="{cls}" data-profit="{s.est_profit or 0}" '
         f'data-start="{_ms(rel.entry_start)}" data-end="{_ms(rel.entry_end)}">'
@@ -151,6 +158,54 @@ def _card(result) -> str:
         f'<span class="grade">{s.level}</span></div>'
         f'<div class="name">{escape(rel.name)}</div>{money}{when}{extra}'
         f'<div class="chips">{"".join(_chip(r) for r in s.reasons)}</div>{link}</article>'
+    )
+
+
+# Links from release-news sites lead to an article, not to an entry page.
+NEWS_SITES = ("sneakernews.com", "sneakerfiles.com", "footlocker.com", "sneakerreleasedates.net",
+              "highsnobiety.com", "soleretriever.com", "sneakerfreaker.com", "luck-d.com")
+
+
+def _link_label(rel) -> str:
+    best = next((v for v in rel.venues if v.url and v.url == rel.url), None)
+    if best:
+        return f"{best.name}에서 {'응모' if best.method == 'draw' else '구매'}하러 가기"
+    if rel.source == "us_calendar" or any(site in rel.url for site in NEWS_SITES):
+        return "발매 정보 보기"
+    return "응모하러 가기"
+
+
+def _venue_chips(venues, limit: int = 6) -> str:
+    chips = []
+    for v in venues[:limit]:
+        kind = "응모" if v.method == "draw" else "선착순"
+        when = f" ~{fmt_kst(v.end)}" if v.end else f" {fmt_kst(v.start)}" if v.start else ""
+        label = f"{escape(v.name)} <b>{v.grade}</b> · {kind}{when}"
+        tip = escape(v.grade_note)
+        if v.url:
+            chips.append(f'<a class="venue g{v.grade}" href="{escape(v.url)}" target="_blank" rel="noopener" title="{tip}">{label}</a>')
+        else:
+            chips.append(f'<span class="venue g{v.grade}" title="{tip}">{label}</span>')
+    more = f'<span class="venue">외 {len(venues) - limit}곳</span>' if len(venues) > limit else ""
+    return f'<div class="venues">{"".join(chips)}{more}</div>'
+
+
+def _venue_section(rows) -> str:
+    if not rows:
+        return ""
+    body = []
+    for r in rows:
+        share = f"{r['share']:.0%}" if r["share"] is not None else "-"
+        body.append(
+            f'<tr><td>{escape(r["name"])}</td><td><span class="venue g{r["grade"]}"><b>{r["grade"]}</b></span></td>'
+            f'<td>{escape(r["note"])}</td><td class="num">{r["seen"]}건</td><td class="num">{share}</td></tr>'
+        )
+    return (
+        '<section class="learn"><h2>응모처 등급</h2>'
+        "<p>S 브랜드 공식 · A 주요 편집숍 · B 대형 플랫폼/체인 · C 오프라인 방문이나 해외. "
+        "그동안 그 응모처가 푼 제품 중 A급 이상 비율이 높으면 한 단계 올리고, 거의 없으면 내립니다 (기록 8건부터).</p>"
+        '<table><tr><th>응모처</th><th>등급</th><th>근거</th><th class="num">기록</th><th class="num">A급 이상</th></tr>'
+        f'{"".join(body)}</table></section>'
     )
 
 
@@ -187,7 +242,7 @@ def _learning(estimator) -> str:
     )
 
 
-def render_html(results: list, errors: list[str], generated_at: datetime, estimator=None, fx=None) -> str:
+def render_html(results: list, errors: list[str], generated_at: datetime, estimator=None, fx=None, venues=None) -> str:
     counts = {v: sum(1 for r in results if r.score.verdict == v) for v in (RECOMMEND, MAYBE, PASS)}
     warn = "".join(f'<div class="warn">⚠ {escape(e)}</div>' for e in errors)
     stats = (
@@ -211,5 +266,6 @@ def render_html(results: list, errors: list[str], generated_at: datetime, estima
 </div>
 <div class="grid">{"".join(_card(r) for r in results)}</div>
 <div class="empty" hidden>해당하는 발매가 없어요</div>
+{_venue_section(venues)}
 {_learning(estimator)}
 </div><script>{SCRIPT}</script></body></html>"""

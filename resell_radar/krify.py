@@ -117,3 +117,33 @@ def reconcile(releases: list[Release], store, keep=lambda r: True) -> tuple[list
         )
         kept.append(item)
     return kr + kept, factor, n_pairs
+
+
+def merge_korean(releases: list[Release], starter_names: set[str] = frozenset()) -> list[Release]:
+    """Collapse the same Korean release seen in several sources into the luck-d one.
+
+    luck-d lists every Korean venue, so its record wins. A Nike KR feed item
+    with the same product code is dropped (its entry window fills gaps); a
+    releases.csv row with a near-identical name is dropped too, after handing
+    over a typed-in market price and note. Built-in starter rows simply give way.
+    """
+    luckd = [r for r in releases if r.source == "luckd"]
+    if not luckd:
+        return releases
+    by_code = {r.style_code.upper(): r for r in luckd if r.style_code}
+    out = []
+    for r in releases:
+        if r.source == "nike" and r.style_code.upper() in by_code:
+            target = by_code[r.style_code.upper()]
+            target.entry_start = target.entry_start or r.entry_start
+            target.entry_end = target.entry_end or r.entry_end
+            continue
+        if r.source == "manual":
+            target = _best_match(r, luckd)
+            if target is not None:
+                if r.name not in starter_names:
+                    target.market_price = target.market_price or r.market_price
+                    target.note = target.note or r.note
+                continue
+        out.append(r)
+    return out

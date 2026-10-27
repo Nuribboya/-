@@ -9,7 +9,7 @@ from resell_radar.config import Settings
 from resell_radar.models import Release, Score, fmt_kst
 from resell_radar.notify import format_message
 from resell_radar.scoring import MAYBE, PASS, RECOMMEND, ProfitSettings, score_release
-from resell_radar.sources import manual, musinsa, nike, us_calendar
+from resell_radar.sources import luckd, manual, musinsa, nike, us_calendar
 from resell_radar.storage import Store
 
 VERDICT_ORDER = {RECOMMEND: 0, MAYBE: 1, PASS: 2}
@@ -34,6 +34,11 @@ def collect(settings: Settings, home: Path, store: Store | None = None) -> tuple
         found, failed = us_calendar.fetch()
         releases.extend(found)
         errors.extend(failed)
+    if settings.sources.get("luckd", True) and store is not None:
+        try:
+            releases.extend(luckd.fetch(store))
+        except Exception as exc:
+            errors.append(f"럭드 수집 실패: {exc}")
     if settings.sources.get("musinsa", True) and store is not None:
         try:
             last = store.get_meta("musinsa_last_raffle")

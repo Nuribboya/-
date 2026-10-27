@@ -13,6 +13,21 @@ UNKNOWN = "unknown"
 
 
 @dataclass
+class Venue:
+    """One Korean shop/app carrying a release (from luck-d)."""
+
+    name: str
+    url: str = ""
+    method: str = UNKNOWN
+    start: datetime | None = None
+    end: datetime | None = None
+    online: bool = True
+    overseas: bool = False
+    grade: str = ""  # filled in by venues.grade_venue
+    grade_note: str = ""
+
+
+@dataclass
 class Release:
     source: str
     source_id: str
@@ -33,6 +48,8 @@ class Release:
     channels: str = ""  # where to enter in Korea (estimated for US-calendar items)
     entries: int | None = None  # raffle entrants so far (Musinsa publishes this)
     winners: int | None = None  # raffle winners = actual allocation
+    style_code: str = ""  # brand product code, used to merge the same item across sources
+    venues: list[Venue] = field(default_factory=list)
 
     @property
     def key(self) -> str:

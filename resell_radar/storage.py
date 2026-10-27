@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS calendar_items (
     url TEXT NOT NULL,
     us_price INTEGER
 );
+CREATE TABLE IF NOT EXISTS luckd_cache (
+    pid TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS venue_history (
+    venue TEXT NOT NULL,
+    release_key TEXT NOT NULL,
+    level TEXT NOT NULL,
+    PRIMARY KEY (venue, release_key)
+);
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -125,6 +136,32 @@ class Store:
             if when >= since:
                 out.append(Release(source="us_calendar", source_id=source_id, name=name, brand=site,
                                    release_at=when, url=url, us_price=usd))
+        return out
+
+    def luckd_cached(self, pid: str) -> tuple[str, datetime] | None:
+        row = self.conn.execute("SELECT data, fetched_at FROM luckd_cache WHERE pid=?", (pid,)).fetchone()
+        return (row[0], datetime.fromisoformat(row[1])) if row else None
+
+    def luckd_cache(self, pid: str, data: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO luckd_cache (pid, data, fetched_at) VALUES (?, ?, ?)",
+            (pid, data, datetime.now(timezone.utc).isoformat()),
+        )
+        self.conn.commit()
+
+    def record_venues(self, release_key: str, venues: list[str], level: str) -> None:
+        for v in venues:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO venue_history (venue, release_key, level) VALUES (?, ?, ?)",
+                (v, release_key, level),
+            )
+        self.conn.commit()
+
+    def venue_history(self) -> dict[str, list[str]]:
+        """venue -> grades of every release it has carried."""
+        out: dict[str, list[str]] = {}
+        for venue, level in self.conn.execute("SELECT venue, level FROM venue_history"):
+            out.setdefault(venue, []).append(level)
         return out
 
     def get_meta(self, key: str) -> str | None:

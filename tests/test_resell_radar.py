@@ -407,3 +407,91 @@ def test_raffle_odds_show_in_reasons_and_card(store):
     results = evaluate([r], DEFAULT_TIERS, Settings(), store)
     assert "당첨 1명 / 응모 34,434명" in results[0].score.reasons
     assert "확률 0.0029%" in render_html(results, [], datetime.now(timezone.utc))
+
+
+from resell_radar import venues as venue_mod
+from resell_radar.models import Venue
+from resell_radar.sources import luckd
+
+
+def luckd_card(name, when, badges=("한국", "온라인"), url="https://shop.example/p"):
+    b = "".join(f'<div class="custom_badge badge__c_white_s">{x}</div>' for x in badges)
+    return (f'<div class="release__container__card"><div class="button_card__contents_content">'
+            f'<a href="/agent/1"><div class="button_card__contents_title"> <span>{name}</span> </div></a>'
+            f'<div class="button_card__contents_cnt"> <span> {when} </span> </div>'
+            f'<div class="button_card__contents_label">{b}</div></div>'
+            f'<button type="primary" class="release_link" data-platform="{name}" data-url="{url}"></button></div>')
+
+
+LUCKD_PAGE = (
+    '<span class="product_info_content">Union LA x Air Jordan 1 Low 세일의 발매 정보입니다. 발매일은 2026년 11월 21일, '
+    '제품 코드는 HF1234-100, 발매가는 199,000 KRW, 색상은 세일입니다. 현재 나이키, 카시나 등 3곳에서 응모 발매가 진행 중이니 '
+    '발매처별 가격과 응모·선착순 정보를 한눈에 확인해 보세요.</span>'
+    '<div class="product_items_title"><h2 size="24">온/오프라인 응모 발매정보</h2></div>'
+    + luckd_card("나이키", "11월 19일 10:00 ~ 11월 20일 10:00 응모",
+                 url="https://click.linkprice.com/click.php?m=nike&amp;tu=https%3A%2F%2Fwww.nike.com%2Fkr%2Flaunch%2Ft%2Fx")
+    + luckd_card("카시나", "11월 18일 11:00 ~ 11월 19일 23:59 응모")
+    + luckd_card("나이키 명동", "11월 21일 08:00 ~ 11월 21일 09:00 응모", badges=("한국", "오프라인"))
+    + '<div class="product_items_title"><h2 size="24">온/오프라인 선착순 발매정보</h2></div>'
+    + luckd_card("END.", "11월 21일 09:00 발매", badges=("해외", "온라인"))
+)
+
+
+def test_luckd_product_parsing():
+    d = luckd.parse_product(LUCKD_PAGE, "90001")
+    r = luckd.to_release(d)
+    assert (r.name, r.retail_price, r.style_code) == ("Union LA x Air Jordan 1 Low 세일", 199_000, "HF1234-100")
+    assert r.release_at.date().isoformat() == "2026-11-21"
+    assert r.method == DRAW and r.retailer_count == 3  # overseas END. not counted
+    assert r.venues[0].url == "https://www.nike.com/kr/launch/t/x"  # affiliate redirect unwrapped
+    assert r.entry_start.isoformat() == "2026-11-18T11:00:00+09:00"
+    assert r.entry_end.isoformat() == "2026-11-21T09:00:00+09:00"
+    assert [v.online for v in r.venues] == [True, True, False, True]
+    assert r.venues[3].overseas and r.venues[3].method == FCFS
+
+
+def test_luckd_fetch_uses_cache(store):
+    calls = []
+
+    def get(url):
+        calls.append(url)
+        return '<a href="/products/90001">' if "release" in url else LUCKD_PAGE
+
+    assert [r.source_id for r in luckd.fetch(store, get=get, pause=0)] == ["90001"]
+    n = len(calls)
+    luckd.fetch(store, get=get, pause=0)
+    assert len(calls) - n == luckd.LIST_PAGES  # second run: list pages only, product from cache
+
+
+def test_venue_grades_and_card_link():
+    r = luckd.to_release(luckd.parse_product(LUCKD_PAGE, "90001"))
+    venue_mod.apply_grades([r], DEFAULT_TIERS, {})
+    assert [(v.name, v.grade) for v in r.venues] == [("나이키", "S"), ("카시나", "A"), ("나이키 명동", "C"), ("END.", "C")]
+    assert r.url == "https://www.nike.com/kr/launch/t/x"
+    from resell_radar.report import _link_label
+    assert _link_label(r) == "나이키에서 응모하러 가기"
+
+
+def test_venue_history_moves_grade():
+    v = Venue(name="무신사")
+    assert venue_mod.grade_venue(v, DEFAULT_TIERS, {})[0] == "B"
+    assert venue_mod.grade_venue(v, DEFAULT_TIERS, {"무신사": ["A"] * 4 + ["C"] * 4})[0] == "A"
+    assert venue_mod.grade_venue(Venue(name="튠"), DEFAULT_TIERS, {"튠": ["C"] * 10})[0] == "B"
+    assert venue_mod.grade_venue(Venue(name="새편집숍"), DEFAULT_TIERS, {})[1].startswith("기본값")
+
+
+def test_merge_korean_prefers_luckd(store):
+    lk = luckd.to_release(luckd.parse_product(LUCKD_PAGE, "90001"))
+    from dataclasses import replace
+
+    nk = replace(rel("Air Jordan 1 Low Union Sail", style_code="hf1234-100"), source="nike")
+    mine = replace(rel("Union LA x Air Jordan 1 Low Sail", market_price=420_000), source="manual")
+    starter = replace(rel("Union LA x Air Jordan 1 Low 세일 (날짜 미정)", market_price=1), source="manual")
+    out = krify.merge_korean([lk, nk, mine, starter], {starter.name})
+    assert out == [lk]
+    assert lk.market_price == 420_000  # the user's typed price carries over; the starter row's doesn't
+
+
+def test_news_links_are_labelled_as_articles():
+    from resell_radar.report import _link_label
+    assert _link_label(rel("Pharrell x adidas", url="https://www.sneakerfiles.com/release-dates/")) == "발매 정보 보기"

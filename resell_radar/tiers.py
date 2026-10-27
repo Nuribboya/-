@@ -66,6 +66,31 @@ DEFAULT_TIERS: dict = {
         "fcfs": -2,
         "apparel": -2,
     },
+    # Korean entry venues (shops/apps), graded by how worth entering they are:
+    #   S: brand's own app/site — biggest allocation, delivered
+    #   A: established select shops that get hyped collab stock
+    #   B: big marketplaces/chains — huge entrant counts or mostly general releases
+    #   C: (computed) in-store only, or overseas (needs a forwarding address)
+    # Unknown online Korean venues default to B. Grades are adjusted from
+    # local history: a venue that often carries A- or better releases moves up.
+    "venues": [
+        {"name": "나이키 SNKRS", "grade": "S", "aliases": ["나이키", "snkrs", "nike"], "note": "브랜드 공식 · 물량 최다 · 택배"},
+        {"name": "아디다스 코리아", "grade": "S", "aliases": ["아디다스", "adidas", "confirmed", "컨펌드"], "note": "브랜드 공식 · 택배/매장"},
+        {"name": "뉴발란스", "grade": "S", "aliases": ["뉴발란스", "new balance"], "note": "브랜드 공식"},
+        {"name": "카시나", "grade": "A", "aliases": ["카시나", "kasina"], "note": "주요 편집숍 · 협업 물량"},
+        {"name": "웍스아웃", "grade": "A", "aliases": ["웍스아웃", "worksout"], "note": "주요 편집숍 · 협업 물량"},
+        {"name": "튠", "grade": "A", "aliases": ["튠", "tune"], "note": "주요 편집숍"},
+        {"name": "스컬프 스토어", "grade": "A", "aliases": ["스컬프", "sculp"], "note": "주요 편집숍"},
+        {"name": "아트모스", "grade": "A", "aliases": ["아트모스", "atmos"], "note": "주요 편집숍"},
+        {"name": "무신사", "grade": "B", "aliases": ["무신사", "musinsa"], "note": "응모자 매우 많음"},
+        {"name": "크림", "grade": "B", "aliases": ["크림", "kream"], "note": "드로우 응모자 매우 많음"},
+        {"name": "29CM", "grade": "B", "aliases": ["29cm"], "note": "대형 플랫폼"},
+        {"name": "W컨셉", "grade": "B", "aliases": ["w컨셉", "w concept", "wconcept"], "note": "대형 플랫폼"},
+        {"name": "SSG", "grade": "B", "aliases": ["ssg", "신세계"], "note": "대형 플랫폼"},
+        {"name": "롯데온", "grade": "B", "aliases": ["롯데온", "lotteon"], "note": "대형 플랫폼"},
+        {"name": "그랜드스테이지/ABC마트", "grade": "B", "aliases": ["그랜드스테이지", "abc마트", "abc-mart"], "note": "체인 · 일반 발매 위주"},
+        {"name": "슈마커", "grade": "B", "aliases": ["슈마커", "shoemarker"], "note": "체인 · 일반 발매 위주"},
+    ],
     # Expected resale / retail ratio per notch, only used when no real market
     # price is known. The +/- steps sit a third of the way (geometrically)
     # toward the neighbouring letter.
