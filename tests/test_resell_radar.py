@@ -522,3 +522,14 @@ def test_unreadable_luckd_pages_are_not_refetched(store):
     n = len(calls)
     luckd.fetch(store, get=get, pause=0)
     assert not any("/products/" in u for u in calls[n:])
+
+
+def test_luckd_list_end_and_missing_product_dont_abort(store):
+    import urllib.error
+
+    def get(url):
+        if "page=2" in url or "/products/2" in url:
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        return '<a href="/products/1"><a href="/products/2">' if "release" in url else LUCKD_PAGE
+
+    assert [r.source_id for r in luckd.fetch(store, get=get, pause=0)] == ["1"]

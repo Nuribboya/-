@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/kr-raffle-probe.yml"
+      - "resell_radar/sources/luckd.py"
 
 jobs:
   probe:

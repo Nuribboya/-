@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -199,7 +200,11 @@ def fetch(store, get=None, pause: float = 0.5, timeout: float = 20) -> list[Rele
     ids: list[str] = []
     for category, pages in CATEGORIES.items():
         for page in range(1, pages + 1):
-            new = [i for i in parse_list(get(LIST_URL.format(category=category, page=page))) if i not in ids]
+            try:
+                html = get(LIST_URL.format(category=category, page=page))
+            except urllib.error.HTTPError:  # past the last page
+                break
+            new = [i for i in parse_list(html) if i not in ids]
             if not new:
                 break
             ids += new
@@ -218,7 +223,11 @@ def fetch(store, get=None, pause: float = 0.5, timeout: float = 20) -> list[Rele
         if d is None:
             if pause:
                 time.sleep(pause)
-            d = parse_product(get(PRODUCT_URL.format(pid=pid)), pid) or {"pid": pid, "unreadable": True}
+            try:
+                html = get(PRODUCT_URL.format(pid=pid))
+            except urllib.error.HTTPError:  # removed product
+                html = ""
+            d = (parse_product(html, pid) if html else None) or {"pid": pid, "unreadable": True}
             # Unreadable pages are cached too, so they aren't re-fetched every run.
             store.luckd_cache(pid, json.dumps(d, ensure_ascii=False))
         if d.get("unreadable"):
