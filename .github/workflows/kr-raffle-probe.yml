@@ -9,36 +9,37 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Extract luck-d product fields compactly
+      - name: Venue rows on luck-d product pages
         shell: python
         run: |
-          import re, html as H, urllib.request, urllib.error
+          import re, html as H, urllib.request
           UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
                 "Accept-Language": "ko-KR,ko;q=0.9"}
           def get(url):
-              req = urllib.request.Request(url, headers=UA)
-              with urllib.request.urlopen(req, timeout=30) as r:
+              with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
                   return r.read().decode("utf-8", "replace")
-          def squash(s): return re.sub(r"\s+", " ", s)
-          h = get("https://www.luck-d.com/release/")
-          t = squash(re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", " ", h, flags=re.S)))
-          for kw in ["크롤링", "자동화된", "무단 수집", "스크래핑", "복제"]:
-              for m in list(re.finditer(kw, t))[:2]:
-                  print("TERMS[%s]:" % kw, t[max(0, m.start()-150): m.end()+150])
-          ids = list(dict.fromkeys(re.findall(r'href="/products/(\d+)"', h)))
-          i = h.find('href="/products/%s"' % ids[0])
-          print("LIST BLOCK:", squash(h[max(0, i-300): i+900])[:1400])
-          # pick a few products incl. sneakers with raffles
-          picks = ids[:3]
-          h_sn = get("https://www.luck-d.com/release/?category=1")
-          picks += list(dict.fromkeys(re.findall(r'href="/products/(\d+)"', h_sn)))[:3]
-          for pid in picks:
-              p = get("https://www.luck-d.com/products/%s" % pid)
-              desc = re.search(r'<meta name="description" content="([^"]+)"', p)
-              title = re.search(r"<title>([^<]+)</title>", p)
-              print("=" * 8, pid, "|", title and squash(title.group(1)))
-              print("DESC:", desc and H.unescape(desc.group(1)))
-              body = p[p.find("<body"):]
-              body = re.sub(r"<script.*?</script>|<style.*?</style>|<svg.*?</svg>", "", body, flags=re.S)
-              j = body.find("응모") if "응모" in body else body.find("선착순")
-              print("VENUE HTML:", squash(body[max(0, j-1200): j+1800])[:3000])
+          sq = lambda s: re.sub(r"\s+", " ", s)
+          ids, raffle_ids = [], []
+          for page in range(1, 6):
+              h = get(f"https://www.luck-d.com/release/?page={page}")
+              pids = list(dict.fromkeys(re.findall(r'href="/products/(\d+)"', h)))
+              dates = re.findall(r'(\d{1,2}월 \d{1,2}일|\d{2}\.\d{2}|D-\d+|오늘|마감)', sq(re.sub(r"<[^>]+>", " ", h)))
+              print("page", page, len(pids), pids[:4], "...", "| date tokens:", dates[:12])
+              ids += pids
+          for pid in ids:
+              p = get(f"https://www.luck-d.com/products/{pid}")
+              d = re.search(r'class="product_info_content">([^<]*발매 정보입니다[^<]*)<', p)
+              d = H.unescape(d.group(1)) if d else ""
+              if "응모" in d or "드로우" in d or "래플" in d:
+                  raffle_ids.append(pid)
+              if len(raffle_ids) >= 2: break
+          print("raffle products:", raffle_ids)
+          for pid in raffle_ids[:2] + ids[:1]:
+              p = get(f"https://www.luck-d.com/products/{pid}")
+              d = re.search(r'class="product_info_content">([^<]*발매 정보입니다[^<]*)<', p)
+              print("=" * 8, pid, "|", H.unescape(d.group(1)) if d else "-")
+              plats = re.findall(r'data-platform="([^"]+)"', p)
+              print("data-platform:", plats)
+              body = re.sub(r"<script.*?</script>|<style.*?</style>|<svg.*?</svg>|<img[^>]*>", "", p[p.find("<body"):], flags=re.S)
+              k = body.find("release_list") if "release_list" in body else body.find(plats[-1] if plats else "응모")
+              print("ROWS HTML:", sq(body[max(0, k-200): k+3500])[:3600])
