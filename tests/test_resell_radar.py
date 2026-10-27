@@ -533,3 +533,9 @@ def test_luckd_list_end_and_missing_product_dont_abort(store):
         return '<a href="/products/1"><a href="/products/2">' if "release" in url else LUCKD_PAGE
 
     assert [r.source_id for r in luckd.fetch(store, get=get, pause=0)] == ["1"]
+
+
+def test_affiliate_redirects_are_unwrapped():
+    assert luckd._real_url("https://redirect.viglink.com?u=https%3A%2F%2Fwww.nike.com%2Fkr%2Flaunch%2Ft%2Fkobe&key=1") \
+        == "https://www.nike.com/kr/launch/t/kobe"
+    assert luckd._real_url("https://tune.kr/products/x?u=1") == "https://tune.kr/products/x?u=1"

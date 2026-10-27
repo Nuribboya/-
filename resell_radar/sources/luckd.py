@@ -57,10 +57,14 @@ def parse_list(html: str) -> list[str]:
 
 
 def _real_url(url: str) -> str:
-    # Affiliate redirects carry the shop URL in "tu"; link straight to the shop.
+    # Affiliate redirects (linkprice "tu", viglink "u") carry the shop URL;
+    # link straight to the shop.
     url = unescape(url)
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-    return q["tu"][0] if "tu" in q else url
+    for key in ("tu", "u"):
+        if key in q and q[key][0].startswith("http"):
+            return q[key][0]
+    return url
 
 
 def _when(text: str, year: int, month: int) -> list[str]:
