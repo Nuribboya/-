@@ -222,17 +222,21 @@ class App:
         self.min_staff = StringVar(value=staff if staff in STAFF_CHOICES else "직원 100명 이상")
         self.only_machines = BooleanVar(value=False)
         self.only_investing = BooleanVar(value=False)
+        # AI 투자 사슬에서 벗어난 거래처를 먼저 — 기존 일감(KC)이 이미 전부 그쪽이다.
+        self.skip_ai = BooleanVar(value=saved.get("skip_ai", True))
         self.filter_boxes = [
             ttk.Checkbutton(buttons, variable=self.only_listed, text="상장사·계열사 공장만"),
             ttk.Combobox(buttons, textvariable=self.min_staff, values=list(STAFF_CHOICES),
                          state="readonly", width=14),
             ttk.Checkbutton(buttons, variable=self.only_machines, text="기계·장비 만드는 공장만"),
             ttk.Checkbutton(buttons, variable=self.only_investing, text="시설투자 공시 회사만"),
+            ttk.Checkbutton(buttons, variable=self.skip_ai, text="반도체·AI 연관 빼기"),
         ]
         for box_ in self.filter_boxes:
             box_.pack(side=LEFT, padx=(14, 0))
             box_.configure(state="disabled")
-        for var in (self.only_listed, self.min_staff, self.only_machines, self.only_investing):
+        for var in (self.only_listed, self.min_staff, self.only_machines, self.only_investing,
+                    self.skip_ai):
             var.trace_add("write", lambda *_a: self._refresh_factories())
         self.status = ttk.Label(buttons, text="준비됨")
         self.status.pack(side=RIGHT)
@@ -636,6 +640,7 @@ class App:
             "data_key": self.data_key.get(),
             "kakao_key": self.kakao_key.get(),
             "min_staff": self.min_staff.get(),
+            "skip_ai": self.skip_ai.get(),
             "distance": self.distance.get(),
             "factory_file": self.factory_file.get(),
             "sales_path": self.sales_path.get(),
@@ -890,6 +895,7 @@ class App:
         self.filter_boxes[2].configure(state="normal")
         self.filter_boxes[3].configure(
             state="normal" if any(c.investment for c in factories) else "disabled")
+        self.filter_boxes[4].configure(state="normal")
         # 비상장 공장도 받았으면 처음부터 같이 보여 준다(직원 수로 거른다).
         self.only_listed.set(result.knows_listed and not result.has_unlisted)
         if not knows_staff:
@@ -909,21 +915,25 @@ class App:
             bits.append("기계·장비 만드는 공장만")
         if self.only_investing.get():
             bits.append("시설투자 공시 회사만")
+        if self.skip_ai.get():
+            bits.append("반도체·AI 연관 뺌")
         return ", ".join(bits)
 
     def _refresh_factories(self) -> None:
         from collections import Counter
-        from prime_contractor.makers import size_text, steady_text
+        from prime_contractor.makers import is_ai_linked, size_text, steady_text
         staff = STAFF_CHOICES.get(self.min_staff.get(), 0)
         self.shown = [c for c in self.factories
                       if (not self.only_listed.get() or c.stock_code or c.group)
                       and c.employees >= staff        # 인원을 모르는 공장은 거를 때 뺀다
                       and (not self.only_machines.get() or c.kind == "maker")
-                      and (not self.only_investing.get() or c.investment)]
+                      and (not self.only_investing.get() or c.investment)
+                      and (not self.skip_ai.get() or not is_ai_linked(c))]
         self.tree.delete(*self.tree.get_children())
         for i, c in enumerate(self.shown, 1):
             self.tree.insert("", END, iid=str(i), values=(
-                i, c.name, c.group or "-", c.sector, steady_text(c.sector_weight), size_text(c),
+                i, c.name, c.group or "-", c.sector,
+                "AI 연관" if is_ai_linked(c) else steady_text(c.sector_weight), size_text(c),
                 c.investment[:7] or "-", c.products, c.region, f"{c.distance_km:.1f}km",
                 c.phone or "-"))
         if not self.factories:

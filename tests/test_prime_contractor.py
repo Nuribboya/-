@@ -2824,9 +2824,9 @@ def test_factory_tab_lists_nearest_first(tmp_path, monkeypatch):
     calls = {}
     app.running = True
     app.run_button = type("B", (), {"configure": lambda self, **k: None})()
-    app.filter_boxes = [app.run_button] * 4
+    app.filter_boxes = [app.run_button] * 5
     monkeypatch.setattr(gui, "LAST_FACTORIES", tmp_path / "last.json")
-    app.only_listed = app.min_staff = app.only_machines = app.only_investing = type(
+    app.only_listed = app.min_staff = app.only_machines = app.only_investing = app.skip_ai = type(
         "V", (), {"set": lambda self, v: None, "get": lambda self: False})()
     app._refresh_factories = lambda: calls.setdefault("refreshed", True)
     far_food = Candidate(name="먼식품", sector_weight=0.9, distance_km=60.0)
@@ -3211,3 +3211,16 @@ def test_assembly_rnd_and_mold_only_plants_are_left_out():
     for products in ("금형,조향장치,콤프레셔", "잉크렛 프린터 외", "X-RAY 의료기기",
                      "반도체 제조용 기계", "라면"):
         assert classify(products)[0], products
+
+
+
+def test_ai_linked_plants_are_tagged():
+    from prime_contractor.makers import is_ai_linked
+    from prime_contractor.models import Candidate
+    for sector, products in (("전자·반도체", "콘덴서"), ("기타 기계·장비", "반도체 제조장비"),
+                             ("화학·플라스틱·고무", "반도체용식각액"), ("기타 제조", "OLED 증착기"),
+                             ("섬유·제지·인쇄", "인쇄회로기판")):
+        assert is_ai_linked(Candidate(name="a", sector=sector, products=products)), products
+    for sector, products in (("식품·음료", "라면"), ("제약·바이오·화장품", "완제의약품"),
+                             ("금속·철강", "강관"), ("포장·충진기계", "포장기")):
+        assert not is_ai_linked(Candidate(name="a", sector=sector, products=products)), products

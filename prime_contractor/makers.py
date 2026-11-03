@@ -158,6 +158,21 @@ def _parts_only(text: str) -> bool:
     return not any(w in stripped for w in ("장비", "설비", "장치", "플랜트"))
 
 
+#: AI 투자 사슬(빅테크 → 반도체 → 장비)에 묶인 공장. AI 투자가 줄면 같이 흔들린다 —
+#: 그쪽 일감이 이미 전부(KC)라, 새 거래처는 여기서 벗어난 곳을 먼저 본다.
+_AI_LINKED = re.compile(
+    r"(반도체|웨이퍼|wafer|HBM|D램|DRAM|낸드|NAND|파운드리|프로브|probe|팹|CMP|슬러리|"
+    r"증착|식각|에처|etcher|에셔|asher|스퍼터|sputter|CVD|노광|디스플레이|OLED|LCD|"
+    r"인쇄회로|PCB|PKG|반도체패키지|전구체|특수가스|ESC|클린룸|스크러버|scrubber)", re.I)
+
+
+def is_ai_linked(c: Candidate) -> bool:
+    """반도체·디스플레이 공정이나 그 장비·소재를 만드는 공장인가."""
+    if c.sector == "전자·반도체":
+        return True
+    return bool(_AI_LINKED.search(f"{c.products} {c.industry_name}"))
+
+
 def steady_text(steady: float) -> str:
     return "덜 탐" if steady >= 0.8 else ("많이 탐" if steady <= 0.4 else "보통")
 
@@ -661,11 +676,12 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
         Column("생산품", 20, WRAP), Column("지역", 6, CENTER), Column("거리(km)", 7, DECIMAL),
         Column("대표자", 7, CENTER), Column("전화", 12, CENTER), Column("주소", 24, WRAP),
         Column("시설투자 공시", 18, WRAP), Column("공시 원문", 24, TEXT),
-        Column("협력사 등록", 30, TEXT),
+        Column("협력사 등록", 30, TEXT), Column("AI·반도체 연관", 8, CENTER),
     ], rows=[[i, c.name, c.group, c.sector, steady_text(c.sector_weight), size_text(c),
               c.products, c.region, c.distance_km, c.ceo, c.phone, c.address,
               c.investment, (DART_VIEW + c.investment_no) if c.investment_no else "",
-              supplier_portal(c.name)[0] or supplier_search_url(c.name)]
+              supplier_portal(c.name)[0] or supplier_search_url(c.name),
+              "예" if is_ai_linked(c) else ""]
              for i, c in enumerate(factories, 1)])
     fields = Counter(c.sector for c in factories).most_common()
     limit = f"{within_km:g}km 안" if within_km is not None else "거리 제한 없이"
@@ -683,6 +699,8 @@ def write_factories_xlsx(factories, path: str | Path, within_km: float | None = 
                "들어가면 같은 그룹 회사로 넓히기 쉽습니다."],
         ["경기", "덜 탐 = 식품·제약·환경처럼 불황에도 돌아가는 분야, 많이 탐 = 반도체·자동차·"
                "철강처럼 경기가 꺾이면 투자부터 끊는 분야."],
+        ["AI·반도체 연관", "'예' = 반도체·디스플레이 공정이나 그 장비·소재를 만드는 공장. AI 투자가 "
+                         "줄면 같이 흔들리므로 새 거래처로는 뒤로 미룹니다."],
         ["시설투자 공시", "최근 2년 안에 상장사가 낸 '신규시설투자'·'유형자산 취득' 공시 중 "
                       "가장 최근 것. 공장·라인을 늘리는 회사라 판넬 일이 곧 나올 수 있습니다. "
                       "회사 전체 공시라 어느 공장인지는 원문에서 확인하세요."],
