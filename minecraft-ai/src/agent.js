@@ -219,6 +219,8 @@ export class Agent {
     const logs = [];
     this.lastExecLogs = logs;
     this.lastExecErrors = ctx.errors = [];
+    ctx.actions = 0;
+    this.lastExecCtx = ctx;
     const api = createApi(
       this.bot,
       ctx,
@@ -233,6 +235,7 @@ export class Agent {
     for (const name of Object.keys(this.skills.index)) {
       if (name in api) continue;
       api[name] = (a = {}) => {
+        ctx.actions++;
         const args = a && typeof a === 'object' ? a : { count: a };
         const p = hooks.useSkill(name, args);
         p.catch(() => {});
@@ -327,6 +330,8 @@ export class Agent {
         this.journal.add('skill_fail', { name, error: '효과 없음 (인벤토리/위치/허기/몹 변화 없음)' });
         this.events.log(`➖ ${name}: 효과 없음`);
         const sw = this.lastExecErrors ?? [];
+        if (!sw.length && (this.lastExecCtx?.actions ?? 0) === 0)
+          return `효과 없음: "${name}"은 아무 동작도 호출하지 않고 끝났다 (조건이 안 맞음). 실제 인벤토리: ${JSON.stringify(inventoryOf(this.bot))}. 이 상황엔 다른 스킬(예: craft_item {item:'oak_planks'})을 쓸 것`;
         return sw.length
           ? `효과 없음: "${name}" 안에서 실패한 호출: ${short(sw.join(' | '), 400)}`
           : `효과 없음: "${name}"이 에러 없이 끝났지만 아무것도 바뀌지 않았다. 다른 스킬이나 다른 장소를 시도하거나 write_skill로 고칠 것`;
@@ -368,10 +373,13 @@ export class Agent {
         const d = diffState(before, snapshotState(this.bot));
         if (!d.effect) {
           const swallowed = this.lastExecErrors ?? [];
+          const acted = this.lastExecCtx?.actions ?? 0;
           throw new Error(
             swallowed.length
               ? `NOTHING changed because these api calls failed (your code caught and ignored them): ${swallowed.join(' | ')}`
-              : 'code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). It must actually do the task - check that every api call is awaited and targets the right block/item.',
+              : acted === 0
+                ? `NOTHING changed: your code never called any action (gather/craft/place/goTo/...). An if-condition was probably false or it returned early. Do not guess the inventory - the REAL inventory right now is ${JSON.stringify(inventoryOf(this.bot))}. Call the actions directly; they throw a clear error if something is missing.`
+                : 'code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). Check that every api call is awaited and targets the right block/item.',
           );
         }
         this.skills.save(parsed.name, parsed.description, parsed.args, parsed.code);

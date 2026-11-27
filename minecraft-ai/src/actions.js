@@ -340,9 +340,11 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     if (!ctx.errors) ctx.errors = [];
     if (ctx.errors.length < 10) ctx.errors.push(`api.${k}: ${e?.message ?? e}`);
   };
+  const ACTIONS = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat', 'placeAt', 'digAt', 'equip', 'block', 'useSkill']);
   for (const [k, fn] of Object.entries(api)) {
     if (typeof fn !== 'function') continue;
     api[k] = (...a) => {
+      if (ACTIONS.has(k)) ctx.actions = (ctx.actions ?? 0) + 1;
       let r;
       try {
         r = fn(...a);
