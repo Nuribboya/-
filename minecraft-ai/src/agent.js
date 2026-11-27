@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { parseJson } from './llm.js';
 import { observe, inventoryOf, snapshotState, diffState } from './observe.js';
 import { nextGoal } from './curriculum.js';
@@ -61,6 +63,21 @@ export class Agent {
         this.events.log(`💀 죽었다: ${cause}`);
       }, 1000);
     });
+  }
+
+  /** Save failed attempts to data/failed/ (last 30) so they can be inspected later. */
+  #keepFailed(parsed, err) {
+    try {
+      const dir = path.join(this.config.dataDir, 'failed');
+      fs.mkdirSync(dir, { recursive: true });
+      const t = new Date().toISOString().replace(/[:.]/g, '-');
+      fs.writeFileSync(
+        path.join(dir, `${t}-${parsed.name}.js`),
+        `// ${parsed.description}\n// args: ${JSON.stringify(parsed.args)}\n// error: ${err.replace(/\n/g, ' ')}\n\n${parsed.code}\n`,
+      );
+      const files = fs.readdirSync(dir).sort();
+      for (const f of files.slice(0, Math.max(0, files.length - 30))) fs.rmSync(path.join(dir, f));
+    } catch {}
   }
 
   #snapshot(label) {
@@ -199,7 +216,17 @@ export class Agent {
         }
       },
     };
-    const api = createApi(this.bot, ctx, (m) => this.events.log(`  · ${m}`), hooks);
+    const logs = [];
+    this.lastExecLogs = logs;
+    const api = createApi(
+      this.bot,
+      ctx,
+      (m) => {
+        logs.push(String(m));
+        this.events.log(`  · ${m}`);
+      },
+      hooks,
+    );
     // Small models keep writing api.collect_logs(...) for saved skills. Instead of
     // fighting that, make every saved skill callable as api.<skill_name>(args).
     for (const name of Object.keys(this.skills.index)) {
@@ -277,7 +304,15 @@ export class Agent {
   }
 
   async useSkill(name, args) {
-    if (!this.skills.has(name)) return `실패: "${name}" 스킬이 없다. 있는 스킬만 쓰거나 write_skill 할 것`;
+    if (!this.skills.has(name)) {
+      const alt = this.skills.closest(name);
+      if (!alt) {
+        this.events.log(`❓ 없는 스킬 "${name}"`);
+        return `실패: "${name}" 스킬은 존재하지 않는다 (저장된 적 없음). 보유 스킬 목록에 있는 이름만 skill로 실행할 것`;
+      }
+      this.events.log(`🔀 없는 스킬 "${name}" → 비슷한 "${alt}" 실행`);
+      name = alt;
+    }
     try {
       const before = snapshotState(this.bot);
       const out = await this.#exec(this.skills.code(name), args);
@@ -335,10 +370,17 @@ export class Agent {
         lastErr = e.message;
         this.journal.add('skill_fail', { name: parsed?.name ?? `write:${short(request, 30)}`, error: short(lastErr, 160), writing: true });
         this.events.log(`❌ 시도 ${i} 실패: ${lastErr}`);
+        if (parsed?.code) this.#keepFailed(parsed, lastErr);
+        const logs = (this.lastExecLogs ?? []).slice(-6);
         messages.push({
           role: 'user',
-          content: `실행 실패: ${lastErr}\n현재 인벤토리: ${JSON.stringify(inventoryOf(this.bot))}\n원인을 고쳐서 같은 형식으로 다시 작성해.`,
+          content:
+            `실행 실패: ${lastErr}\n` +
+            (logs.length ? `실행 중 api.log 출력:\n${logs.map((l) => '- ' + short(l, 160)).join('\n')}\n` : '실행 중 api.log 출력: 없음 (api 호출이 한 번도 실행되지 않았을 수 있음 - 조건문/return 확인)\n') +
+            `테스트 인자: ${JSON.stringify(parsed?.args ?? {})}\n` +
+            `현재 인벤토리: ${JSON.stringify(inventoryOf(this.bot))}\n원인을 고쳐서 같은 형식으로 다시 작성해.`,
         });
+        this.lastExecLogs = [];
       }
     }
     this.memory.addLesson(`스킬 작성 실패 "${short(request, 80)}": ${lastErr}`);

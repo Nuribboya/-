@@ -311,3 +311,12 @@ test('new body tools: nearbyMobs, placeAt, digAt, equip, block', async () => {
   assert.equal(shieldUp, 0); // raised and lowered again
   await assert.rejects(api.equip('dirt', 'hat'), /unknown slot/);
 });
+
+test('skills.closest maps made-up names to existing skills', () => {
+  const s = new Skills(tmp());
+  assert.equal(s.closest('collect_logs_v2_fixed'), 'collect_logs');
+  assert.equal(s.closest('collect_logs_v2'), 'collect_logs');
+  assert.equal(s.closest('explore_area_safely'), 'explore_area');
+  assert.equal(s.closest('eat_some_food'), 'eat_food');
+  assert.equal(s.closest('build_nether_portal'), null);
+});

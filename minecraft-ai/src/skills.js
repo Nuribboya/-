@@ -135,6 +135,29 @@ export class Skills {
     return Object.values(this.index).filter((s) => !s.builtin).length;
   }
 
+  /**
+   * Best existing skill for a name the model made up, e.g. collect_logs_v2_fixed -> collect_logs.
+   * Prefix match first, then word overlap. Returns null if nothing is close enough.
+   */
+  closest(name) {
+    const names = Object.keys(this.index);
+    const prefix = names.filter((n) => name.startsWith(n + '_') || n.startsWith(name + '_')).sort((a, b) => b.length - a.length);
+    if (prefix.length) return prefix[0];
+    const words = new Set(name.split('_').filter((w) => w.length > 2 && !/^v\d+$/.test(w)));
+    let best = null;
+    let bestScore = 0;
+    for (const n of names) {
+      const nw = n.split('_').filter((w) => w.length > 2);
+      const common = nw.filter((w) => words.has(w)).length;
+      const score = common / Math.max(nw.length, 1);
+      if (score > bestScore) {
+        best = n;
+        bestScore = score;
+      }
+    }
+    return bestScore >= 0.5 ? best : null;
+  }
+
   count() {
     return Object.keys(this.index).length;
   }
