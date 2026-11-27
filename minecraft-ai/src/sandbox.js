@@ -5,9 +5,14 @@ import vm from 'node:vm';
 const BANNED =
   /\b(process|require|import|eval|Function|constructor|globalThis|global|child_process|fs|__proto__|prototype|Reflect|Proxy)\b/;
 
+const ASYNC_API = 'gather|craft|place|smelt|goTo|explore|attack|eat|sleep';
+const FLOATING = new RegExp(`^\\s*api\\.(${ASYNC_API})\\(`, 'm');
+
 export function checkCode(code) {
   const m = code.match(BANNED);
   if (m) throw new Error(`code uses banned identifier "${m[0]}" - use only the api object`);
+  const f = code.match(FLOATING);
+  if (f) throw new Error(`missing await: "api.${f[1]}(...)" must be written as "await api.${f[1]}(...)"`);
 }
 
 /**

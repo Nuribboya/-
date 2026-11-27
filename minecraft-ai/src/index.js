@@ -12,6 +12,10 @@ import { startOverlay } from './overlay.js';
 const { pathfinder, Movements } = pf;
 
 const events = new Events();
+
+// Never let a stray rejection from model-written code kill the bot.
+process.on('unhandledRejection', (e) => events.log(`⚠️ 처리 안 된 오류 무시: ${e?.message ?? e}`));
+process.on('uncaughtException', (e) => events.log(`⚠️ 예외 무시: ${e?.message ?? e}`));
 const llm = new LLM(config);
 const skills = new Skills(config.dataDir);
 const memory = new Memory(config.dataDir);

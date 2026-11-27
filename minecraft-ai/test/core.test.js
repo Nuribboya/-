@@ -108,3 +108,17 @@ test('journal failureDigest groups failures since an index', async () => {
   assert.equal(d.bySkill.b.n, 1);
   assert.deepEqual(d.deaths, ['lava']);
 });
+
+test('sandbox rejects un-awaited async api calls', () => {
+  assert.throws(() => checkCode('api.gather("log", 3);\nreturn 1;'), /missing await/);
+  assert.doesNotThrow(() => checkCode('await api.gather("log", 3);\nreturn api.inventory();'));
+  assert.doesNotThrow(() => checkCode('const n = api.countBlocks("log");\nreturn n;'));
+});
+
+test('createApi: floating rejected promise does not crash the process', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const bot = { registry: {}, entity: { position: { floored: () => ({}) } }, pathfinder: { goto: async () => { throw new Error('PathStopped'); } } };
+  const api = createApi(bot, { aborted: false });
+  api.goTo(1, 2, 3); // not awaited on purpose
+  await new Promise((r) => setTimeout(r, 20)); // would crash the test runner if unhandled
+});

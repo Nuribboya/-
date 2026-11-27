@@ -181,5 +181,15 @@ export function createApi(bot, ctx, log = () => {}) {
       await goto(p.x + Math.cos(a) * distance, p.y, p.z + Math.sin(a) * distance, 3);
     },
   };
+  // Safety net: a model-written call that is not awaited must never become an
+  // unhandled rejection (that would crash the whole process).
+  for (const [k, fn] of Object.entries(api)) {
+    if (typeof fn !== 'function') continue;
+    api[k] = (...a) => {
+      const r = fn(...a);
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+      return r;
+    };
+  }
   return api;
 }
