@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/index.js",
     "start:free": "node --env-file=.env.free src/index.js",
-    "report": "node src/report.js",
+    "report": "node --env-file-if-exists=.env.free src/report.js",
+    "brain": "node --env-file-if-exists=.env.free src/brain-cli.js",
     "test": "node --test test/*.test.js"
   },
   "engines": { "node": ">=20" },

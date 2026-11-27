@@ -143,3 +143,54 @@ test('useSkill runs a saved skill from inside another skill', async () => {
   const out = await runSkill('return await api.useSkill("double", {x: 4});', api, {}, { aborted: false });
   assert.equal(out, 8);
 });
+
+test('diffState: outcome-based success', async () => {
+  const { diffState } = await import('../src/observe.js');
+  const { Vec3 } = await import('vec3');
+  const base = { inv: { oak_log: 1 }, pos: new Vec3(0, 64, 0), food: 20, hostiles: 1 };
+  assert.equal(diffState(base, { ...base }).effect, false);
+  const got = diffState(base, { ...base, inv: { oak_log: 4 } });
+  assert.equal(got.effect, true);
+  assert.match(got.text, /oak_log \+3/);
+  assert.equal(diffState(base, { ...base, pos: new Vec3(5, 64, 0) }).effect, true);
+  assert.equal(diffState(base, { ...base, hostiles: 0 }).effect, true);
+  assert.equal(diffState(base, { ...base, pos: new Vec3(1, 64, 0) }).effect, false); // tiny wiggle is not progress
+});
+
+test('brains: snapshot, rotate, restore', async () => {
+  const { Brains } = await import('../src/brain.js');
+  const root = tmp();
+  const data = path.join(root, 'data');
+  fs.mkdirSync(data);
+  fs.writeFileSync(path.join(data, 'memory.json'), '{"v":1}');
+  const b = new Brains(data, path.join(root, 'brains'), 2);
+  const ms = b.snapshot('ms-logs');
+  for (let i = 0; i < 4; i++) b.snapshot('auto');
+  assert.equal(b.list().filter((n) => n.endsWith('-auto')).length, 2); // rotated
+  assert.ok(b.list().includes(ms)); // milestone kept
+  fs.writeFileSync(path.join(data, 'memory.json'), '{"v":2}');
+  const backup = b.restore(ms);
+  assert.equal(fs.readFileSync(path.join(data, 'memory.json'), 'utf8'), '{"v":1}');
+  assert.ok(backup.endsWith('-before-restore'));
+  assert.throws(() => b.restore('nope'));
+});
+
+test('skills.consolidate archives useless/failing skills, never builtins', () => {
+  const dir = tmp();
+  const s = new Skills(dir);
+  s.save('never_works', 'x', {}, 'return 1;');
+  s.record('never_works', false);
+  s.record('never_works', false);
+  s.save('good_one', 'y', {}, 'return 1;');
+  s.record('good_one', true);
+  for (let i = 0; i < 3; i++) s.record('collect_logs', false); // builtin
+  const archived = s.consolidate(25);
+  assert.deepEqual(archived, ['never_works']);
+  assert.ok(!s.has('never_works') && s.has('good_one') && s.has('collect_logs'));
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'archive', 'never_works.js')));
+  // over capacity: lowest score goes first
+  s.save('meh', 'z', {}, 'return 1;');
+  s.record('meh', true);
+  s.record('meh', false);
+  assert.deepEqual(s.consolidate(1), ['meh']);
+});

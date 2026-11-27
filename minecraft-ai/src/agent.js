@@ -1,10 +1,11 @@
 import { parseJson } from './llm.js';
-import { observe, inventoryOf } from './observe.js';
+import { observe, inventoryOf, snapshotState, diffState } from './observe.js';
 import { nextGoal } from './curriculum.js';
 import { createApi } from './actions.js';
 import { runSkill } from './sandbox.js';
 import { Skills } from './skills.js';
 import { Journal } from './journal.js';
+import { Brains } from './brain.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -19,6 +20,9 @@ export class Agent {
     this.journal = journal ?? new Journal(config.dataDir);
     this.lastSelfMsg = { text: '', at: 0 };
     this.steps = 0;
+    this.reflections = 0;
+    this.brains = new Brains(config.dataDir, config.brainsDir);
+    this.lastSnapshotAt = Date.now();
     this.reflectedAt = this.journal.entries.length;
     this.lastHealth = bot.health ?? 20;
     this.running = false;
@@ -55,6 +59,18 @@ export class Agent {
         this.events.log(`💀 죽었다: ${cause}`);
       }, 1000);
     });
+  }
+
+  #snapshot(label) {
+    try {
+      const name = this.brains.snapshot(label);
+      this.lastSnapshotAt = Date.now();
+      if (name) this.events.log(`💾 두뇌 저장: ${name}`);
+      return name;
+    } catch (e) {
+      this.events.log(`⚠️ 두뇌 저장 실패: ${e.message}`);
+      return null;
+    }
   }
 
   #where() {
@@ -94,6 +110,9 @@ export class Agent {
         await sleep(5000);
       }
       this.events.update({ spentUsd: this.llm.spentUsd, skills: this.skills.count() });
+      if (Date.now() - this.lastSnapshotAt > this.config.snapshotEveryMin * 60000) {
+        this.#snapshot('auto');
+      }
       if (++this.steps % this.config.reflectEvery === 0) {
         try {
           await this.reflect();
@@ -113,6 +132,7 @@ export class Agent {
       if (!before.has(id)) {
         this.journal.add('milestone', { id });
         this.events.log(`🏁 목표 달성: ${id}`);
+        this.#snapshot(`ms-${id}`);
       }
     }
     const lessons = this.memory.data.lessons;
@@ -177,6 +197,10 @@ export class Agent {
    * 2) distill the journal into a fresh, short lesson list.
    */
   async reflect() {
+    this.reflections++;
+    if (this.reflections % this.config.consolidateEvery === 0 || this.skills.learnedCount() > this.config.maxSkills) {
+      this.consolidate();
+    }
     const digest = this.journal.failureDigest(this.reflectedAt);
     this.reflectedAt = this.journal.entries.length;
     const repeated = Object.entries(digest.bySkill).filter(([, f]) => f.n >= 3);
@@ -209,14 +233,37 @@ export class Agent {
     }
   }
 
+  /** Snapshot the brain, then archive useless/failing skills. */
+  consolidate() {
+    const snap = this.#snapshot('before-consolidate');
+    const archived = this.skills.consolidate(this.config.maxSkills);
+    this.journal.add('consolidate', { archived, snapshot: snap });
+    this.events.update({ skills: this.skills.count() });
+    this.events.log(
+      archived.length
+        ? `🧹 두뇌 정리: ${archived.length}개 보관함으로 (${archived.join(', ')})`
+        : '🧹 두뇌 정리: 정리할 스킬 없음',
+    );
+    return archived;
+  }
+
   async useSkill(name, args) {
     if (!this.skills.has(name)) return `실패: "${name}" 스킬이 없다. 있는 스킬만 쓰거나 write_skill 할 것`;
     try {
+      const before = snapshotState(this.bot);
       const out = await this.#exec(this.skills.code(name), args);
+      const d = diffState(before, snapshotState(this.bot));
+      if (!d.effect) {
+        // Finished without error but changed nothing: not a real success.
+        this.skills.record(name, false);
+        this.journal.add('skill_fail', { name, error: '효과 없음 (인벤토리/위치/허기/몹 변화 없음)' });
+        this.events.log(`➖ ${name}: 효과 없음`);
+        return `효과 없음: "${name}"이 에러 없이 끝났지만 아무것도 바뀌지 않았다. 다른 스킬이나 다른 장소를 시도하거나 write_skill로 고칠 것`;
+      }
       this.skills.record(name, true);
-      this.journal.add('skill_ok', { name });
-      this.events.log(`✅ ${name}`);
-      return `성공: ${short(out ?? 'ok')}`;
+      this.journal.add('skill_ok', { name, effect: d.text });
+      this.events.log(`✅ ${name}: ${d.text}`);
+      return `성공: ${d.text}${out !== undefined ? ` / 반환값 ${short(out, 200)}` : ''}`;
     } catch (e) {
       this.skills.record(name, false);
       this.journal.add('skill_fail', { name, error: short(e.message, 160) });
@@ -242,13 +289,17 @@ export class Agent {
         parsed = parseWriterReply(reply);
         if (!Skills.validName(parsed.name)) throw new Error(`잘못된 스킬 이름: ${parsed.name}`);
         this.events.log(`🛠️ 스킬 작성 시도 ${i}/${maxAttempts}: ${parsed.name}`);
+        const before = snapshotState(this.bot);
         const out = await this.#exec(parsed.code, parsed.args);
+        const d = diffState(before, snapshotState(this.bot));
+        if (!d.effect)
+          throw new Error('code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). It must actually do the task - check that every api call is awaited and targets the right block/item.');
         this.skills.save(parsed.name, parsed.description, parsed.args, parsed.code);
         this.skills.record(parsed.name, true);
         this.journal.add('new_skill', { name: parsed.name });
         this.events.log(`🎓 새 스킬 습득: ${parsed.name}`);
         this.events.update({ skills: this.skills.count(), newSkill: parsed.name });
-        return `새 스킬 "${parsed.name}" 작성·실행 성공: ${short(out ?? 'ok')}`;
+        return `새 스킬 "${parsed.name}" 작성·실행 성공: ${d.text}${out !== undefined ? ` / 반환값 ${short(out, 200)}` : ''}`;
       } catch (e) {
         lastErr = e.message;
         this.journal.add('skill_fail', { name: parsed?.name ?? `write:${short(request, 30)}`, error: short(lastErr, 160), writing: true });

@@ -66,6 +66,7 @@ export class Journal {
         case 'skill_fail': return `${time} ❌ ${e.name}: ${e.error}`;
         case 'new_skill': return `${time} 🎓 ${e.name}`;
         case 'milestone': return `${time} 🏁 ${e.id}`;
+        case 'consolidate': return `${time} 🧹 정리: ${e.archived?.length ?? 0}개 보관`;
         default: return `${time} ${e.type}`;
       }
     };

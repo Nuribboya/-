@@ -50,7 +50,7 @@ export class Skills {
   #write(name, description, args, code, builtin = false) {
     fs.writeFileSync(path.join(this.dir, `${name}.js`), code);
     const prev = this.index[name];
-    this.index[name] = { description, args, uses: prev?.uses ?? 0, fails: prev?.fails ?? 0, streak: 0, builtin };
+    this.index[name] = { description, args, uses: prev?.uses ?? 0, fails: prev?.fails ?? 0, streak: 0, builtin, createdAt: prev?.createdAt ?? Date.now() };
     fs.writeFileSync(this.indexFile, JSON.stringify(this.index, null, 2));
   }
 
@@ -82,6 +82,50 @@ export class Skills {
       s.streak = (s.streak ?? 0) + 1;
     }
     fs.writeFileSync(this.indexFile, JSON.stringify(this.index, null, 2));
+  }
+
+  /** Move a skill out of the active library (kept in skills/archive/, not deleted). */
+  archive(name) {
+    const s = this.index[name];
+    if (!s || s.builtin) return false;
+    const dir = path.join(this.dir, 'archive');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(path.join(this.dir, `${name}.js`), path.join(dir, `${name}.js`));
+    const idxFile = path.join(dir, 'index.json');
+    let idx = {};
+    try {
+      idx = JSON.parse(fs.readFileSync(idxFile, 'utf8'));
+    } catch {}
+    idx[name] = { ...s, archivedAt: new Date().toISOString() };
+    fs.writeFileSync(idxFile, JSON.stringify(idx, null, 2));
+    delete this.index[name];
+    fs.writeFileSync(this.indexFile, JSON.stringify(this.index, null, 2));
+    return true;
+  }
+
+  /**
+   * Keep the library lean: archive learned skills that never worked or keep failing,
+   * then, if still over maxSkills, archive the lowest-scoring ones. Builtins are never touched.
+   */
+  consolidate(maxSkills = 25) {
+    const archived = [];
+    for (const [n, s] of Object.entries(this.index)) {
+      if (s.builtin) continue;
+      if ((s.uses === 0 && s.fails >= 2) || s.streak >= 5) {
+        if (this.archive(n)) archived.push(n);
+      }
+    }
+    const learned = Object.entries(this.index).filter(([, s]) => !s.builtin);
+    if (learned.length > maxSkills) {
+      const score = (s) => s.uses - s.fails;
+      learned.sort((a, b) => score(a[1]) - score(b[1]) || (a[1].createdAt ?? 0) - (b[1].createdAt ?? 0));
+      for (const [n] of learned.slice(0, learned.length - maxSkills)) if (this.archive(n)) archived.push(n);
+    }
+    return archived;
+  }
+
+  learnedCount() {
+    return Object.values(this.index).filter((s) => !s.builtin).length;
   }
 
   count() {

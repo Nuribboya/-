@@ -28,4 +28,8 @@ export const config = {
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),
   overlayPort: Number(env.OVERLAY_PORT ?? 3000),
   dataDir: env.DATA_DIR ?? 'data',
+  brainsDir: env.BRAINS_DIR ?? 'brains', // snapshots of dataDir
+  snapshotEveryMin: Number(env.SNAPSHOT_EVERY_MIN ?? 60),
+  consolidateEvery: Number(env.CONSOLIDATE_EVERY ?? 4), // every N reflection passes
+  maxSkills: Number(env.MAX_SKILLS ?? 25), // learned skills kept active (builtins not counted)
 };

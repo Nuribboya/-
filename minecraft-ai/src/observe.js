@@ -1,7 +1,7 @@
 const NOTABLE_NAMES = new Set(['stone', 'cobblestone', 'water', 'lava', 'crafting_table', 'furnace', 'chest', 'sand', 'gravel']);
 const NOTABLE = (n) => n.endsWith('_log') || n.endsWith('_ore') || NOTABLE_NAMES.has(n);
 
-const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'drowned', 'husk', 'pillager', 'phantom']);
+export const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'drowned', 'husk', 'pillager', 'phantom']);
 
 export function inventoryOf(bot) {
   const inv = {};
@@ -39,5 +39,38 @@ export function observe(bot) {
       `주변 블록(24칸, 개수/최단거리): ${Object.keys(near).length ? JSON.stringify(near) : '특별한 것 없음'}`,
       `주변 생물: ${mobs.length ? mobs.map((m) => `${m.name}${m.hostile ? '(적대)' : ''}@${m.dist}`).join(', ') : '없음'}`,
     ].join('\n'),
+  };
+}
+
+/** Minimal state used to judge whether a skill actually did something. */
+export function snapshotState(bot) {
+  const p = bot.entity.position;
+  return {
+    inv: inventoryOf(bot),
+    pos: p.clone(),
+    food: bot.food ?? 0,
+    hostiles: Object.values(bot.entities).filter((e) => HOSTILE.has(e.name) && e.position.distanceTo(p) < 16).length,
+  };
+}
+
+/** Outcome of a skill: inventory delta, distance moved, food gained, hostiles removed. */
+export function diffState(a, b) {
+  const inv = {};
+  for (const k of new Set([...Object.keys(a.inv), ...Object.keys(b.inv)])) {
+    const d = (b.inv[k] ?? 0) - (a.inv[k] ?? 0);
+    if (d) inv[k] = d;
+  }
+  const moved = Math.round(a.pos.distanceTo(b.pos));
+  const food = b.food - a.food;
+  const killed = a.hostiles - b.hostiles;
+  const parts = Object.entries(inv).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`);
+  if (moved >= 3) parts.push(`이동 ${moved}칸`);
+  if (food > 0) parts.push(`허기 +${food}`);
+  if (killed > 0) parts.push(`주변 적대몹 -${killed}`);
+  return {
+    inv,
+    moved,
+    effect: Object.keys(inv).length > 0 || moved >= 3 || food > 0 || killed > 0,
+    text: parts.length ? parts.join(', ') : '변화 없음',
   };
 }
