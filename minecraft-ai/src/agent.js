@@ -4,6 +4,7 @@ import { nextGoal } from './curriculum.js';
 import { createApi } from './actions.js';
 import { runSkill } from './sandbox.js';
 import { Skills } from './skills.js';
+import { Journal } from './journal.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, parseWriterReply } from './prompts.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -13,19 +14,62 @@ const short = (v, n = 400) => {
 };
 
 export class Agent {
-  constructor({ bot, llm, skills, memory, events, config }) {
+  constructor({ bot, llm, skills, memory, events, config, journal }) {
     Object.assign(this, { bot, llm, skills, memory, events, config });
+    this.journal = journal ?? new Journal(config.dataDir);
+    this.lastSelfMsg = { text: '', at: 0 };
+    this.lastHealth = bot.health ?? 20;
     this.running = false;
     this.lastResult = '아직 없음';
     this.lastAction = '';
 
-    bot.on('death', () => {
-      this.memory.addDeath();
-      const p = bot.entity?.position;
-      this.memory.addLesson(`죽음 #${this.memory.data.deaths}: 직전 행동 "${this.lastAction}", 직전 결과 "${short(this.lastResult, 120)}"${p ? ` (${p.x.toFixed(0)},${p.y.toFixed(0)},${p.z.toFixed(0)})` : ''}`);
-      this.events.update({ deaths: this.memory.data.deaths });
-      this.events.log('💀 죽었다... 교훈을 기록했다');
+    // Death message from the server ("<name> was slain by Zombie") tells us the cause.
+    bot.on('messagestr', (msg) => {
+      if (msg.startsWith(bot.username)) this.lastSelfMsg = { text: msg, at: Date.now() };
     });
+
+    // Damage log: big hits only, with the nearest hostile as the likely source.
+    bot.on('health', () => {
+      const drop = this.lastHealth - bot.health;
+      this.lastHealth = bot.health;
+      if (drop >= 3 && bot.health > 0) {
+        this.journal.add('damage', { amount: Math.round(drop), source: this.#nearestThreat(), where: this.#where() });
+      }
+    });
+
+    bot.on('death', () => {
+      const night = this.#isNight();
+      const where = this.#where();
+      const lastAction = this.lastAction;
+      const lastResult = short(this.lastResult, 120);
+      this.memory.addDeath();
+      this.events.update({ deaths: this.memory.data.deaths });
+      // The chat line with the cause can arrive just after the death event.
+      setTimeout(() => {
+        const recent = Date.now() - this.lastSelfMsg.at < 6000;
+        const cause = recent ? this.lastSelfMsg.text.slice(bot.username.length + 1) : this.#nearestThreat() ?? '원인불명';
+        this.journal.add('death', { cause, where, night, lastAction, lastResult });
+        this.memory.addLesson(`죽음 #${this.memory.data.deaths}: ${cause} (${night ? '밤' : '낮'}, ${where}), 직전 행동 "${lastAction}"`);
+        this.events.log(`💀 죽었다: ${cause}`);
+      }, 1000);
+    });
+  }
+
+  #where() {
+    const p = this.bot.entity?.position;
+    return p ? `${p.x.toFixed(0)},${p.y.toFixed(0)},${p.z.toFixed(0)}` : '?';
+  }
+
+  #isNight() {
+    const t = this.bot.time?.timeOfDay ?? 0;
+    return t >= 13000 && t < 23000;
+  }
+
+  #nearestThreat() {
+    const me = this.bot.entity;
+    if (!me) return undefined;
+    const e = this.bot.nearestEntity((x) => x.name && x.position.distanceTo(me.position) < 6 && x !== me && x.type !== 'object' && x.type !== 'orb');
+    return e?.name;
   }
 
   stop() {
@@ -54,7 +98,14 @@ export class Agent {
 
   async step() {
     const obs = observe(this.bot);
+    const before = new Set(this.memory.data.achieved);
     const goal = nextGoal(obs.inv, this.memory);
+    for (const id of this.memory.data.achieved) {
+      if (!before.has(id)) {
+        this.journal.add('milestone', { id });
+        this.events.log(`🏁 목표 달성: ${id}`);
+      }
+    }
     const lessons = this.memory.data.lessons;
 
     const user = [
@@ -63,6 +114,8 @@ export class Agent {
       `직전 행동: ${this.lastAction || '없음'}`,
       `직전 결과: ${short(this.lastResult)}`,
       `보유 스킬:\n${this.skills.describe()}`,
+      `최근 일지:\n${this.journal.recentText(8) || '- 없음'}`,
+      this.journal.deathSummary() ? `누적: ${this.journal.deathSummary()}` : '',
       `교훈:\n${lessons.length ? lessons.map((l) => '- ' + l).join('\n') : '- 아직 없음'}`,
     ].join('\n\n');
 
@@ -101,10 +154,12 @@ export class Agent {
     try {
       const out = await this.#exec(this.skills.code(name), args);
       this.skills.record(name, true);
+      this.journal.add('skill_ok', { name });
       this.events.log(`✅ ${name}`);
       return `성공: ${short(out ?? 'ok')}`;
     } catch (e) {
       this.skills.record(name, false);
+      this.journal.add('skill_fail', { name, error: short(e.message, 160) });
       this.events.log(`❌ ${name}: ${e.message}`);
       return `실패: ${e.message}`;
     }
@@ -130,6 +185,7 @@ export class Agent {
         const out = await this.#exec(parsed.code, parsed.args);
         this.skills.save(parsed.name, parsed.description, parsed.args, parsed.code);
         this.skills.record(parsed.name, true);
+        this.journal.add('new_skill', { name: parsed.name });
         this.events.log(`🎓 새 스킬 습득: ${parsed.name}`);
         this.events.update({ skills: this.skills.count(), newSkill: parsed.name });
         return `새 스킬 "${parsed.name}" 작성·실행 성공: ${short(out ?? 'ok')}`;

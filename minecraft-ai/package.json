@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "start:free": "node --env-file=.env.free src/index.js",
+    "report": "node src/report.js",
     "test": "node --test test/*.test.js"
   },
   "engines": { "node": ">=20" },

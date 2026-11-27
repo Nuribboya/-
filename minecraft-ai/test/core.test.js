@@ -79,3 +79,16 @@ test('ollama adapter sends ctx/json format and reads reply', async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test('journal records, summarizes deaths, reloads from disk', async () => {
+  const { Journal } = await import('../src/journal.js');
+  const dir = tmp();
+  const j = new Journal(dir);
+  j.add('death', { cause: 'was slain by Zombie', where: '1,64,2', night: true, lastAction: 'collect_logs' });
+  j.add('death', { cause: 'was slain by Zombie', where: '3,64,4', night: false, lastAction: 'explore_area' });
+  j.add('skill_fail', { name: 'x', error: 'boom' });
+  assert.match(j.deathSummary(), /죽음 2회: was slain by Zombie 2 \/ 밤에 1회/);
+  assert.match(j.recentText(), /boom/);
+  assert.equal(new Journal(dir).entries.length, 3);
+  assert.match(j.report(), /\[죽음\]/);
+});

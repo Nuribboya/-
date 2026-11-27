@@ -6,6 +6,7 @@ import { Skills } from './skills.js';
 import { Memory } from './memory.js';
 import { Events } from './events.js';
 import { Agent } from './agent.js';
+import { Journal } from './journal.js';
 import { startOverlay } from './overlay.js';
 
 const { pathfinder, Movements } = pf;
@@ -14,6 +15,7 @@ const events = new Events();
 const llm = new LLM(config);
 const skills = new Skills(config.dataDir);
 const memory = new Memory(config.dataDir);
+const journal = new Journal(config.dataDir);
 events.update({ deaths: memory.data.deaths, skills: skills.count() });
 startOverlay(events, config.overlayPort);
 
@@ -33,7 +35,7 @@ function connect() {
   bot.once('spawn', () => {
     bot.pathfinder.setMovements(new Movements(bot));
     events.log('스폰 완료. 플레이 시작!');
-    agent = new Agent({ bot, llm, skills, memory, events, config });
+    agent = new Agent({ bot, llm, skills, memory, events, config, journal });
     agent.run();
   });
 
