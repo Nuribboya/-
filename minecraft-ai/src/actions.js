@@ -10,7 +10,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * The only surface generated skill code can touch. Every method checks ctx.aborted
  * so a timed-out skill stops acting instead of running on in the background.
  */
-export function createApi(bot, ctx, log = () => {}) {
+export function createApi(bot, ctx, log = () => {}, hooks = {}) {
   const reg = bot.registry;
   const check = () => {
     if (ctx.aborted) throw new Error('skill timed out / aborted');
@@ -42,6 +42,12 @@ export function createApi(bot, ctx, log = () => {}) {
 
   const api = {
     log,
+    /** Run another saved skill by name from inside a skill: await api.useSkill('collect_logs', {count: 3}) */
+    useSkill: async (name, args = {}) => {
+      check();
+      if (!hooks.useSkill) throw new Error('useSkill is not available here');
+      return hooks.useSkill(name, args);
+    },
     sleep: async (ms) => {
       check();
       await sleep(Math.min(ms, 10000));

@@ -122,3 +122,24 @@ test('createApi: floating rejected promise does not crash the process', async ()
   api.goTo(1, 2, 3); // not awaited on purpose
   await new Promise((r) => setTimeout(r, 20)); // would crash the test runner if unhandled
 });
+
+test('sandbox: unknown api name gives helpful error', () => {
+  assert.throws(() => checkCode('await api.collect_logs(3);', ['gather', 'useSkill']), /useSkill/);
+  assert.doesNotThrow(() => checkCode('await api.gather("log", 2);', ['gather', 'useSkill']));
+});
+
+test('sandbox: Korean outside strings/comments rejected, inside allowed', () => {
+  assert.throws(() => checkCode('const 위치 = api.position();'), /Korean/);
+  assert.doesNotThrow(() => checkCode('// 위치 확인\nconst p = api.position();\napi.log("위치로 이동");'));
+});
+
+test('useSkill runs a saved skill from inside another skill', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const bot = { registry: {}, entity: {}, pathfinder: {} };
+  let api;
+  api = createApi(bot, { aborted: false }, () => {}, {
+    useSkill: (name, args) => runSkill('return args.x * 2;', api, args, { aborted: false }),
+  });
+  const out = await runSkill('return await api.useSkill("double", {x: 4});', api, {}, { aborted: false });
+  assert.equal(out, 8);
+});

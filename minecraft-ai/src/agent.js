@@ -148,7 +148,20 @@ export class Agent {
 
   async #exec(code, args) {
     const ctx = { aborted: false };
-    const api = createApi(this.bot, ctx, (m) => this.events.log(`  · ${m}`));
+    let depth = 0;
+    const hooks = {
+      useSkill: async (name, a) => {
+        if (!this.skills.has(name)) throw new Error(`no saved skill "${name}". Saved skills: ${Object.keys(this.skills.index).join(', ')}`);
+        if (depth >= 3) throw new Error('skills nested too deeply (max 3)');
+        depth++;
+        try {
+          return await runSkill(this.skills.code(name), api, a, ctx, this.config.skillTimeoutMs);
+        } finally {
+          depth--;
+        }
+      },
+    };
+    const api = createApi(this.bot, ctx, (m) => this.events.log(`  · ${m}`), hooks);
     try {
       return await runSkill(code, api, args, ctx, this.config.skillTimeoutMs);
     } finally {
@@ -166,9 +179,10 @@ export class Agent {
   async reflect() {
     const digest = this.journal.failureDigest(this.reflectedAt);
     this.reflectedAt = this.journal.entries.length;
-    const failing = Object.entries(digest.bySkill).filter(([name, f]) => f.n >= 3 && this.skills.has(name));
-    if (!failing.length && !digest.deaths.length) return;
-    this.events.log(`🔁 반성 시간: 반복 실패 스킬 ${failing.length}개, 죽음 ${digest.deaths.length}회 분석`);
+    const repeated = Object.entries(digest.bySkill).filter(([, f]) => f.n >= 3);
+    const failing = repeated.filter(([name]) => this.skills.has(name));
+    if (!repeated.length && !digest.deaths.length) return;
+    this.events.log(`🔁 반성 시간: 반복 실패 ${repeated.length}개(저장된 스킬 ${failing.length}개 수리), 죽음 ${digest.deaths.length}회 분석`);
 
     const obs = observe(this.bot);
     const goal = nextGoal(obs.inv, this.memory);
@@ -237,6 +251,7 @@ export class Agent {
         return `새 스킬 "${parsed.name}" 작성·실행 성공: ${short(out ?? 'ok')}`;
       } catch (e) {
         lastErr = e.message;
+        this.journal.add('skill_fail', { name: parsed?.name ?? `write:${short(request, 30)}`, error: short(lastErr, 160), writing: true });
         this.events.log(`❌ 시도 ${i} 실패: ${lastErr}`);
         messages.push({
           role: 'user',
