@@ -218,6 +218,7 @@ export class Agent {
     };
     const logs = [];
     this.lastExecLogs = logs;
+    this.lastExecErrors = ctx.errors = [];
     const api = createApi(
       this.bot,
       ctx,
@@ -325,12 +326,16 @@ export class Agent {
         this.skills.record(name, false);
         this.journal.add('skill_fail', { name, error: '효과 없음 (인벤토리/위치/허기/몹 변화 없음)' });
         this.events.log(`➖ ${name}: 효과 없음`);
-        return `효과 없음: "${name}"이 에러 없이 끝났지만 아무것도 바뀌지 않았다. 다른 스킬이나 다른 장소를 시도하거나 write_skill로 고칠 것`;
+        const sw = this.lastExecErrors ?? [];
+        return sw.length
+          ? `효과 없음: "${name}" 안에서 실패한 호출: ${short(sw.join(' | '), 400)}`
+          : `효과 없음: "${name}"이 에러 없이 끝났지만 아무것도 바뀌지 않았다. 다른 스킬이나 다른 장소를 시도하거나 write_skill로 고칠 것`;
       }
       this.skills.record(name, true);
       this.journal.add('skill_ok', { name, effect: d.text });
-      this.events.log(`✅ ${name}: ${d.text}`);
-      return `성공: ${d.text}${out !== undefined ? ` / 반환값 ${short(out, 200)}` : ''}`;
+      const sw = this.lastExecErrors ?? [];
+      this.events.log(`✅ ${name}: ${d.text}${sw.length ? ` (내부 실패 ${sw.length}건)` : ''}`);
+      return `성공: ${d.text}${out !== undefined ? ` / 반환값 ${short(out, 200)}` : ''}${sw.length ? ` / 단, 내부에서 실패한 호출: ${short(sw.join(' | '), 300)}` : ''}`;
     } catch (e) {
       this.skills.record(name, false);
       this.journal.add('skill_fail', { name, error: short(e.message, 160) });
@@ -361,8 +366,14 @@ export class Agent {
           throw new Error(`"${parsed.name}" is a builtin skill and cannot be overwritten - use a different NAME`);
         const out = await this.#exec(parsed.code, parsed.args, this.config.writeTestTimeoutMs);
         const d = diffState(before, snapshotState(this.bot));
-        if (!d.effect)
-          throw new Error('code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). It must actually do the task - check that every api call is awaited and targets the right block/item.');
+        if (!d.effect) {
+          const swallowed = this.lastExecErrors ?? [];
+          throw new Error(
+            swallowed.length
+              ? `NOTHING changed because these api calls failed (your code caught and ignored them): ${swallowed.join(' | ')}`
+              : 'code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). It must actually do the task - check that every api call is awaited and targets the right block/item.',
+          );
+        }
         this.skills.save(parsed.name, parsed.description, parsed.args, parsed.code);
         this.skills.record(parsed.name, true);
         this.journal.add('new_skill', { name: parsed.name });

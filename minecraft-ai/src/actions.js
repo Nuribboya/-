@@ -51,6 +51,45 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     }
   };
 
+  /** Human/model-readable explanation of why `name` can't be crafted right now. */
+  const explainCraft = (name, item, tableNearby) => {
+    const all = bot.recipesAll(item.id, null, true);
+    if (!all.length) return `${name} has no crafting recipe - it must be mined, smelted or found`;
+    const inv = inventoryOf(bot);
+    const needOf = (r) => {
+      const need = {};
+      for (const d of r.delta) if (d.count < 0) {
+        const n = reg.items[d.id]?.name ?? String(d.id);
+        need[n] = (need[n] ?? 0) - d.count;
+      }
+      return need;
+    };
+    // Pick the variant closest to craftable; among ties prefer the wood type we hold logs of.
+    let best = null;
+    let bestScore = Infinity;
+    for (const r of all) {
+      const need = needOf(r);
+      let score = 0;
+      for (const [n, c] of Object.entries(need)) {
+        score += Math.max(0, c - (inv[n] ?? 0)) * 10;
+        if (n.endsWith('_planks') && (inv[n.replace('_planks', '_log')] ?? 0) > 0) score -= 1;
+      }
+      if (score < bestScore) {
+        best = { r, need };
+        bestScore = score;
+      }
+    }
+    const parts = Object.entries(best.need).map(([n, c]) => `${n} x${c} (have ${inv[n] ?? 0})`);
+    const hints = [];
+    for (const [n, c] of Object.entries(best.need)) {
+      if ((inv[n] ?? 0) >= c) continue;
+      if (n.endsWith('_planks')) hints.push(`await api.craft('${n}') turns 1 ${n.replace('_planks', '_log')} into 4 ${n}`);
+      else if (n === 'stick') hints.push("await api.craft('stick') turns 2 planks into 4 sticks");
+    }
+    const tableNote = best.r.requiresTable && !tableNearby ? ' Also needs a crafting_table PLACED within 32 blocks (await api.place("crafting_table")).' : '';
+    return `cannot craft ${name}: needs ${parts.join(', ')}.${tableNote}${hints.length ? ' Next step: ' + hints.join('; ') : ''}`;
+  };
+
   const api = {
     log,
     /** Run another saved skill by name from inside a skill: await api.useSkill('collect_logs', {count: 3}) */
@@ -106,10 +145,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       if (!recipe) {
         const tableId = reg.blocksByName.crafting_table.id;
         table = bot.findBlock({ matching: tableId, maxDistance: 32 });
-        if (!table) throw new Error(`cannot craft ${name} now: missing ingredients, or needs a crafting_table nearby (place one first)`);
-        await goto(table.position.x, table.position.y, table.position.z, 3);
+        if (!table) throw new Error(explainCraft(name, item, false));
         recipe = bot.recipesFor(item.id, null, 1, table)[0];
-        if (!recipe) throw new Error(`missing ingredients for ${name}`);
+        if (!recipe) throw new Error(explainCraft(name, item, true));
+        await goto(table.position.x, table.position.y, table.position.z, 3);
       }
       await bot.craft(recipe, times, table);
       return inventoryOf(bot)[name] ?? 0;
@@ -295,11 +334,23 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   // Safety net: a model-written call that is not awaited must never become an
   // unhandled rejection (that would crash the whole process).
+  // Also record every api error in ctx.errors, so errors the skill code swallows with
+  // try/catch are still visible to the model ("nothing changed - because craft failed: ...").
+  const note = (k, e) => {
+    if (!ctx.errors) ctx.errors = [];
+    if (ctx.errors.length < 10) ctx.errors.push(`api.${k}: ${e?.message ?? e}`);
+  };
   for (const [k, fn] of Object.entries(api)) {
     if (typeof fn !== 'function') continue;
     api[k] = (...a) => {
-      const r = fn(...a);
-      if (r && typeof r.catch === 'function') r.catch(() => {});
+      let r;
+      try {
+        r = fn(...a);
+      } catch (e) {
+        note(k, e);
+        throw e;
+      }
+      if (r && typeof r.catch === 'function') r.catch((e) => note(k, e));
       return r;
     };
   }

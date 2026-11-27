@@ -352,3 +352,30 @@ test('goto retries once when a stale stop cancels the first move', async () => {
   await assert.rejects(api.goTo(1, 2, 3), /No path/);
   assert.equal(calls, 1);
 });
+
+test('craft error explains the missing ingredients with real 26.1 recipes', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const reg = require('prismarine-registry')('26.1');
+  const Recipe = require('prismarine-recipe')(reg).Recipe;
+  const inv = [{ name: 'birch_log', count: 3, type: reg.itemsByName.birch_log.id }];
+  const bot = {
+    registry: reg,
+    entity: { position: { floored: () => ({}) } },
+    inventory: { items: () => inv },
+    recipesFor: () => [],
+    recipesAll: (id, meta, table) => Recipe.find(id, meta).filter((r) => !r.requiresTable || table),
+    findBlock: () => null,
+    pathfinder: { goto: async () => {} },
+  };
+  const ctx = { aborted: false };
+  const api = createApi(bot, ctx);
+  await assert.rejects(api.craft('crafting_table'), (e) => {
+    assert.match(e.message, /birch_planks x4 \(have 0\)/);
+    assert.match(e.message, /api\.craft\('birch_planks'\)/);
+    return true;
+  });
+  await assert.rejects(api.craft('wooden_pickaxe'), /needs a crafting_table PLACED/);
+  assert.equal(ctx.errors.length, 2); // swallowed-or-not, every api error is recorded
+});
