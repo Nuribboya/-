@@ -27,6 +27,20 @@ export class Journal {
     return this.entries.filter((e) => e.type === type);
   }
 
+  /** Group failures since entry index `since`: { bySkill: {name: {n, errors[]}}, deaths: [causes] } */
+  failureDigest(since = 0) {
+    const bySkill = {};
+    const deaths = [];
+    for (const e of this.entries.slice(since)) {
+      if (e.type === 'skill_fail') {
+        const s = (bySkill[e.name] ??= { n: 0, errors: [] });
+        s.n++;
+        if (!s.errors.includes(e.error) && s.errors.length < 4) s.errors.push(e.error);
+      } else if (e.type === 'death') deaths.push(e.cause ?? '원인불명');
+    }
+    return { bySkill, deaths };
+  }
+
   /** "죽음 3회: zombie 2, lava 1 / 밤에 2회" */
   deathSummary() {
     const deaths = this.of('death');

@@ -92,3 +92,19 @@ test('journal records, summarizes deaths, reloads from disk', async () => {
   assert.equal(new Journal(dir).entries.length, 3);
   assert.match(j.report(), /\[죽음\]/);
 });
+
+test('journal failureDigest groups failures since an index', async () => {
+  const { Journal } = await import('../src/journal.js');
+  const j = new Journal(tmp());
+  j.add('skill_fail', { name: 'a', error: 'e0' });
+  const since = j.entries.length;
+  j.add('skill_fail', { name: 'a', error: 'e1' });
+  j.add('skill_fail', { name: 'a', error: 'e1' });
+  j.add('skill_fail', { name: 'b', error: 'x' });
+  j.add('death', { cause: 'lava' });
+  const d = j.failureDigest(since);
+  assert.equal(d.bySkill.a.n, 2);
+  assert.deepEqual(d.bySkill.a.errors, ['e1']);
+  assert.equal(d.bySkill.b.n, 1);
+  assert.deepEqual(d.deaths, ['lava']);
+});

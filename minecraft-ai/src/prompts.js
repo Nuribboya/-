@@ -57,3 +57,7 @@ export function parseWriterReply(text) {
   } catch {}
   return { name, description, args, code };
 }
+
+export const REFLECT_SYSTEM = `너는 마인크래프트 봇의 코치다. 최근 일지와 기존 교훈을 보고, 앞으로 같은 실수를 막을 "교훈"을 최대 8개로 다시 정리한다.
+규칙: 구체적이고 행동 가능한 한 줄 (예: "밤에는 탐험 대신 작업대 근처에서 대기"). 중복/모호한 것은 합치거나 버린다. 아래 JSON 하나만 출력:
+{"lessons": ["...", "..."]}`;

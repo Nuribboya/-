@@ -24,6 +24,7 @@ export const config = {
 
   dailyBudgetUsd: Number(env.DAILY_BUDGET_USD ?? 15),
   decisionIntervalMs: Number(env.DECISION_INTERVAL_MS ?? 2000),
+  reflectEvery: Number(env.REFLECT_EVERY ?? 25), // decision steps between self-improvement passes
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),
   overlayPort: Number(env.OVERLAY_PORT ?? 3000),
   dataDir: env.DATA_DIR ?? 'data',

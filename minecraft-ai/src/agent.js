@@ -5,7 +5,7 @@ import { createApi } from './actions.js';
 import { runSkill } from './sandbox.js';
 import { Skills } from './skills.js';
 import { Journal } from './journal.js';
-import { DECISION_SYSTEM, WRITER_SYSTEM, parseWriterReply } from './prompts.js';
+import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (v, n = 400) => {
@@ -18,6 +18,8 @@ export class Agent {
     Object.assign(this, { bot, llm, skills, memory, events, config });
     this.journal = journal ?? new Journal(config.dataDir);
     this.lastSelfMsg = { text: '', at: 0 };
+    this.steps = 0;
+    this.reflectedAt = this.journal.entries.length;
     this.lastHealth = bot.health ?? 20;
     this.running = false;
     this.lastResult = '아직 없음';
@@ -92,6 +94,13 @@ export class Agent {
         await sleep(5000);
       }
       this.events.update({ spentUsd: this.llm.spentUsd, skills: this.skills.count() });
+      if (++this.steps % this.config.reflectEvery === 0) {
+        try {
+          await this.reflect();
+        } catch (e) {
+          this.events.log(`⚠️ 반성 실패: ${e.message}`);
+        }
+      }
       await sleep(this.config.decisionIntervalMs);
     }
   }
@@ -146,6 +155,43 @@ export class Agent {
       ctx.aborted = true;
       this.bot.pathfinder.stop();
       this.bot.clearControlStates();
+    }
+  }
+
+  /**
+   * Self-improvement pass over accumulated failures:
+   * 1) rewrite skills that keep failing (using their code + the error messages),
+   * 2) distill the journal into a fresh, short lesson list.
+   */
+  async reflect() {
+    const digest = this.journal.failureDigest(this.reflectedAt);
+    this.reflectedAt = this.journal.entries.length;
+    const failing = Object.entries(digest.bySkill).filter(([name, f]) => f.n >= 3 && this.skills.has(name));
+    if (!failing.length && !digest.deaths.length) return;
+    this.events.log(`🔁 반성 시간: 반복 실패 스킬 ${failing.length}개, 죽음 ${digest.deaths.length}회 분석`);
+
+    const obs = observe(this.bot);
+    const goal = nextGoal(obs.inv, this.memory);
+    for (const [name, f] of failing.slice(0, 2)) {
+      const request =
+        `스킬 "${name}"이(가) 최근 ${f.n}번 실패했다. 에러들: ${f.errors.join(' | ')}\n` +
+        `현재 코드:\n${this.skills.code(name)}\n같은 이름(${name})으로, 이 에러들이 나지 않게 고쳐서 다시 작성해라.`;
+      const result = await this.writeSkill(request, obs, goal);
+      this.journal.add('reflect_fix', { name, result: short(result, 120) });
+    }
+
+    const text = await this.llm.ask(
+      'smart',
+      REFLECT_SYSTEM,
+      `기존 교훈:\n${this.memory.data.lessons.map((l) => '- ' + l).join('\n') || '- 없음'}\n\n최근 일지:\n${this.journal.recentText(40)}\n\n${this.journal.deathSummary()}`,
+      { maxTokens: 2000 },
+    );
+    const { lessons } = parseJson(text);
+    if (Array.isArray(lessons) && lessons.length) {
+      this.memory.data.lessons = lessons.filter((l) => typeof l === 'string').slice(0, 8);
+      this.memory.save();
+      this.journal.add('reflect', { lessons: this.memory.data.lessons.length });
+      this.events.log(`🧩 교훈 ${this.memory.data.lessons.length}개로 정리`);
     }
   }
 
