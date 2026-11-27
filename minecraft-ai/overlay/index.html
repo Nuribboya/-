@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>AI Minecraft Overlay</title>
+<style>
+  html, body { margin: 0; background: transparent; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; color: #fff; }
+  .panel { position: absolute; left: 16px; bottom: 16px; width: 520px; padding: 14px 16px; border-radius: 12px; background: rgba(15,17,23,.82); backdrop-filter: blur(4px); }
+  .goal { font-size: 13px; color: #9ad1ff; margin-bottom: 6px; }
+  .thought { font-size: 20px; line-height: 1.35; min-height: 54px; }
+  .stats { display: flex; gap: 14px; margin-top: 10px; font-size: 13px; color: #c9d1d9; flex-wrap: wrap; }
+  .stats b { color: #fff; }
+  .log { margin-top: 8px; font-size: 12px; color: #8b949e; max-height: 110px; overflow: hidden; }
+  .toast { position: absolute; top: 24px; right: 24px; padding: 12px 18px; border-radius: 10px; background: #1f6f43; font-size: 18px; opacity: 0; transition: opacity .4s; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <div class="goal" id="goal"></div>
+  <div class="thought" id="thought"></div>
+  <div class="stats">
+    <span>💀 사망 <b id="deaths">0</b></span>
+    <span>🎓 스킬 <b id="skills">0</b></span>
+    <span>⏱ <b id="uptime">0m</b></span>
+    <span>💵 $<b id="cost">0.00</b></span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let lastSkill = null, startedAt = Date.now();
+  const es = new EventSource('/events');
+  es.onmessage = (e) => {
+    const s = JSON.parse(e.data);
+    startedAt = s.startedAt;
+    $('goal').textContent = s.goal ? '🎯 ' + s.goal : '';
+    $('thought').textContent = s.thought;
+    $('deaths').textContent = s.deaths;
+    $('skills').textContent = s.skills;
+    $('cost').textContent = s.spentUsd.toFixed(2);
+    $('log').innerHTML = s.log.slice(-5).map((l) => '<div>' + l.replace(/</g, '&lt;') + '</div>').join('');
+    if (s.newSkill && s.newSkill !== lastSkill) {
+      lastSkill = s.newSkill;
+      $('toast').textContent = '🎓 새 스킬 습득: ' + s.newSkill;
+      $('toast').classList.add('show');
+      setTimeout(() => $('toast').classList.remove('show'), 5000);
+    }
+  };
+  setInterval(() => {
+    const m = Math.floor((Date.now() - startedAt) / 60000);
+    $('uptime').textContent = m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm';
+  }, 1000);
+</script>
+</body>
+</html>
