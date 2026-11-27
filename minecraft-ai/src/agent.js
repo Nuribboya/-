@@ -182,6 +182,17 @@ export class Agent {
       },
     };
     const api = createApi(this.bot, ctx, (m) => this.events.log(`  · ${m}`), hooks);
+    // Small models keep writing api.collect_logs(...) for saved skills. Instead of
+    // fighting that, make every saved skill callable as api.<skill_name>(args).
+    for (const name of Object.keys(this.skills.index)) {
+      if (name in api) continue;
+      api[name] = (a = {}) => {
+        const args = a && typeof a === 'object' ? a : { count: a };
+        const p = hooks.useSkill(name, args);
+        p.catch(() => {});
+        return p;
+      };
+    }
     try {
       return await runSkill(code, api, args, ctx, timeoutMs);
     } finally {

@@ -23,11 +23,14 @@ export function checkCode(code, apiNames) {
   if (apiNames) {
     for (const [, name] of bare.matchAll(/\bapi\.([A-Za-z_$][\w$]*)/g)) {
       if (!apiNames.includes(name))
-        throw new Error(`api.${name} does not exist. Available api: ${apiNames.join(', ')}. Saved skills are NOT api functions - call them with: await api.useSkill("skill_name", {args})`);
+        throw new Error(`api.${name} does not exist. Available api: ${apiNames.join(', ')}. Saved skills can be called as await api.<skill_name>({args}) only if that skill exists`);
     }
   }
   const f = code.match(FLOATING);
   if (f) throw new Error(`missing await: "api.${f[1]}(...)" must be written as "await api.${f[1]}(...)"`);
+  // Saved skills exposed as api.<snake_case_name>(...) must be awaited too.
+  const fs = bare.match(/^\s*api\.([a-z]+_[a-z0-9_]+)\(/m);
+  if (fs) throw new Error(`missing await: "api.${fs[1]}(...)" must be written as "await api.${fs[1]}(...)"`);
 }
 
 /**

@@ -229,3 +229,10 @@ test('primitive actions run one at a time even if called in parallel', async () 
   await Promise.all([api.goTo(1, 2, 3), api.goTo(4, 5, 6), api.goTo(7, 8, 9)]);
   assert.equal(maxActive, 1);
 });
+
+test('saved skill names pass the API check and must be awaited', () => {
+  const names = ['gather', 'useSkill', 'collect_logs'];
+  assert.doesNotThrow(() => checkCode('await api.collect_logs({count: 3});', names));
+  assert.throws(() => checkCode('api.collect_logs({count: 3});', names), /missing await/);
+  assert.throws(() => checkCode('await api.made_up_skill();', names), /does not exist/);
+});

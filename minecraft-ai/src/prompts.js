@@ -7,7 +7,7 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.goTo(x,y,z,range=1) / api.explore(distance=30)
 - api.attack(entityName='zombie'): 가장 가까운 해당 몹과 전투
 - api.eat()
-- api.useSkill(skillName, args={}): 이미 저장된 스킬을 코드 안에서 호출 (예: await api.useSkill('collect_logs', {count: 3})). 작은 스킬을 조합해 큰 스킬을 만들 때 쓴다. 스킬 이름은 api 함수가 아니다 (api.collect_logs 같은 건 없다).
+- 저장된 스킬 호출: await api.스킬이름({인자}) 예) await api.collect_logs({count: 3}). 또는 await api.useSkill('collect_logs', {count: 3}). '보유 스킬' 목록에 있는 이름만 가능. 작은 스킬을 조합해 큰 스킬을 만들 때 쓴다.
 - 동기 함수: api.inventory() -> {itemName: count}, api.has(name,n), api.countBlocks(name,maxDistance), api.position(), api.health(), api.food(), api.log(msg), api.chat(msg)
 - api.sleep(ms)
 규칙: 코드의 변수명/문법은 영어만. 한글은 따옴표 문자열이나 주석 안에서만 쓴다. 위 목록에 없는 api.* 는 존재하지 않는다. require/import/process/eval/Function/constructor 사용 금지. 반드시 \`return\` 으로 결과(인벤토리 등)를 돌려줄 것. 무한루프 금지, 반복문에는 await 포함. 아이템/블록 이름은 마인크래프트 영문 ID(snake_case).
