@@ -24,7 +24,14 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   const goto = async (x, y, z, range = 1) => {
     check();
-    await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
+    try {
+      await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
+    } catch (e) {
+      // A leftover stop/goal change from earlier code can cancel a fresh move once; retry one time.
+      if (ctx.aborted || !['PathStopped', 'GoalChanged'].includes(e?.name)) throw e;
+      check();
+      await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
+    }
     check();
   };
 

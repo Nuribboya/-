@@ -320,3 +320,35 @@ test('skills.closest maps made-up names to existing skills', () => {
   assert.equal(s.closest('eat_some_food'), 'eat_food');
   assert.equal(s.closest('build_nether_portal'), null);
 });
+
+test('goto retries once when a stale stop cancels the first move', async () => {
+  const { createApi } = await import('../src/actions.js');
+  let calls = 0;
+  const bot = {
+    registry: {},
+    entity: { position: { floored: () => ({}) } },
+    pathfinder: {
+      goto: async () => {
+        calls++;
+        if (calls === 1) {
+          const e = new Error('Path was stopped');
+          e.name = 'PathStopped';
+          throw e;
+        }
+      },
+    },
+  };
+  const api = createApi(bot, { aborted: false });
+  await api.goTo(1, 2, 3);
+  assert.equal(calls, 2);
+  // a real failure (NoPath) is not retried
+  calls = 0;
+  bot.pathfinder.goto = async () => {
+    calls++;
+    const e = new Error('No path');
+    e.name = 'NoPath';
+    throw e;
+  };
+  await assert.rejects(api.goTo(1, 2, 3), /No path/);
+  assert.equal(calls, 1);
+});

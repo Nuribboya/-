@@ -242,7 +242,10 @@ export class Agent {
       return await runSkill(code, api, args, ctx, timeoutMs);
     } finally {
       ctx.aborted = true;
-      this.bot.pathfinder.stop();
+      // NOT pathfinder.stop(): that only sets a flag, and if the bot is already standing
+      // still the flag stays set and cancels the NEXT skill's first move ("Path was stopped").
+      // setGoal(null) clears the path right away (and also clears a stale stop flag).
+      this.bot.pathfinder.setGoal(null);
       this.bot.clearControlStates();
     }
   }
