@@ -260,3 +260,54 @@ test('events: long lines cut on console, repeats collapsed, full text in bot.log
   assert.ok(file.includes('x'.repeat(100)));
   assert.equal(file.split('same').length - 1, 3);
 });
+
+test('new body tools: nearbyMobs, placeAt, digAt, equip, block', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { Vec3 } = await import('vec3');
+  const placed = [];
+  const dug = [];
+  const equipped = [];
+  let shieldUp = 0;
+  const blocks = new Map(); // "x,y,z" -> block; default air above y=63, stone at/below
+  const blockAt = (p) => blocks.get(`${p.x},${p.y},${p.z}`) ?? (p.y <= 63 ? { name: 'stone', boundingBox: 'block', position: p, diggable: true } : { name: 'air', boundingBox: 'empty', position: p });
+  const me = { position: new Vec3(0.5, 64, 0.5) };
+  const zombie = { name: 'zombie', type: 'mob', position: new Vec3(5, 64, 0) };
+  const cow = { name: 'cow', type: 'mob', position: new Vec3(2, 64, 0) };
+  const bot = {
+    registry: { items: {} },
+    entity: me,
+    entities: { 1: me, 2: zombie, 3: cow },
+    blockAt,
+    inventory: { items: () => [{ name: 'dirt', type: 1 }, { name: 'shield', type: 2 }], slots: {} },
+    equip: async (item, dest) => {
+      equipped.push([item.name, dest]);
+      if (dest === 'off-hand') bot.inventory.slots[45] = item;
+    },
+    placeBlock: async (ref, face) => placed.push([ref.position.toString(), face.toString()]),
+    dig: async (b) => dug.push(b.name),
+    activateItem: () => shieldUp++,
+    deactivateItem: () => shieldUp--,
+    pathfinder: { goto: async () => {} },
+  };
+  const api = createApi(bot, { aborted: false });
+
+  const mobs = api.nearbyMobs();
+  assert.deepEqual(mobs.map((m) => m.name), ['cow', 'zombie']);
+  assert.equal(mobs[1].hostile, true);
+  assert.equal(mobs[1].x, 5);
+
+  await api.placeAt(1, 64, 0, 'dirt'); // ground below is stone -> attach on top face
+  assert.deepEqual(placed[0], [new Vec3(1, 63, 0).toString(), new Vec3(0, 1, 0).toString()]);
+  await assert.rejects(api.placeAt(0, 64, 0, 'dirt'), /inside yourself/);
+  await assert.rejects(api.placeAt(1, 64, 0, 'diamond_block'), /no diamond_block/);
+
+  assert.equal(await api.digAt(0, 63, 0), 'stone');
+  await assert.rejects(api.digAt(0, 70, 0), /nothing to dig/);
+
+  await assert.rejects(api.block(10), /no shield in off-hand/);
+  await api.equip('shield', 'off-hand');
+  assert.deepEqual(equipped.at(-1), ['shield', 'off-hand']);
+  await api.block(10);
+  assert.equal(shieldUp, 0); // raised and lowered again
+  await assert.rejects(api.equip('dirt', 'hat'), /unknown slot/);
+});

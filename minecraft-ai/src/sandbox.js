@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const BANNED =
   /\b(process|require|import|eval|Function|constructor|globalThis|global|child_process|fs|__proto__|prototype|Reflect|Proxy)\b/;
 
-const ASYNC_API = 'gather|craft|place|smelt|goTo|explore|attack|eat|sleep|useSkill';
+const ASYNC_API = 'gather|craft|place|smelt|goTo|explore|attack|eat|sleep|useSkill|placeAt|digAt|equip|block';
 const FLOATING = new RegExp(`^\\s*api\\.(${ASYNC_API})\\(`, 'm');
 
 const stripLiterals = (code) =>

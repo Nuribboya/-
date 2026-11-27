@@ -1,10 +1,14 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
-import { inventoryOf } from './observe.js';
+import { inventoryOf, HOSTILE } from './observe.js';
 
 const { goals } = pf;
 const TIER = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const NEIGHBORS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+const EQUIP_SLOTS = { hand: 'hand', 'off-hand': 'off-hand', offhand: 'off-hand', head: 'head', torso: 'torso', chest: 'torso', legs: 'legs', feet: 'feet' };
+const OFF_HAND_SLOT = 45;
+const isOpen = (b) => !b || b.boundingBox === 'empty'; // air, grass, water, flowers...
 
 /**
  * The only surface generated skill code can touch. Every method checks ctx.aborted
@@ -180,6 +184,87 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       return false;
     },
 
+    /** Nearby living entities with coordinates, nearest first: [{name, x, y, z, dist, hostile}] */
+    nearbyMobs(maxDistance = 16) {
+      const me = bot.entity.position;
+      return Object.values(bot.entities)
+        .filter((e) => e !== bot.entity && e.name && e.type !== 'object' && e.type !== 'orb' && e.position.distanceTo(me) <= maxDistance)
+        .map((e) => ({
+          name: e.name,
+          x: Math.floor(e.position.x),
+          y: Math.floor(e.position.y),
+          z: Math.floor(e.position.z),
+          dist: Math.round(e.position.distanceTo(me)),
+          hostile: HOSTILE.has(e.name),
+        }))
+        .sort((a, b) => a.dist - b.dist);
+    },
+
+    /** Place a block from inventory at exact coordinates (needs a solid neighbor to attach to). */
+    async placeAt(x, y, z, name) {
+      check();
+      const item = bot.inventory.items().find((i) => i.name === name);
+      if (!item) throw new Error(`no ${name} in inventory`);
+      const target = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
+      if (!isOpen(bot.blockAt(target))) throw new Error(`(${target.x},${target.y},${target.z}) is not empty (${bot.blockAt(target).name})`);
+      const feet = bot.entity.position.floored();
+      if (target.x === feet.x && target.z === feet.z && (target.y === feet.y || target.y === feet.y + 1))
+        throw new Error('cannot place a block inside yourself - pick a spot next to you or above your head (y+2)');
+      let ref = null;
+      let face = null;
+      for (const [dx, dy, dz] of NEIGHBORS) {
+        const b = bot.blockAt(target.offset(dx, dy, dz));
+        if (b && b.boundingBox === 'block') {
+          ref = b;
+          face = new Vec3(-dx, -dy, -dz);
+          break;
+        }
+      }
+      if (!ref) throw new Error(`nothing solid next to (${target.x},${target.y},${target.z}) to attach the block to`);
+      if (bot.entity.position.distanceTo(target) > 4) await goto(target.x, target.y, target.z, 3);
+      await bot.equip(item, 'hand');
+      check();
+      await bot.placeBlock(ref, face);
+      return target;
+    },
+
+    /** Mine the block at exact coordinates (e.g. dig down to hide: api.digAt(x, y-1, z)). */
+    async digAt(x, y, z) {
+      check();
+      const block = bot.blockAt(new Vec3(Math.floor(x), Math.floor(y), Math.floor(z)));
+      if (!block || isOpen(block)) throw new Error(`nothing to dig at (${x},${y},${z})`);
+      if (block.diggable === false) throw new Error(`${block.name} cannot be dug`);
+      if (bot.entity.position.distanceTo(block.position) > 4) await goto(block.position.x, block.position.y, block.position.z, 3);
+      await equipFor(block);
+      check();
+      await bot.dig(block);
+      return block.name;
+    },
+
+    /** Equip an item. slot: hand | off-hand | head | torso | legs | feet  (armor, shield, sword...) */
+    async equip(name, slot = 'hand') {
+      check();
+      const dest = EQUIP_SLOTS[slot];
+      if (!dest) throw new Error(`unknown slot "${slot}" - use one of: hand, off-hand, head, torso, legs, feet`);
+      const item = bot.inventory.items().find((i) => i.name === name);
+      if (!item) throw new Error(`no ${name} in inventory`);
+      await bot.equip(item, dest);
+      return dest;
+    },
+
+    /** Raise the shield held in the off-hand for ms (max 5s). Equip it first: api.equip('shield', 'off-hand') */
+    async block(ms = 1500) {
+      check();
+      if (bot.inventory.slots[OFF_HAND_SLOT]?.name !== 'shield') throw new Error("no shield in off-hand - first: await api.equip('shield', 'off-hand')");
+      bot.activateItem(true);
+      try {
+        await sleep(Math.min(ms, 5000));
+      } finally {
+        bot.deactivateItem();
+      }
+      return true;
+    },
+
     /** Wander to find new terrain: walk ~distance blocks in a random direction. */
     async explore(distance = 30) {
       const a = Math.random() * Math.PI * 2;
@@ -190,7 +275,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
   // Body actions run one at a time: Promise.all([gather a, gather b]) would make two
   // pathfinder goals cancel each other ("Path was stopped"). useSkill is not queued
   // (it calls these itself, queuing it would deadlock).
-  const SERIAL = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat']);
+  const SERIAL = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat', 'placeAt', 'digAt', 'equip', 'block']);
   let queue = Promise.resolve();
   for (const k of SERIAL) {
     const fn = api[k];

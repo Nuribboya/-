@@ -74,7 +74,7 @@ cd minecraft-ai && npm install && npm run start:free
 ```
 src/index.js      접속·재접속
 src/agent.js      관찰→판단→실행 루프, 스킬 작성/수정
-src/actions.js    스킬 코드가 쓰는 api (gather/craft/smelt/attack/...)
+src/actions.js    스킬 코드가 쓰는 api (gather/craft/smelt/attack/placeAt/digAt/equip/block/nearbyMobs/...)
 src/sandbox.js    생성 코드 실행(금지어 검사 + 타임아웃)
 src/skills.js     스킬 라이브러리 (data/skills)
 src/curriculum.js 단계별 목표

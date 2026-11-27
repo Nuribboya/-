@@ -6,10 +6,15 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.smelt(inputName, count=1, fuel='coal'): 근처 화로에서 굽기 (예: 'raw_iron')
 - api.goTo(x,y,z,range=1) / api.explore(distance=30)
 - api.attack(entityName='zombie'): 가장 가까운 해당 몹과 전투
+- api.placeAt(x,y,z, blockName): 정확한 좌표에 블록 설치 (옆에 단단한 블록이 있어야 함, 내 몸 위치(발/머리)에는 불가)
+- api.digAt(x,y,z): 정확한 좌표의 블록 캐기 (예: 발밑 파고 숨기 = api.digAt(p.x, p.y-1, p.z))
+- api.equip(itemName, slot='hand'): 장착. slot = hand | off-hand | head | torso | legs | feet (갑옷, 방패, 칼)
+- api.block(ms=1500): 왼손(off-hand) 방패 들기, 최대 5초. 먼저 await api.equip('shield','off-hand')
 - api.eat()
 - 저장된 스킬 호출: await api.스킬이름({인자}) 예) await api.collect_logs({count: 3}). 또는 await api.useSkill('collect_logs', {count: 3}). '보유 스킬' 목록에 있는 이름만 가능. 작은 스킬을 조합해 큰 스킬을 만들 때 쓴다.
-- 동기 함수: api.inventory() -> {itemName: count}, api.has(name,n), api.countBlocks(name,maxDistance), api.position(), api.health(), api.food(), api.log(msg), api.chat(msg)
+- 동기 함수: api.nearbyMobs(maxDistance=16) -> [{name,x,y,z,dist,hostile}] (가까운 순), api.inventory() -> {itemName: count}, api.has(name,n), api.countBlocks(name,maxDistance), api.position(), api.health(), api.food(), api.log(msg), api.chat(msg)
 - api.sleep(ms)
+활용 예: 도망 = 가장 가까운 적대몹 좌표의 반대 방향으로 api.goTo. 은신처 = 내 주변 4방향과 머리 위(y+2)에 api.placeAt으로 블록(dirt, cobblestone 등). 갑옷이 있으면 api.equip으로 입기.
 규칙: 코드의 변수명/문법은 영어만. 한글은 따옴표 문자열이나 주석 안에서만 쓴다. 위 목록에 없는 api.* 는 존재하지 않는다. require/import/process/eval/Function/constructor 사용 금지. 반드시 \`return\` 으로 결과(인벤토리 등)를 돌려줄 것. 무한루프 금지, 반복문에는 await 포함. 아이템/블록 이름은 마인크래프트 영문 ID(snake_case).
 `.trim();
 
