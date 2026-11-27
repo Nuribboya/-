@@ -5,7 +5,7 @@ const fastProvider = env.FAST_PROVIDER ?? 'anthropic';
 const smartProvider = env.SMART_PROVIDER ?? 'anthropic';
 
 export const config = {
-  host: env.MC_HOST ?? 'localhost',
+  host: env.MC_HOST ?? '127.0.0.1',
   port: Number(env.MC_PORT ?? 25565),
   username: env.MC_USER ?? 'ClaudeBot',
   version: env.MC_VERSION || undefined,

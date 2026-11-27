@@ -44,7 +44,12 @@ function connect() {
   });
 
   bot.on('kicked', (r) => events.log(`추방됨: ${typeof r === 'string' ? r : JSON.stringify(r)}`));
-  bot.on('error', (e) => events.log(`연결 오류: ${e.message}`));
+  bot.on('error', (e) => {
+    const parts = [e.message, e.code, ...(e.errors ?? []).map((x) => `${x.address}:${x.port} ${x.code}`)].filter(Boolean);
+    events.log(`연결 오류: ${parts.join(' | ') || String(e)}`);
+    if (parts.some((p) => /ECONNREFUSED/.test(p)))
+      events.log('→ 해당 포트에 열린 서버가 없음: 게임에서 LAN이 켜져 있는지, 채팅창의 포트 번호가 MC_PORT와 같은지 확인');
+  });
   bot.on('end', () => {
     agent?.stop();
     events.log('연결 끊김. 10초 후 재접속...');
