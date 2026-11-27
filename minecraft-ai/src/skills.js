@@ -42,8 +42,9 @@ export class Skills {
     } catch {
       this.index = {};
     }
+    // Builtins are always present and always the original code (repairs an older overwrite).
     for (const [name, s] of Object.entries(SEEDS)) {
-      if (!this.index[name]) this.#write(name, s.description, s.args, s.code, true);
+      if (!this.index[name]?.builtin) this.#write(name, s.description, s.args, s.code, true);
     }
   }
 
@@ -66,8 +67,14 @@ export class Skills {
     return fs.readFileSync(path.join(this.dir, `${name}.js`), 'utf8');
   }
 
+  static isBuiltin(name) {
+    return Object.hasOwn(SEEDS, name);
+  }
+
   save(name, description, args, code) {
     if (!NAME_RE.test(name)) throw new Error(`bad skill name: ${name}`);
+    if (Skills.isBuiltin(name))
+      throw new Error(`"${name}" is a builtin skill and cannot be overwritten - give the new skill a different name (it can call it via api.useSkill)`);
     this.#write(name, description, args, code);
   }
 

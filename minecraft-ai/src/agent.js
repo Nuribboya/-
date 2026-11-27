@@ -166,7 +166,7 @@ export class Agent {
     this.events.update({ lastAction: this.lastAction });
   }
 
-  async #exec(code, args) {
+  async #exec(code, args, timeoutMs = this.config.skillTimeoutMs) {
     const ctx = { aborted: false };
     let depth = 0;
     const hooks = {
@@ -183,7 +183,7 @@ export class Agent {
     };
     const api = createApi(this.bot, ctx, (m) => this.events.log(`  · ${m}`), hooks);
     try {
-      return await runSkill(code, api, args, ctx, this.config.skillTimeoutMs);
+      return await runSkill(code, api, args, ctx, timeoutMs);
     } finally {
       ctx.aborted = true;
       this.bot.pathfinder.stop();
@@ -290,7 +290,9 @@ export class Agent {
         if (!Skills.validName(parsed.name)) throw new Error(`잘못된 스킬 이름: ${parsed.name}`);
         this.events.log(`🛠️ 스킬 작성 시도 ${i}/${maxAttempts}: ${parsed.name}`);
         const before = snapshotState(this.bot);
-        const out = await this.#exec(parsed.code, parsed.args);
+        if (Skills.isBuiltin(parsed.name))
+          throw new Error(`"${parsed.name}" is a builtin skill and cannot be overwritten - use a different NAME`);
+        const out = await this.#exec(parsed.code, parsed.args, this.config.writeTestTimeoutMs);
         const d = diffState(before, snapshotState(this.bot));
         if (!d.effect)
           throw new Error('code finished without errors but NOTHING changed (inventory, position, food, nearby mobs). It must actually do the task - check that every api call is awaited and targets the right block/item.');

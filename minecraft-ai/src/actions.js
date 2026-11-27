@@ -187,6 +187,20 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await goto(p.x + Math.cos(a) * distance, p.y, p.z + Math.sin(a) * distance, 3);
     },
   };
+  // Body actions run one at a time: Promise.all([gather a, gather b]) would make two
+  // pathfinder goals cancel each other ("Path was stopped"). useSkill is not queued
+  // (it calls these itself, queuing it would deadlock).
+  const SERIAL = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat']);
+  let queue = Promise.resolve();
+  for (const k of SERIAL) {
+    const fn = api[k];
+    api[k] = (...a) => {
+      const run = queue.then(() => fn(...a));
+      queue = run.catch(() => {});
+      return run;
+    };
+  }
+
   // Safety net: a model-written call that is not awaited must never become an
   // unhandled rejection (that would crash the whole process).
   for (const [k, fn] of Object.entries(api)) {

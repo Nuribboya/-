@@ -26,6 +26,7 @@ export const config = {
   decisionIntervalMs: Number(env.DECISION_INTERVAL_MS ?? 2000),
   reflectEvery: Number(env.REFLECT_EVERY ?? 25), // decision steps between self-improvement passes
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),
+  writeTestTimeoutMs: Number(env.WRITE_TEST_TIMEOUT_MS ?? 60000), // first trial run of new code
   overlayPort: Number(env.OVERLAY_PORT ?? 3000),
   dataDir: env.DATA_DIR ?? 'data',
   brainsDir: env.BRAINS_DIR ?? 'brains', // snapshots of dataDir

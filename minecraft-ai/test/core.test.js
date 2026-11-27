@@ -194,3 +194,38 @@ test('skills.consolidate archives useless/failing skills, never builtins', () =>
   s.record('meh', false);
   assert.deepEqual(s.consolidate(1), ['meh']);
 });
+
+test('builtin skills cannot be overwritten and are repaired on load', () => {
+  const dir = tmp();
+  const s = new Skills(dir);
+  assert.throws(() => s.save('collect_logs', 'bad', {}, 'return 0;'), /builtin/);
+  // simulate an older version that overwrote a builtin
+  const idx = JSON.parse(fs.readFileSync(path.join(dir, 'skills', 'index.json'), 'utf8'));
+  idx.collect_logs.builtin = false;
+  fs.writeFileSync(path.join(dir, 'skills', 'index.json'), JSON.stringify(idx));
+  fs.writeFileSync(path.join(dir, 'skills', 'collect_logs.js'), 'return 0;');
+  const s2 = new Skills(dir);
+  assert.ok(s2.index.collect_logs.builtin);
+  assert.match(s2.code('collect_logs'), /api\.gather\('log'/);
+});
+
+test('primitive actions run one at a time even if called in parallel', async () => {
+  const { createApi } = await import('../src/actions.js');
+  let active = 0;
+  let maxActive = 0;
+  const bot = {
+    registry: {},
+    entity: { position: { floored: () => ({}) } },
+    pathfinder: {
+      goto: async () => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 10));
+        active--;
+      },
+    },
+  };
+  const api = createApi(bot, { aborted: false });
+  await Promise.all([api.goTo(1, 2, 3), api.goTo(4, 5, 6), api.goTo(7, 8, 9)]);
+  assert.equal(maxActive, 1);
+});
