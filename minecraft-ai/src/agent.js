@@ -20,6 +20,8 @@ export class Agent {
     this.journal = journal ?? new Journal(config.dataDir);
     this.lastSelfMsg = { text: '', at: 0 };
     this.steps = 0;
+    this.writeFailStreak = 0;
+    this.writeCooldown = 0;
     this.reflections = 0;
     this.brains = new Brains(config.dataDir, config.brainsDir);
     this.lastSnapshotAt = Date.now();
@@ -143,6 +145,9 @@ export class Agent {
       `직전 행동: ${this.lastAction || '없음'}`,
       `직전 결과: ${short(this.lastResult)}`,
       `보유 스킬:\n${this.skills.describe()}`,
+      this.writeCooldown > 0
+        ? `⛔ 스킬 작성이 연속 실패해서 앞으로 ${this.writeCooldown}턴 동안 write_skill 금지. 반드시 보유 스킬 중 하나를 "skill"로 실행할 것 (예: collect_logs, craft_item, place_block, explore_area).`
+        : '',
       `최근 일지:\n${this.journal.recentText(8) || '- 없음'}`,
       this.journal.deathSummary() ? `누적: ${this.journal.deathSummary()}` : '',
       `교훈:\n${lessons.length ? lessons.map((l) => '- ' + l).join('\n') : '- 아직 없음'}`,
@@ -153,9 +158,22 @@ export class Agent {
     this.events.update({ thought: d.thought ?? '', goal: goal.text });
     this.events.log(`🧠 ${d.thought ?? ''}`);
 
-    if (d.write_skill) {
+    if (this.writeCooldown > 0) this.writeCooldown--;
+    if (d.write_skill && this.writeCooldown > 0) {
+      // Model ignored the ban: don't burn another 3 attempts, nudge it back to existing skills.
+      this.lastAction = 'write_skill (금지 중이라 무시됨)';
+      this.lastResult = `write_skill은 ${this.writeCooldown}턴 더 금지. 보유 스킬을 "skill"로 실행할 것`;
+      this.events.log('⛔ 스킬 작성 금지 중 - 기존 스킬을 쓰도록 유도');
+    } else if (d.write_skill) {
       this.lastAction = `write_skill: ${short(d.write_skill, 80)}`;
       this.lastResult = await this.writeSkill(d.write_skill, obs, goal);
+      if (this.lastResult.startsWith('새 스킬')) {
+        this.writeFailStreak = 0;
+      } else if (++this.writeFailStreak >= 2) {
+        this.writeCooldown = this.config.writeCooldownSteps;
+        this.writeFailStreak = 0;
+        this.events.log(`⛔ 스킬 작성 연속 실패 → ${this.writeCooldown}턴 동안 기존 스킬만 사용`);
+      }
     } else if (d.skill) {
       this.lastAction = `${d.skill}(${short(d.args ?? {}, 80)})`;
       this.lastResult = await this.useSkill(d.skill, d.args ?? {});

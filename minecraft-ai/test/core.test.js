@@ -236,3 +236,27 @@ test('saved skill names pass the API check and must be awaited', () => {
   assert.throws(() => checkCode('api.collect_logs({count: 3});', names), /missing await/);
   assert.throws(() => checkCode('await api.made_up_skill();', names), /does not exist/);
 });
+
+test('events: long lines cut on console, repeats collapsed, full text in bot.log', async () => {
+  const { Events } = await import('../src/events.js');
+  const dir = tmp();
+  const ev = new Events({ dataDir: dir, maxChars: 30, clearEvery: 0 });
+  const out = [];
+  const orig = console.log;
+  console.log = (x) => out.push(x);
+  try {
+    ev.log('x'.repeat(100));
+    ev.log('same');
+    ev.log('same');
+    ev.log('same');
+    ev.log('next');
+  } finally {
+    console.log = orig;
+  }
+  assert.ok(out[0].endsWith('…') && out[0].length <= 31);
+  assert.equal(out.filter((l) => l.includes('same')).length, 1);
+  assert.ok(out.some((l) => l.includes('2번 더 반복')));
+  const file = fs.readFileSync(path.join(dir, 'bot.log'), 'utf8');
+  assert.ok(file.includes('x'.repeat(100)));
+  assert.equal(file.split('same').length - 1, 3);
+});

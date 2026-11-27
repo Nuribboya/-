@@ -29,6 +29,9 @@ export const config = {
   writeTestTimeoutMs: Number(env.WRITE_TEST_TIMEOUT_MS ?? 60000), // first trial run of new code
   overlayPort: Number(env.OVERLAY_PORT ?? 3000),
   dataDir: env.DATA_DIR ?? 'data',
+  logMaxChars: Number(env.LOG_MAX_CHARS ?? 200), // console line length (full text in data/bot.log)
+  clearEvery: Number(env.CLEAR_EVERY ?? 300), // clear console after this many lines (0 = never)
+  writeCooldownSteps: Number(env.WRITE_COOLDOWN_STEPS ?? 6), // block write_skill after repeated write failures
   brainsDir: env.BRAINS_DIR ?? 'brains', // snapshots of dataDir
   snapshotEveryMin: Number(env.SNAPSHOT_EVERY_MIN ?? 60),
   consolidateEvery: Number(env.CONSOLIDATE_EVERY ?? 4), // every N reflection passes

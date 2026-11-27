@@ -11,7 +11,7 @@ import { startOverlay } from './overlay.js';
 
 const { pathfinder, Movements } = pf;
 
-const events = new Events();
+const events = new Events({ dataDir: config.dataDir, maxChars: config.logMaxChars, clearEvery: config.clearEvery });
 
 // Never let a stray rejection from model-written code kill the bot.
 process.on('unhandledRejection', (e) => events.log(`⚠️ 처리 안 된 오류 무시: ${e?.message ?? e}`));
