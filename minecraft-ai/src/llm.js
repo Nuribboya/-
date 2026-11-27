@@ -37,7 +37,7 @@ export class LLM {
   async ask(tier, system, messages, { maxTokens = 1500 } = {}) {
     const { provider, model } = this.config[tier];
     const msgs = typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages;
-    if (provider === 'ollama') return this.#ollama(model, system, msgs);
+    if (provider === 'ollama') return this.#ollama(model, system, msgs, tier === 'fast');
     if (provider === 'anthropic') return this.#anthropicCall(tier, model, system, msgs, maxTokens);
     throw new Error(`unknown provider: ${provider}`);
   }
@@ -84,13 +84,15 @@ export class LLM {
     this.spentUsd += cost;
   }
 
-  async #ollama(model, system, messages) {
+  async #ollama(model, system, messages, json) {
     const res = await fetch(`${this.config.ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
         stream: false,
+        ...(json ? { format: 'json' } : {}),
+        options: { num_ctx: this.config.ollamaCtx, temperature: 0.4 },
         messages: [{ role: 'system', content: system }, ...messages],
       }),
     });

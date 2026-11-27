@@ -19,6 +19,7 @@ export const config = {
     provider: smartProvider,
     model: env.SMART_MODEL ?? (ollama(smartProvider) ? 'qwen2.5-coder:14b' : 'claude-sonnet-5-5'),
   },
+  ollamaCtx: Number(env.OLLAMA_CTX ?? 8192), // Ollama's default 2048 would cut off the prompt
   ollamaUrl: env.OLLAMA_URL ?? 'http://localhost:11434',
 
   dailyBudgetUsd: Number(env.DAILY_BUDGET_USD ?? 15),

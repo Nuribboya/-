@@ -22,7 +22,17 @@ npm start
 - 마인크래프트에서 싱글플레이 월드를 열고 "LAN으로 열기" 후 표시되는 포트를 `MC_PORT`에 넣거나, 전용 서버(`online-mode=false` 권장)를 사용하세요.
 - 방송: OBS → 소스 추가 → 브라우저 → `http://localhost:3000` (배경 투명).
 
-## 비용 / 무료 모드
+## 무료 모드 (API 키 없이)
+```bash
+# 1) Ollama 설치: https://ollama.com  → 터미널에서 모델 받기
+ollama pull qwen2.5:7b
+ollama pull qwen2.5-coder:7b
+# 2) 실행 (Node 20.6+)
+cd minecraft-ai && npm install && npm run start:free
+```
+설정은 `.env.free`에 있습니다. GPU(VRAM 8GB 이상)가 있으면 쾌적하고, CPU만 쓰면 판단이 느립니다. 모델이 작아서 코드 작성 실패가 잦을 수 있으니, 성능이 부족하면 `SMART_MODEL=qwen2.5-coder:14b`처럼 키우거나 smart만 Claude로 바꾸세요.
+
+## 비용 / 유료 모드
 - 기본: fast=`claude-haiku-5-5`, smart=`claude-sonnet-5-5`. 24시간 기준 대략 하루 $12~15 (추정).
 - `DAILY_BUDGET_USD`를 넘으면 봇이 자동으로 쉽니다 (다음 날 초기화).
 - 무료: `FAST_PROVIDER=ollama` (+ 필요하면 `SMART_PROVIDER=ollama`). 로컬 모델은 코드 작성 품질이 낮을 수 있어, fast만 로컬로 두는 하이브리드를 추천합니다.

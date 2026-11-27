@@ -58,3 +58,24 @@ test('parseWriterReply extracts fields', () => {
   assert.deepEqual(r.args, { count: 4 });
   assert.equal(r.code, 'return 1;');
 });
+
+test('ollama adapter sends ctx/json format and reads reply', async () => {
+  const { LLM } = await import('../src/llm.js');
+  let body;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ message: { content: '{"wait":true}' } }) };
+  };
+  try {
+    const llm = new LLM({ fast: { provider: 'ollama', model: 'm' }, smart: { provider: 'ollama', model: 'm' }, ollamaUrl: 'http://x', ollamaCtx: 8192, dailyBudgetUsd: 1 });
+    assert.equal(await llm.ask('fast', 'sys', 'hi'), '{"wait":true}');
+    assert.equal(body.format, 'json');
+    assert.equal(body.options.num_ctx, 8192);
+    assert.equal(body.messages[0].role, 'system');
+    await llm.ask('smart', 'sys', 'hi');
+    assert.equal(body.format, undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
