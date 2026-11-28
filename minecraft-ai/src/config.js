@@ -37,6 +37,7 @@ export const config = {
   brainsDir: env.BRAINS_DIR ?? 'brains', // snapshots of dataDir
   snapshotEveryMin: Number(env.SNAPSHOT_EVERY_MIN ?? 60),
   consolidateEvery: Number(env.CONSOLIDATE_EVERY ?? 4), // every N reflection passes
+  advancementGoals: env.ADVANCEMENT_GOALS !== 'false', // after the iron pickaxe, go for advancements first
   freeGoalMaxSteps: Number(env.FREE_GOAL_MAX_STEPS ?? 80), // give up a self-chosen goal after this many turns
   maxSkills: Number(env.MAX_SKILLS ?? 25), // learned skills kept active (builtins not counted)
 };

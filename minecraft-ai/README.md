@@ -47,6 +47,13 @@ npm run report   # 죽음/마일스톤/새 스킬 요약 출력
 - 기본 스킬 추가: `mine_block {block, count}`, `smelt_item {item, count, fuel}`.
 - 굽기 레시피와 광석 위치처럼 데이터에 없는 것은 `src/knowledge.js`에 직접 적어두었습니다.
 
+## 발전 과제 따라가기
+철 곡괭이 다음부터는 **아직 못 한 발전 과제**를 순서대로 목표로 삼습니다(모델 호출 없이 바로 결정). 서버가 접속 때 보내는 발전 과제 진행 데이터로 이미 달성한 것까지 알고, 채팅의 "has made the advancement" 줄은 예비로 씁니다.
+- 현재 도구로 가능한 것: Suit Up(철 투구 착용) → Husbandry(먹기) → Monster Hunter(적대 몹 처치) → Not Today, Thank You(방패로 화살 막기) → Sweet Dreams(침대에서 자기) → Diamonds! → Cover Me with Diamonds(다이아 투구 착용)
+- 아이템을 만든 뒤 할 일(입기, 먹기, 자기)도 자동 계획에 나옵니다 (`equip_item` 기본 스킬 추가).
+- 다 하면 예전처럼 스스로 목표를 고릅니다. 끄려면 `ADVANCEMENT_GOALS=false`.
+- 오버레이와 `npm run report`에 달성한 발전 과제가 표시됩니다.
+
 ## 속도
 - **`follow_plan {steps}`**: 자동 계획의 다음 단계들을 모델에게 다시 묻지 않고 한 번에 연달아 실행합니다(최대 8단계). 계획이 끝나거나, 단계가 실패하거나, 아무것도 안 바뀌면 멈춥니다. 시간 제한은 일반 스킬의 4배.
 - **Ollama**: 모델을 메모리에 계속 올려두고(`OLLAMA_KEEP_ALIVE`, 기본 60m), 답변 길이를 용도별로 제한합니다(판단 450, 목표 250, 반성 600, 코드 1500 토큰).

@@ -8,6 +8,7 @@ import { Skills } from './skills.js';
 import { Journal } from './journal.js';
 import { Brains } from './brain.js';
 import { Goals } from './goals.js';
+import { Advancements } from './advancements.js';
 import { knowledgeText } from './knowledge.js';
 import { wikiFor } from './wiki.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
@@ -31,7 +32,8 @@ export class Agent {
     Object.assign(this, { bot, llm, skills, memory, events, config });
     this.journal = journal ?? new Journal(config.dataDir);
     this.brains = new Brains(config.dataDir, config.brainsDir);
-    this.goals = new Goals({ bot, llm, memory, journal: this.journal, events, config, snapshot: (label) => this.#snapshot(label) });
+    this.advancements = new Advancements(memory.data.advancementsFromChat ?? []);
+    this.goals = new Goals({ bot, llm, memory, journal: this.journal, events, config, snapshot: (label) => this.#snapshot(label), advancements: this.advancements });
     this.lastSelfMsg = { text: '', at: 0 };
     this.steps = 0;
     this.writeFailStreak = 0;
@@ -52,7 +54,25 @@ export class Agent {
     const bot = this.bot;
     // Death message from the server ("<name> was slain by Zombie") tells us the cause.
     bot.on('messagestr', (msg) => {
+      if (this.advancements.onChat(msg, bot.username)) return;
       if (msg.startsWith(bot.username)) this.lastSelfMsg = { text: msg, at: Date.now() };
+    });
+
+    // Advancement progress: the server sends all of it on join, then updates.
+    bot._client?.on?.('advancements', (packet) => {
+      try {
+        this.advancements.onPacket(packet);
+        this.events.update({ advancements: this.advancements.doneIds().length });
+      } catch (e) {
+        this.events.log(`⚠️ 발전 과제 데이터 읽기 실패: ${e.message}`);
+      }
+    });
+    this.advancements.onDone((id, title) => {
+      this.journal.add('advancement', { id, title });
+      this.events.log(`🏆 발전 과제 달성: ${title}`);
+      this.memory.data.advancementsFromChat = [...this.advancements.fromChat];
+      this.memory.save();
+      this.events.update({ advancements: this.advancements.doneIds().length });
     });
 
     // Damage log: big hits only, with the nearest mob as the likely source.

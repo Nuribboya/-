@@ -66,6 +66,7 @@ export class Journal {
         case 'skill_fail': return `${time} ❌ ${e.name}: ${e.error}`;
         case 'new_skill': return `${time} 🎓 ${e.name}`;
         case 'milestone': return `${time} 🏁 ${e.id}`;
+        case 'advancement': return `${time} 🏆 발전 과제: ${e.title}`;
         case 'self_goal': return `${time} 🎯 새 목표: ${e.goal}`;
         case 'self_goal_done': return `${time} 🏁 목표 달성: ${e.goal}`;
         case 'self_goal_dropped': return `${time} 🏳️ 목표 포기: ${e.goal}`;
@@ -85,6 +86,8 @@ export class Journal {
     lines.push('\n[죽음]');
     for (const e of this.of('death'))
       lines.push(`  ${e.t.slice(0, 16).replace('T', ' ')}  ${e.cause ?? '원인불명'} @ ${e.where} (${e.night ? '밤' : '낮'}) 직전행동: ${e.lastAction}`);
+    lines.push('\n[발전 과제]');
+    for (const e of this.of('advancement')) lines.push(`  ${e.t.slice(0, 16).replace('T', ' ')}  ${e.title}`);
     lines.push('\n[새로 배운 스킬]');
     for (const e of this.of('new_skill')) lines.push(`  ${e.t.slice(0, 16).replace('T', ' ')}  ${e.name}`);
     return lines.join('\n');

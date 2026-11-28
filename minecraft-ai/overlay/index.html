@@ -22,6 +22,7 @@
   <div class="stats">
     <span>💀 사망 <b id="deaths">0</b></span>
     <span>🎓 스킬 <b id="skills">0</b></span>
+    <span>🏆 발전 과제 <b id="adv">0</b></span>
     <span>⏱ <b id="uptime">0m</b></span>
     <span>💵 $<b id="cost">0.00</b></span>
   </div>
@@ -39,6 +40,7 @@
     $('thought').textContent = s.thought;
     $('deaths').textContent = s.deaths;
     $('skills').textContent = s.skills;
+    $('adv').textContent = s.advancements ?? 0;
     $('cost').textContent = s.spentUsd.toFixed(2);
     $('log').innerHTML = s.log.slice(-5).map((l) => '<div>' + l.replace(/</g, '&lt;') + '</div>').join('');
     if (s.newSkill && s.newSkill !== lastSkill) {

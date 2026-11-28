@@ -1066,3 +1066,96 @@ test('plan text offers follow_plan; nextAction gives the first step', async () =
   assert.equal(goals.nextAction({ id: 'free', target: null }, {}), null);
   assert.equal(goals.planText({ id: 'logs', target: { item: 'log', count: 4 } }, { oak_log: 5 }), '');
 });
+
+test('advancements: join packet gives past progress, later updates and chat lines announce new ones', async () => {
+  const { Advancements, ADVANCEMENT_GOALS } = await import('../src/advancements.js');
+  const a = new Advancements();
+  const announced = [];
+  a.onDone((id, title) => announced.push(title));
+  const req = (...groups) => ({ requirements: groups });
+  a.onPacket({
+    reset: true,
+    advancementMapping: [
+      { key: 'minecraft:adventure/kill_a_mob', value: req(['zombie', 'skeleton', 'creeper']) }, // any one
+      { key: 'minecraft:story/obtain_armor', value: req(['iron_helmet', 'iron_chestplate']) },
+      { key: 'minecraft:test/and', value: req(['a'], ['b']) }, // both needed
+    ],
+    progressMapping: [
+      { key: 'minecraft:adventure/kill_a_mob', value: [{ criterionIdentifier: 'zombie', criterionProgress: 1700000000000n }] },
+      { key: 'minecraft:story/obtain_armor', value: [{ criterionIdentifier: 'iron_helmet' }] }, // not obtained
+      { key: 'minecraft:test/and', value: [{ criterionIdentifier: 'a', criterionProgress: 1n }] },
+    ],
+  });
+  assert.ok(a.isDone('minecraft:adventure/kill_a_mob')); // earned before the bot knew about it
+  assert.ok(!a.isDone('minecraft:story/obtain_armor'));
+  assert.ok(!a.isDone('minecraft:test/and'));
+  assert.deepEqual(announced, []); // the join sync is not "new"
+  assert.equal(a.next().title, 'Suit Up');
+
+  a.onPacket({ reset: false, progressMapping: [{ key: 'minecraft:story/obtain_armor', value: [{ criterionIdentifier: 'iron_helmet', criterionProgress: 5n }] }] });
+  assert.deepEqual(announced, ['Suit Up']);
+  assert.equal(a.next().title, 'Husbandry');
+
+  // chat backup (no packet data for it), only for our own bot
+  assert.equal(a.onChat('OtherGuy has made the advancement [Husbandry]', 'FreeBot2'), null);
+  assert.equal(a.onChat('FreeBot2 has made the advancement [Husbandry]', 'FreeBot2'), 'minecraft:husbandry/root');
+  assert.ok(a.isDone('minecraft:husbandry/root'));
+  assert.deepEqual(announced, ['Suit Up', 'Husbandry']);
+  assert.ok(ADVANCEMENT_GOALS.every((g) => g.id.startsWith('minecraft:')));
+});
+
+test('advancement goals: make the item, then do the finishing action, done when the server confirms', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Advancements } = await import('../src/advancements.js');
+  const { Journal } = await import('../src/journal.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const memory = new Memory(dir);
+  let asked = 0;
+  const adv = new Advancements();
+  const goals = new Goals({
+    bot: { registry: reg, findBlock: () => null, inventory: { slots: {} } },
+    llm: { ask: async () => (asked++, '{}') },
+    memory,
+    journal: new Journal(dir),
+    events: { log() {} },
+    config: { freeGoalMaxSteps: 80 },
+    advancements: adv,
+  });
+  const inv = { iron_pickaxe: 1, iron_ingot: 5, oak_planks: 4 };
+  const g = await goals.current({ inv, text: '' });
+  assert.equal(asked, 0); // no model call needed
+  assert.match(g.text, /Suit Up/);
+  assert.deepEqual(goals.nextAction(g, inv).skill, 'craft_item'); // first make the helmet
+
+  const withHelmet = { ...inv, iron_helmet: 1 };
+  const g2 = await goals.current({ inv: withHelmet, text: '' });
+  assert.match(g2.text, /Suit Up/); // having it is not enough, must wear it
+  assert.deepEqual(goals.nextAction(g2, withHelmet), { skill: 'equip_item', args: { item: 'iron_helmet', slot: 'head' } });
+
+  adv.onChat('Bot has made the advancement [Suit Up]', 'Bot');
+  const g3 = await goals.current({ inv: withHelmet, text: '' });
+  assert.equal(memory.data.goalHistory.at(-1).result, '달성');
+  assert.match(g3.text, /Husbandry/); // on to the next one
+
+  // turned off -> back to the model/candidates
+  const g4goals = new Goals({ bot: { registry: reg, inventory: { slots: {} } }, llm: { ask: async () => '{"goal":"x","item":"shield","count":1}' }, memory: new Memory(tmp()), journal: new Journal(tmp()), events: { log() {} }, config: { freeGoalMaxSteps: 80, advancementGoals: false }, advancements: new Advancements() });
+  assert.equal((await g4goals.current({ inv: { iron_pickaxe: 1 }, text: '' })).target.item, 'shield');
+});
+
+test('agent: the bot\'s advancement chat line goes to the journal', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const dir = tmp();
+  const bot = Object.assign(new EventEmitter(), { username: 'FreeBot2', registry: {}, _client: new EventEmitter() });
+  const journal = new Journal(dir);
+  const memory = new Memory(dir);
+  new Agent({ bot, llm: {}, skills: new Skills(dir), memory, events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b') } });
+  bot.emit('messagestr', 'FreeBot2 has made the advancement [Diamonds!]');
+  assert.equal(journal.entries.at(-1).type, 'advancement');
+  assert.equal(journal.entries.at(-1).title, 'Diamonds!');
+  assert.deepEqual(memory.data.advancementsFromChat, ['minecraft:story/mine_diamond']);
+  bot._client.emit('advancements', { reset: true, advancementMapping: [], progressMapping: [] }); // no crash
+});

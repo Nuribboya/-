@@ -25,6 +25,11 @@ const SEEDS = {
     timeoutMul: 4,
     code: `return await api.followPlan(args.steps ?? 4);`,
   },
+  equip_item: {
+    description: '아이템 장착: slot = hand | off-hand | head | torso | legs | feet (갑옷 입기, 방패 들기, 칼 들기)',
+    args: { item: 'iron_helmet', slot: 'head' },
+    code: `await api.equip(args.item ?? args.name, args.slot ?? 'hand');\nreturn api.inventory();`,
+  },
   mine_block: {
     description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄; raw_iron처럼 아이템 이름도 됨). 맞는 곡괭이 필요',
     args: { block: 'stone', count: 3 },
