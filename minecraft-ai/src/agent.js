@@ -244,6 +244,18 @@ export class Agent {
     return result;
   }
 
+  /** Record a failed run; a learned skill that failed 5 times in a row is archived on the spot. */
+  #recordFail(name, error) {
+    this.skills.record(name, false);
+    this.journal.add('skill_fail', { name, error });
+    const s = this.skills.index[name];
+    if (s && !s.builtin && s.streak >= 5 && this.skills.archive(name)) {
+      this.journal.add('consolidate', { archived: [name], reason: 'streak' });
+      this.events.log(`🧹 "${name}" 5번 연속 실패 → 보관함으로 (기본 스킬을 쓰도록)`);
+      this.events.update({ skills: this.skills.count() });
+    }
+  }
+
   async useSkill(name, args) {
     if (!this.skills.has(name)) {
       const alt = this.skills.closest(name);
@@ -257,16 +269,14 @@ export class Agent {
 
     const r = await this.#run(this.skills.code(name), args);
     if (!r.ok) {
-      this.skills.record(name, false);
-      this.journal.add('skill_fail', { name, error: short(r.error.message, 160) });
       this.events.log(`❌ ${name}: ${r.error.message}`);
+      this.#recordFail(name, short(r.error.message, 160));
       return `실패: ${r.error.message}`;
     }
     if (!r.diff.effect && !this.skills.index[name]?.passive) {
       // Finished without error but changed nothing: not a real success.
-      this.skills.record(name, false);
-      this.journal.add('skill_fail', { name, error: '효과 없음 (인벤토리/위치/허기/몹 변화 없음)' });
       this.events.log(`➖ ${name}: 효과 없음`);
+      this.#recordFail(name, '효과 없음 (인벤토리/위치/허기/몹 변화 없음)');
       return `효과 없음: "${name}" - ${short(noEffectMessage(r, inventoryOf(this.bot)), 500)} 이 상황엔 다른 스킬을 쓰거나 write_skill로 고칠 것`;
     }
     this.skills.record(name, true);

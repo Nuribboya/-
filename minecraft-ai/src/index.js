@@ -37,7 +37,13 @@ function connect() {
 
   let agent;
   bot.once('spawn', () => {
-    bot.pathfinder.setMovements(new Movements(bot));
+    const movements = new Movements(bot);
+    // Pathfinder pillars up with dirt + cobblestone by default. Cobblestone is needed for the
+    // furnace and stone tools, so build with junk blocks instead.
+    movements.scafoldingBlocks = ['dirt', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack']
+      .map((n) => bot.registry.itemsByName[n]?.id)
+      .filter((id) => id !== undefined);
+    bot.pathfinder.setMovements(movements);
     events.log('스폰 완료. 플레이 시작!');
     agent = new Agent({ bot, llm, skills, memory, events, config, journal });
     agent.run();

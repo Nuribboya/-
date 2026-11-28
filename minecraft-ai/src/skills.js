@@ -207,9 +207,17 @@ export class Skills {
   }
 
   /** Compact list for the prompt. */
+  /** Compact list for the prompt: builtins first (they always work), then learned skills. */
   describe() {
-    return Object.entries(this.index)
-      .map(([n, s]) => `- ${n}(${JSON.stringify(s.args)}): ${s.description} [성공 ${s.uses}/실패 ${s.fails}${s.streak >= 2 ? ', 연속실패 중 - 재작성 고려' : ''}]`)
-      .join('\n');
+    const line = ([n, s]) =>
+      `- ${n}(${JSON.stringify(s.args)}): ${s.description}` +
+      (s.builtin ? '' : ` [성공 ${s.uses}/실패 ${s.fails}${s.streak >= 2 ? ', 연속실패 중' : ''}]`);
+    const all = Object.entries(this.index);
+    return [
+      '[기본 스킬 - 확실히 동작, 먼저 쓸 것]',
+      ...all.filter(([, s]) => s.builtin).map(line),
+      '[직접 배운 스킬]',
+      ...(all.some(([, s]) => !s.builtin) ? all.filter(([, s]) => !s.builtin).map(line) : ['- 아직 없음']),
+    ].join('\n');
   }
 }

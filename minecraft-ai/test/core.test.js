@@ -745,3 +745,44 @@ test('place: when every cell next to the bot is blocked, walks a few blocks and 
   assert.ok(t && placedAt && placedAt.equals(t));
   assert.ok(Math.abs(t.x) + Math.abs(t.z) >= 2);
 });
+
+test('skill list shows builtins first, then learned skills with their record', () => {
+  const s = new Skills(tmp());
+  s.save('go_to_logs_v2', '원목으로 가기', {}, 'return 1;');
+  const text = s.describe();
+  const builtinAt = text.indexOf('[기본 스킬');
+  const learnedAt = text.indexOf('[직접 배운 스킬]');
+  assert.ok(builtinAt === 0 && learnedAt > text.indexOf('- collect_logs'));
+  assert.ok(text.indexOf('- go_to_logs_v2') > learnedAt);
+  assert.match(text, /go_to_logs_v2.*\[성공 0\/실패 0\]/);
+  assert.doesNotMatch(text.split('[직접 배운 스킬]')[0], /\[성공/); // builtins show no stats
+});
+
+test('a learned skill that fails 5 times in a row is archived on the spot', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { Vec3 } = await import('vec3');
+  const dir = tmp();
+  const bot = Object.assign(new EventEmitter(), {
+    registry: {},
+    entity: { position: new Vec3(0, 64, 0) },
+    entities: {},
+    food: 20,
+    inventory: { items: () => [] },
+    pathfinder: { setGoal() {} },
+    clearControlStates() {},
+  });
+  const skills = new Skills(dir);
+  skills.save('craft_item_with_table', 'x', {}, 'return 1;'); // never does anything
+  skills.record('craft_item_with_table', true); // old loose "success" from before
+  const agent = new Agent({ bot, llm: {}, skills, memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 1000 } });
+  for (let i = 0; i < 4; i++) await agent.useSkill('craft_item_with_table', {});
+  assert.ok(skills.has('craft_item_with_table'));
+  await agent.useSkill('craft_item_with_table', {});
+  assert.ok(!skills.has('craft_item_with_table'));
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'archive', 'craft_item_with_table.js')));
+  // builtins are never archived, however often they fail
+  for (let i = 0; i < 6; i++) await agent.useSkill('eat_food', {});
+  assert.ok(skills.has('eat_food'));
+});
