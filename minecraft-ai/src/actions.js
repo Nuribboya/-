@@ -1,7 +1,7 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
-import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint, similarItems } from './knowledge.js';
+import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint, similarItems, similarNames, blockForItem } from './knowledge.js';
 import { BODY_ACTIONS } from './api-names.js';
 import { sleep, isNight, withTimeout } from './util.js';
 
@@ -219,6 +219,18 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
     /** Mine `count` blocks. name 'log' = any log. Walks to them, equips best tool, picks up drops. */
     async gather(name, count = 1, maxDistance = 48) {
+      if (!name || typeof name !== 'string') throw new Error("which block? give a block name, e.g. mine_block {block: 'stone', count: 3} or {block: 'iron_ore'}");
+      // The model often asks for the drop (raw_iron, cobblestone, coal) instead of the block.
+      const mapped = blockForItem(name);
+      if (mapped && mapped !== name) {
+        log(`${name} comes from ${mapped}: mining ${mapped}`);
+        name = mapped;
+      } else if (name !== 'log' && reg.blocksByName && !reg.blocksByName[name]) {
+        const block = reg.blocksByName[`${name}_ore`] ? `${name}_ore` : null;
+        if (!block) throw new Error(`"${name}" is not a block - did you mean: ${similarNames(Object.keys(reg.blocksByName), name).join(', ')}?`);
+        log(`${name} comes from ${block}: mining ${block}`);
+        name = block;
+      }
       let got = 0;
       while (got < count) {
         check();
@@ -276,17 +288,32 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     place: (name) => placeRaw(name),
 
     /** Smelt `count` of `input` (e.g. raw_iron) in a nearby furnace using `fuel`. */
-    async smelt(input, count = 1, fuel = 'coal') {
+    async smelt(input, count = 1, fuel = null) {
       check();
+      if (!input) throw new Error("what to smelt? e.g. smelt_item {item: 'raw_iron', count: 3}");
       const furnaceBlock = bot.findBlock({ matching: reg.blocksByName.furnace.id, maxDistance: 32 });
       if (!furnaceBlock) throw new Error('no furnace nearby - craft and place one');
       const inItem = bot.inventory.items().find((i) => i.name === input);
-      const fuelItem = bot.inventory.items().find((i) => i.name === fuel);
       if (!inItem || inItem.count < count) throw new Error(`need ${count} ${input} to smelt (have ${inItem?.count ?? 0})`);
-      if (!fuelItem) throw new Error(`no fuel (${fuel}) in inventory`);
-      const per = fuelValue(fuel) || 1;
+
+      // Fuel: use the one asked for if we have enough of it, otherwise pick what we have
+      // (coal/charcoal first, then planks, logs, sticks).
+      const items = bot.inventory.items();
+      const enough = (it) => it && fuelValue(it.name) > 0 && it.count >= Math.ceil(count / fuelValue(it.name));
+      const rank = (n) => (/^(coal|charcoal)$/.test(n) ? 0 : n.endsWith('_planks') ? 1 : n.endsWith('_log') ? 2 : 3);
+      let fuelItem = fuel ? items.find((i) => i.name === fuel) : null;
+      if (!enough(fuelItem)) {
+        const pick = items.filter(enough).sort((a, b) => rank(a.name) - rank(b.name))[0];
+        if (!pick) {
+          const have = items.filter((i) => fuelValue(i.name) > 0).map((i) => `${i.name} x${i.count}`).join(', ') || 'none';
+          throw new Error(`not enough fuel to smelt ${count} (coal smelts 8, planks/logs 1.5 each; you have: ${have}) - get coal (coal_ore) or more logs`);
+        }
+        if (fuel) log(`no/too little ${fuel}, using ${pick.name} as fuel`);
+        fuelItem = pick;
+      }
+      fuel = fuelItem.name;
+      const per = fuelValue(fuel);
       const fuelCount = Math.max(1, Math.ceil(count / per));
-      if (fuelItem.count < fuelCount) throw new Error(`need ${fuelCount} ${fuel} as fuel to smelt ${count} (have ${fuelItem.count}); coal smelts 8, planks 1.5 each`);
       // Every step gets its own time limit, so a stuck step says which one instead of the whole
       // skill silently running into its 120s timeout.
       const fp = furnaceBlock.position;

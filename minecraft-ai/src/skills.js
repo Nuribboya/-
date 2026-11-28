@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const NAME_RE = /^[a-z][a-z0-9_]{2,40}$/;
+const NAME_RE = /^[a-z][a-z0-9_]{2,59}$/;
 
 const SEEDS = {
   collect_logs: {
@@ -12,22 +12,22 @@ const SEEDS = {
   craft_item: {
     description: '아이템을 제작한다. 필요하면 근처 작업대를 자동 사용 (item 이름, count=제작 횟수)',
     args: { item: 'oak_planks', count: 1 },
-    code: `await api.craft(args.item, args.count ?? 1);\nreturn api.inventory();`,
+    code: `await api.craft(args.item ?? args.name ?? args.block, args.count ?? 1);\nreturn api.inventory();`,
   },
   place_block: {
     description: '인벤토리의 블록을 주변 땅에 설치한다 (예: crafting_table, furnace)',
     args: { block: 'crafting_table' },
-    code: `await api.place(args.block);\nreturn 'placed';`,
+    code: `await api.place(args.block ?? args.item ?? args.name);\nreturn 'placed';`,
   },
   mine_block: {
-    description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄). 맞는 곡괭이 필요',
+    description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄; raw_iron처럼 아이템 이름도 됨). 맞는 곡괭이 필요',
     args: { block: 'stone', count: 3 },
-    code: `await api.gather(args.block, args.count ?? 1);\nreturn api.inventory();`,
+    code: `await api.gather(args.block ?? args.item ?? args.ore ?? args.name, args.count ?? 1);\nreturn api.inventory();`,
   },
   smelt_item: {
-    description: '근처 화로에서 item을 count개 굽는다 (예: raw_iron). fuel = coal 또는 oak_planks 등',
+    description: '근처 화로에서 item을 count개 굽는다 (예: raw_iron). 연료는 가진 것 중 자동 선택 (fuel로 지정 가능)',
     args: { item: 'raw_iron', count: 1, fuel: 'coal' },
-    code: `await api.smelt(args.item, args.count ?? 1, args.fuel ?? 'coal');\nreturn api.inventory();`,
+    code: `await api.smelt(args.item ?? args.input ?? args.name, args.count ?? 1, args.fuel);\nreturn api.inventory();`,
   },
   descend_mine: {
     description: '계단식으로 파 내려간다 (기본 y=-58 다이아 높이). 용암/물/낭떠러지가 보이면 멈춘다',

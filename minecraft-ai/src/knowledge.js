@@ -298,8 +298,17 @@ export function oreHint(name, y) {
   return 'try explore_cave or explore_area to look somewhere else';
 }
 
-/** Closest real item names for a misspelled/made-up one (e.g. iron_gardener -> iron_chestplate...). */
+/** Block to mine for an item the model asked for by its drop name (raw_iron -> iron_ore). */
+export function blockForItem(name) {
+  return MINE[name] ?? null;
+}
+
+/** Closest real item names for a misspelled/made-up one (e.g. iron_chest_plate -> iron_chestplate). */
 export function similarItems(reg, name, n = 3) {
+  return similarNames(Object.keys(reg.itemsByName), name, n);
+}
+
+export function similarNames(names, name, n = 3) {
   const want = String(name).toLowerCase();
   const words = new Set(want.split('_'));
   const dist = (a, b) => {
@@ -310,7 +319,7 @@ export function similarItems(reg, name, n = 3) {
         d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
     return d[a.length][b.length];
   };
-  return Object.keys(reg.itemsByName)
+  return names
     .map((k) => ({ k, score: k.split('_').filter((w) => words.has(w)).length * 10 - dist(want, k) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, n)

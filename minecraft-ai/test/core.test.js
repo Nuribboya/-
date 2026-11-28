@@ -913,3 +913,50 @@ test('wiki notes: only the ones relevant to the situation, size-limited', async 
   const many = wikiFor('creeper skeleton zombie spider enderman lava diamond armor shield bed chest nether enchant food', reg);
   assert.ok(many.split('\n- ').length - 1 <= 3 && many.length < 1100);
 });
+
+test('mine_block: asks for a block name, maps drop names to blocks, suggests real blocks', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  let searched = null;
+  const logs = [];
+  const bot = { registry: reg, entity: { position: { y: 20 } }, findBlocks: ({ matching }) => ((searched = matching), []) };
+  const api = createApi(bot, { aborted: false }, (m) => logs.push(m));
+  await assert.rejects(api.gather(undefined, 1), /which block\?/);
+  await assert.rejects(api.gather('raw_iron', 1), /no iron_ore within 48/);
+  assert.ok(searched({ name: 'deepslate_iron_ore' }));
+  assert.match(logs[0], /raw_iron comes from iron_ore/);
+  await assert.rejects(api.gather('cobblestone', 1), /no stone within/); // drop name -> mine stone
+  await assert.rejects(api.gather('iron', 1), /no iron_ore within/);
+  await assert.rejects(api.gather('shiny_rock', 1), /is not a block - did you mean/);
+});
+
+test('smelt picks a fuel we actually have when coal is missing', async () => {
+  const { createApi } = await import('../src/actions.js');
+  let fuelPut = null;
+  const furnace = {
+    inputItem: () => null,
+    fuelItem: () => null,
+    outputItem: () => (fuelPut ? { count: 1 } : null),
+    takeOutput: async () => ({ count: 1 }),
+    putFuel: async (type, m, n) => (fuelPut = [type, n]),
+    putInput: async () => {},
+    close() {},
+  };
+  const items = [{ name: 'raw_iron', type: 5, count: 1 }, { name: 'oak_log', type: 7, count: 3 }, { name: 'oak_planks', type: 8, count: 4 }];
+  const logs = [];
+  const bot = {
+    registry: { blocksByName: { furnace: { id: 1 } } },
+    entity: { position: { floored: () => ({}) } },
+    findBlock: () => ({ position: { x: 0, y: 64, z: 0 } }),
+    inventory: { items: () => items },
+    pathfinder: { goto: async () => {} },
+    openFurnace: async () => furnace,
+  };
+  const api = createApi(bot, { aborted: false }, (m) => logs.push(m));
+  assert.equal(await api.smelt('raw_iron', 1, 'coal'), 1);
+  assert.deepEqual(fuelPut, [8, 1]); // planks preferred over logs
+  assert.match(logs[0], /using oak_planks as fuel/);
+  items.splice(1, 2);
+  await assert.rejects(api.smelt('raw_iron', 1), /not enough fuel to smelt 1 .*you have: none/);
+});
