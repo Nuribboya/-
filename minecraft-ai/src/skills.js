@@ -45,6 +45,18 @@ const SEEDS = {
     args: { y: -58 },
     code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
   },
+  block_with_shield: {
+    description: '왼손 방패를 ms 동안 들어 공격을 막는다 (방패를 왼손에 장착한 상태여야 함)',
+    args: { ms: 3000 },
+    passive: true,
+    code: `await api.block(args.ms ?? args.time ?? 3000);\nreturn 'blocked';`,
+  },
+  block_arrows: {
+    description: '가까운 스켈레톤을 바라보며 방패로 화살을 막는다 (방패가 없으면 장착부터). 스켈레톤이 없으면 에러',
+    args: { seconds: 8 },
+    passive: true,
+    code: `return await api.blockArrows(args.seconds ?? 8);`,
+  },
   fill_bucket: {
     description: '빈 양동이로 가까운 물(또는 용암) 원천을 뜬다 (liquid = water | lava)',
     args: { liquid: 'water' },

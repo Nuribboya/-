@@ -1920,3 +1920,54 @@ test('goals: nether preparation steps follow the advancements, done when the por
   assert.equal(memory.data.goalHistory.at(-1).result, '달성');
   assert.doesNotMatch(g5.text, /네더 준비/); // done: back to self-chosen goals
 });
+
+test('shield advancement: after equipping, the plan moves on to blocking arrows; "block" means the shield', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Advancements } = await import('../src/advancements.js');
+  const { Journal } = await import('../src/journal.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const memory = new Memory(dir);
+  const adv = new Advancements();
+  for (const id of ['minecraft:story/obtain_armor', 'minecraft:husbandry/root', 'minecraft:adventure/kill_a_mob']) adv.fromChat.add(id);
+  const slots = {};
+  const goals = new Goals({ bot: { registry: reg, findBlock: () => null, inventory: { slots } }, llm: { ask: async () => '{}' }, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 }, advancements: adv });
+  const g = await goals.current({ inv: { iron_pickaxe: 1, shield: 1 }, text: '' });
+  assert.match(g.text, /Not Today/);
+  assert.deepEqual(goals.nextAction(g, { shield: 1 }), { skill: 'equip_item', args: { item: 'shield', slot: 'off-hand' } });
+  slots[45] = { name: 'shield', count: 1 }; // now in the off-hand (gone from the inventory)
+  assert.deepEqual(goals.nextAction(g, {}), { skill: 'block_arrows', args: { seconds: 8 } });
+  // a goal saved before this change (no `then`) still gets it
+  delete memory.data.freeGoal.then;
+  const g2 = await goals.current({ inv: { iron_pickaxe: 1 }, text: '' });
+  assert.deepEqual(goals.nextAction(g2, {}), { skill: 'block_arrows', args: { seconds: 8 } });
+
+  const s = new Skills(tmp());
+  assert.equal(s.closest('block'), 'block_with_shield'); // not place_block any more
+});
+
+test('blockArrows: equips the shield, faces the skeleton and holds the shield up', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { Vec3 } = await import('vec3');
+  const slots = {};
+  const events = [];
+  const skeleton = { name: 'skeleton', height: 2, position: new Vec3(6, 64, 0) };
+  const bot = {
+    registry: {}, entity: { position: new Vec3(0, 64, 0) },
+    inventory: { items: () => [{ name: 'shield', type: 1, count: 1 }], slots },
+    equip: async (item, dest) => (events.push(`equip ${item.name} ${dest}`), (slots[45] = item)),
+    nearestEntity: (f) => (f(skeleton) ? skeleton : null),
+    lookAt: async () => events.push('look'),
+    activateItem: (off) => events.push(`raise ${off}`),
+    deactivateItem: () => events.push('lower'),
+  };
+  const api = createApi(bot, { aborted: false });
+  await api.blockArrows(0.6);
+  assert.equal(events[0], 'equip shield off-hand');
+  assert.equal(events[1], 'raise true');
+  assert.ok(events.includes('look'));
+  assert.equal(events.at(-1), 'lower');
+  skeleton.position = new Vec3(60, 64, 0); // too far
+  await assert.rejects(api.blockArrows(1), /no skeleton within 24/);
+});

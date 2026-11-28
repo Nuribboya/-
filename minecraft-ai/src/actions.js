@@ -684,6 +684,35 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     },
 
     /** Raise the shield held in the off-hand for ms (max 5s). Equip it first: api.equip('shield', 'off-hand') */
+    /**
+     * Face the nearest skeleton and hold the off-hand shield up while it shoots (for the
+     * "Not Today, Thank You" advancement and to survive skeletons). Equips the shield if needed.
+     */
+    async blockArrows(seconds = 8) {
+      check();
+      if (bot.inventory.slots[OFF_HAND_SLOT]?.name !== 'shield') {
+        const sh = bot.inventory.items().find((i) => i.name === 'shield');
+        if (!sh) throw new Error('no shield - craft one (6 planks + 1 iron ingot)');
+        await bot.equip(sh, 'off-hand');
+      }
+      const isSkel = (e) => /^(skeleton|stray|bogged)$/.test(e.name) && e.position.distanceTo(bot.entity.position) < 24;
+      if (!bot.nearestEntity(isSkel)) throw new Error('no skeleton within 24 blocks - they come out at night or in dark caves; try again then');
+      const until = Date.now() + Math.min(seconds, 15) * 1000;
+      bot.activateItem(true);
+      try {
+        while (Date.now() < until) {
+          check();
+          const s = bot.nearestEntity(isSkel);
+          if (!s) break;
+          await bot.lookAt(s.position.offset(0, (s.height ?? 1.8) * 0.8, 0), true);
+          await sleep(250);
+        }
+      } finally {
+        bot.deactivateItem();
+      }
+      return { held: true };
+    },
+
     async block(ms = 1500) {
       check();
       if (bot.inventory.slots[OFF_HAND_SLOT]?.name !== 'shield') throw new Error("no shield in off-hand - first: await api.equip('shield', 'off-hand')");

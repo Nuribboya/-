@@ -4,6 +4,7 @@ import { parseJson } from './llm.js';
 import { nextGoal } from './curriculum.js';
 import { plan as makePlan, stepText, stepToAction } from './knowledge.js';
 import { GOAL_SYSTEM } from './prompts.js';
+import { ADVANCEMENT_GOALS } from './advancements.js';
 
 // What a player usually goes for after the iron pickaxe, cheapest/most useful first.
 // Used as suggestions and as the fallback when the model picks something already done.
@@ -67,7 +68,9 @@ export class Goals {
     const m = this.memory.data;
     m.goalHistory ??= [];
     const fg = m.freeGoal;
-    const asGoal = (g) => ({ id: 'free', text: g.text, target: g.target, finish: g.finish ?? null, advId: g.advId ?? null, prepId: g.prepId ?? null });
+    // (a goal saved by an older version may lack `then`: take it from the current list)
+    const thenOf = (g) => g.then ?? (g.advId ? ADVANCEMENT_GOALS.find((a) => a.id === g.advId)?.then : null) ?? null;
+    const asGoal = (g) => ({ id: 'free', text: g.text, target: g.target, finish: g.finish ?? null, then: thenOf(g), advId: g.advId ?? null, prepId: g.prepId ?? null });
 
     if (fg && !advance) return asGoal(fg);
     if (!fg && !advance) return { ...fallback, target: null };
@@ -99,7 +102,7 @@ export class Goals {
       const skip = new Set(m.goalHistory.slice(-3).filter((g) => g.result === '포기').map((g) => g.advId).filter(Boolean));
       const adv = this.advancements.next(skip);
       if (adv) {
-        m.freeGoal = { text: adv.text, target: adv.target, finish: adv.finish, advId: adv.id, steps: 0, setAt: new Date().toISOString() };
+        m.freeGoal = { text: adv.text, target: adv.target, finish: adv.finish, then: adv.then ?? null, advId: adv.id, steps: 0, setAt: new Date().toISOString() };
         this.memory.save();
         this.journal.add('self_goal', { goal: adv.text, target: adv.target, advancement: adv.title });
         this.events.log(`🏆 다음 목표 (발전 과제): ${adv.title}`);
@@ -192,6 +195,15 @@ export class Goals {
     const t = goal?.target;
     // Got the item (or none needed): what is left is the finishing action (wear it, sleep, eat...).
     if (goal?.finish && (!t || (this.#owned(inv)[t.item] ?? 0) >= t.count)) {
+      // Already worn/held where the finishing step would put it: go on to what comes after
+      // (e.g. shield in the off-hand -> block arrows), instead of equipping it again and again.
+      const a = goal.finish.action;
+      const SLOT = { head: 5, torso: 6, legs: 7, feet: 8, 'off-hand': 45 };
+      const slot = a?.skill === 'equip_item' ? SLOT[a.args?.slot] : undefined;
+      if (slot !== undefined && this.bot.inventory?.slots?.[slot]?.name === a.args.item) {
+        const then = goal.then;
+        return then ? { label: then.text, steps: [{ text: then.text, action: then.action }] } : { label: goal.finish.text, steps: [] };
+      }
       return { label: goal.finish.text, steps: [{ text: goal.finish.text, action: goal.finish.action }] };
     }
     if (!t) return null;

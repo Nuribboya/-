@@ -28,9 +28,11 @@ export const ADVANCEMENT_GOALS = [
   {
     id: 'minecraft:story/deflect_arrow',
     title: 'Not Today, Thank You',
-    text: '발전 과제 "Not Today, Thank You": 방패를 왼손에 들고 스켈레톤 화살을 막기 (스켈레톤이 보이면 api.block())',
+    text: '발전 과제 "Not Today, Thank You": 방패를 왼손에 들고 스켈레톤 화살을 막기 (밤에 스켈레톤을 찾아 block_arrows)',
     target: { item: 'shield', count: 1 },
     finish: { text: '방패 왼손에 들기', action: { skill: 'equip_item', args: { item: 'shield', slot: 'off-hand' } } },
+    // once it is in the off-hand, the advancement needs an actual blocked arrow
+    then: { text: '스켈레톤을 바라보며 방패로 화살 막기', action: { skill: 'block_arrows', args: { seconds: 8 } } },
   },
   {
     id: 'minecraft:adventure/sleep_in_bed',
@@ -126,6 +128,6 @@ export class Advancements {
 
   #emit(id) {
     const entry = ADVANCEMENT_GOALS.find((a) => a.id === id);
-    for (const fn of this.listeners) fn(id, entry?.title ?? id.replace(/^title:/, ''));
+    for (const fn of this.listeners) fn(id, entry?.title ?? id.replace(/^title:/, '').replace(/^minecraft:/, ''));
   }
 }
