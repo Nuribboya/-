@@ -1344,3 +1344,33 @@ test('torches: dark tunnel gets a torch every ~8 blocks (crafted from coal if ne
   await createApi(w2.bot, { aborted: false }, () => {}, { torches: true }).descend(62); // first steps, sky still open above
   assert.equal(placed, 0);
 });
+
+test('several bots: lessons and journal are shared, progress is per bot', async () => {
+  const { Journal } = await import('../src/journal.js');
+  const dir = tmp();
+  const main = new Memory(dir);
+  const second = new Memory(path.join(dir, 'bots', 'Bot_2'), { sharedLessons: main });
+  second.addLesson('용암이 보이면 방향을 바꾼다'); // learned by bot 2...
+  assert.deepEqual(main.data.lessons, ['용암이 보이면 방향을 바꾼다']); // ...known to bot 1
+  second.data.lessons = ['교훈 정리됨']; // reflection replaces the list
+  assert.deepEqual(main.data.lessons, ['교훈 정리됨']);
+  second.achieve('logs');
+  assert.deepEqual(main.data.achieved, []); // progress is per bot
+  // files: lessons only in the shared memory, progress in each bot's own file
+  const mainFile = JSON.parse(fs.readFileSync(path.join(dir, 'memory.json'), 'utf8'));
+  const botFile = JSON.parse(fs.readFileSync(path.join(dir, 'bots', 'Bot_2', 'memory.json'), 'utf8'));
+  assert.deepEqual(mainFile.lessons, ['교훈 정리됨']);
+  assert.equal(botFile.lessons, undefined);
+  assert.deepEqual(botFile.achieved, ['logs']);
+  // reloading bot 2 still sees the shared lessons
+  assert.deepEqual(new Memory(path.join(dir, 'bots', 'Bot_2'), { sharedLessons: new Memory(dir) }).data.lessons, ['교훈 정리됨']);
+
+  const journal = new Journal(dir);
+  const j2 = journal.forBot('Bot_2');
+  j2.add('death', { cause: 'lava', where: '0,0,0', night: false, lastAction: 'x' });
+  journal.forBot('Bot').add('skill_ok', { name: 'collect_logs' });
+  assert.equal(journal.entries.length, 2); // one shared journal
+  assert.equal(journal.entries[0].bot, 'Bot_2');
+  assert.match(j2.recentText(), /\[Bot_2\] .*lava/);
+  assert.match(journal.deathSummary(), /죽음 1회: lava/); // everyone's deaths teach everyone
+});

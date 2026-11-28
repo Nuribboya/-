@@ -8,6 +8,8 @@ export const config = {
   host: env.MC_HOST ?? '127.0.0.1',
   port: Number(env.MC_PORT ?? 25565),
   username: env.MC_USER ?? 'ClaudeBot',
+  // Several bots in the same world share skills, lessons and the journal (collective learning).
+  botCount: Math.max(1, Math.min(8, Number(env.BOT_COUNT ?? 1))),
   version: env.MC_VERSION || undefined,
 
   // "fast" = routine decisions (many calls). "smart" = writing/fixing skill code (few calls).

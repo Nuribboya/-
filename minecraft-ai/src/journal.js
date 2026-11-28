@@ -16,6 +16,13 @@ export class Journal {
     } catch {}
   }
 
+  /** A view of this journal that tags every new entry with the bot's name (shared entries). */
+  forBot(name) {
+    const view = Object.create(this);
+    view.add = (type, data = {}) => this.add(type, { bot: name, ...data });
+    return view;
+  }
+
   add(type, data = {}) {
     const entry = { t: new Date().toISOString(), type, ...data };
     this.entries.push(entry);
@@ -74,7 +81,10 @@ export class Journal {
         default: return `${time} ${e.type}`;
       }
     };
-    return this.entries.slice(-n).map(fmt).join('\n');
+    return this.entries
+      .slice(-n)
+      .map((e) => (e.bot ? `[${e.bot}] ` : '') + fmt(e))
+      .join('\n');
   }
 
   report() {
