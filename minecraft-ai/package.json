@@ -6,10 +6,10 @@
   "description": "Minecraft bot that plays and learns on its own. Brain is swappable: Claude API or local Ollama model.",
   "scripts": {
     "start": "node src/index.js",
-    "start:free": "node --env-file=.env.free src/index.js",
-    "report": "node --env-file-if-exists=.env.free src/report.js",
-    "brain": "node --env-file-if-exists=.env.free src/brain-cli.js",
-    "new-world": "node --env-file-if-exists=.env.free src/new-world.js",
+    "start:free": "node --env-file=.env.free --env-file-if-exists=.env.local src/index.js",
+    "report": "node --env-file-if-exists=.env.free --env-file-if-exists=.env.local src/report.js",
+    "brain": "node --env-file-if-exists=.env.free --env-file-if-exists=.env.local src/brain-cli.js",
+    "new-world": "node --env-file-if-exists=.env.free --env-file-if-exists=.env.local src/new-world.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {

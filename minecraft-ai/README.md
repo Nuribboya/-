@@ -48,6 +48,13 @@ npm run report   # 죽음/마일스톤/새 스킬 요약 출력
 - 기본 스킬 추가: `mine_block {block, count}`, `smelt_item {item, count, fuel}`.
 - 굽기 레시피와 광석 위치처럼 데이터에 없는 것은 `src/knowledge.js`에 직접 적어두었습니다.
 
+## 내 설정은 `.env.local`에
+포트 번호, 봇 수 같은 **개인 설정은 `.env.local`** 파일에 적으세요(없으면 만들기). `.env.free`보다 우선하고, git이 건드리지 않아서 `git pull` 때 충돌이 나지 않습니다.
+```
+MC_PORT=55414
+BOT_COUNT=2
+```
+
 ## 봇 여러 마리 (집단 학습)
 `.env.free`에 `BOT_COUNT=2`(최대 8)를 넣으면 한 프로그램에서 봇 여러 마리가 같은 월드에 접속합니다 (`MC_USER`, `MC_USER_2`, ...).
 - **공유**: 스킬 라이브러리, 교훈, 일지(항목마다 어느 봇인지 표시), 모델. 한 봇이 배운 스킬과 다른 봇의 죽음 원인을 모두가 씁니다.
