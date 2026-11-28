@@ -29,6 +29,28 @@ const SEEDS = {
     args: { item: 'raw_iron', count: 1, fuel: 'coal' },
     code: `await api.smelt(args.item, args.count ?? 1, args.fuel ?? 'coal');\nreturn api.inventory();`,
   },
+  descend_mine: {
+    description: '계단식으로 파 내려간다 (기본 y=-58 다이아 높이). 용암/물/낭떠러지가 보이면 멈춘다',
+    args: { y: -58 },
+    code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
+  },
+  explore_cave: {
+    description: '근처 동굴 안으로 들어가 둘러본다 (광석 찾기)',
+    args: {},
+    code: `return await api.exploreCave(32);`,
+  },
+  night_shelter: {
+    description: '밤용 은신처: 땅을 3칸 파고 들어가 위를 막는다 (아침에 이동하면 알아서 파고 나감)',
+    args: {},
+    passive: true, // "already sheltered" is a fine result, not a failure
+    code: `return await api.shelter();`,
+  },
+  wait_for_day: {
+    description: '은신처 안에서 아침까지 기다린다 (최대 약 100초씩)',
+    args: {},
+    passive: true,
+    code: `for (let i = 0; i < 10 && api.isNight(); i++) await api.sleep(10000);\nreturn { night: api.isNight() };`,
+  },
   eat_food: {
     description: '가진 음식 중 가장 좋은 것을 먹는다',
     args: {},
@@ -55,6 +77,7 @@ export class Skills {
     // Builtins are always present and always the original code (repairs an older overwrite).
     for (const [name, s] of Object.entries(SEEDS)) {
       if (!this.index[name]?.builtin) this.#write(name, s.description, s.args, s.code, true);
+      this.index[name].passive = !!s.passive;
     }
   }
 

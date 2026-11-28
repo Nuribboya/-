@@ -236,6 +236,25 @@ export function knowledgeText(reg) {
     `- 채굴 도구: 원목/흙/모래=맨손, stone→cobblestone=${tool('stone')}, coal_ore=${tool('coal_ore')}, iron_ore=${tool('iron_ore')}, diamond_ore=${tool('diamond_ore')} (이상 등급이면 됨, 등급: wooden<stone=copper<iron<diamond)`,
     '- 제작: 원목1→판자4, 판자2→막대기4, 작업대=판자4, 곡괭이=재료3+막대기2(작업대 필요), 화로=조약돌8(작업대 필요)',
     '- 굽기(화로): raw_iron→iron_ingot, sand→glass, 연료 coal 1개=8개 굽기, 판자 1개=1.5개',
-    '- 철/다이아는 지하(낮은 Y)에 많다. 용암 주의.',
+    `- 광석 깊이: ${Object.entries(ORE_DEPTH).map(([k, v]) => `${k} y≈${v}`).join(', ')}. 깊이 내려갈 땐 descend_mine, 동굴은 explore_cave. 용암 주의.`,
   ].join('\n');
+}
+
+// Where ores are most common (1.18+ generation). Used for "go deeper" hints.
+export const ORE_DEPTH = {
+  diamond_ore: -58,
+  redstone_ore: -58,
+  gold_ore: -16,
+  lapis_ore: 0,
+  iron_ore: 16,
+  copper_ore: 48,
+  coal_ore: 96,
+};
+
+/** Hint after failing to find `name` nearby while standing at height y. */
+export function oreHint(name, y) {
+  const d = ORE_DEPTH[name];
+  if (d !== undefined && Math.abs(y - d) > 20)
+    return `${name} is most common around y=${d} and you are at y=${y}: ${y > d ? `use descend_mine {y: ${d}} (or explore_cave) first` : 'go up / explore_area'}`;
+  return 'try explore_cave or explore_area to look somewhere else';
 }

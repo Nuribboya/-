@@ -13,10 +13,9 @@ const MILESTONES = [
   { id: 'furnace', target: { item: 'furnace', count: 1 }, goal: '화로(furnace) 만들기 (cobblestone 8개)', done: (i) => has(i, /^(furnace|iron_ingot|iron_pickaxe|diamond_pickaxe)$/) },
   { id: 'iron_ingot', target: { item: 'iron_ingot', count: 3 }, goal: '철광석(raw_iron)을 캐고 화로에서 구워 철 주괴(iron_ingot) 3개 만들기', done: (i) => count(i, /^iron_ingot$/) >= 3 || has(i, /^(iron|diamond)_pickaxe$/) },
   { id: 'iron_pickaxe', target: { item: 'iron_pickaxe', count: 1 }, goal: '철 곡괭이(iron_pickaxe) 만들기', done: (i) => has(i, /^(iron|diamond)_pickaxe$/) },
-  { id: 'diamond', target: { item: 'diamond', count: 1 }, goal: '다이아몬드(diamond) 찾아서 캐기 (낮은 Y 레벨 탐색)', done: (i) => has(i, /^diamond$/) },
 ];
 
-const FINAL_GOAL = '살아남으면서 자유롭게 탐험하고 자원 모으기 (음식, 침대, 철 도구)';
+const FINAL_GOAL = '기본 도구 완성 - 이제 스스로 목표를 정해서 플레이';
 
 export function nextGoal(inv, memory) {
   for (const m of MILESTONES) {

@@ -1,7 +1,8 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
-import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText } from './knowledge.js';
+import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint } from './knowledge.js';
+import { BODY_ACTIONS } from './api-names.js';
 
 const { goals } = pf;
 const TIER = ['netherite', 'diamond', 'iron', 'copper', 'stone', 'golden', 'wooden'];
@@ -95,6 +96,33 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     return `cannot craft ${name}: needs ${parts.join(', ')}.${tableNote}${hints.length ? ' Next step: ' + hints.join('; ') : ''}`;
   };
 
+  const placeAtRaw = async (x, y, z, name) => {
+    check();
+    const item = bot.inventory.items().find((i) => i.name === name);
+    if (!item) throw new Error(`no ${name} in inventory`);
+    const target = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
+    if (!isOpen(bot.blockAt(target))) throw new Error(`(${target.x},${target.y},${target.z}) is not empty (${bot.blockAt(target).name})`);
+    const feet = bot.entity.position.floored();
+    if (target.x === feet.x && target.z === feet.z && (target.y === feet.y || target.y === feet.y + 1))
+      throw new Error('cannot place a block inside yourself - pick a spot next to you or above your head (y+2)');
+    let ref = null;
+    let face = null;
+    for (const [dx, dy, dz] of NEIGHBORS) {
+      const b = bot.blockAt(target.offset(dx, dy, dz));
+      if (b && b.boundingBox === 'block') {
+        ref = b;
+        face = new Vec3(-dx, -dy, -dz);
+        break;
+      }
+    }
+    if (!ref) throw new Error(`nothing solid next to (${target.x},${target.y},${target.z}) to attach the block to`);
+    if (bot.entity.position.distanceTo(target) > 4) await goto(target.x, target.y, target.z, 3);
+    await bot.equip(item, 'hand');
+    check();
+    await bot.placeBlock(ref, face);
+    return target;
+  };
+
   const api = {
     log,
     /** Run another saved skill by name from inside a skill: await api.useSkill('collect_logs', {count: 3}) */
@@ -127,7 +155,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       while (got < count) {
         check();
         const [pos] = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 1 });
-        if (!pos) throw new Error(`no ${name} within ${maxDistance} blocks (got ${got}/${count}) - explore somewhere else`);
+        if (!pos) throw new Error(`no ${name} within ${maxDistance} blocks (got ${got}/${count}) - ${oreHint(name, Math.floor(bot.entity.position.y))}`);
         await goto(pos.x, pos.y, pos.z, 2);
         const block = bot.blockAt(pos);
         if (!block || !matcherFor(name)(block)) continue;
@@ -268,32 +296,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     },
 
     /** Place a block from inventory at exact coordinates (needs a solid neighbor to attach to). */
-    async placeAt(x, y, z, name) {
-      check();
-      const item = bot.inventory.items().find((i) => i.name === name);
-      if (!item) throw new Error(`no ${name} in inventory`);
-      const target = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
-      if (!isOpen(bot.blockAt(target))) throw new Error(`(${target.x},${target.y},${target.z}) is not empty (${bot.blockAt(target).name})`);
-      const feet = bot.entity.position.floored();
-      if (target.x === feet.x && target.z === feet.z && (target.y === feet.y || target.y === feet.y + 1))
-        throw new Error('cannot place a block inside yourself - pick a spot next to you or above your head (y+2)');
-      let ref = null;
-      let face = null;
-      for (const [dx, dy, dz] of NEIGHBORS) {
-        const b = bot.blockAt(target.offset(dx, dy, dz));
-        if (b && b.boundingBox === 'block') {
-          ref = b;
-          face = new Vec3(-dx, -dy, -dz);
-          break;
-        }
-      }
-      if (!ref) throw new Error(`nothing solid next to (${target.x},${target.y},${target.z}) to attach the block to`);
-      if (bot.entity.position.distanceTo(target) > 4) await goto(target.x, target.y, target.z, 3);
-      await bot.equip(item, 'hand');
-      check();
-      await bot.placeBlock(ref, face);
-      return target;
-    },
+    placeAt: (x, y, z, name) => placeAtRaw(x, y, z, name),
 
     /** Mine the block at exact coordinates (e.g. dig down to hide: api.digAt(x, y-1, z)). */
     async digAt(x, y, z) {
@@ -332,6 +335,94 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       return true;
     },
 
+    /** Is it night (mobs spawn)? */
+    isNight: () => {
+      const t = bot.time?.timeOfDay ?? 0;
+      return t >= 13000 && t < 23000;
+    },
+
+    /**
+     * Staircase-mine down to targetY (default -58, diamond level). Checks for lava/water
+     * and big drops before every step and stops with an error instead of walking into them.
+     */
+    async descend(targetY = -58, maxSteps = 80) {
+      check();
+      const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      const danger = (b) => b && (b.name.includes('lava') || b.name === 'water');
+      let p = bot.entity.position.floored();
+      const [dx, dz] = DIRS[Math.floor(Math.random() * DIRS.length)];
+      let steps = 0;
+      while (p.y > targetY && steps < maxSteps) {
+        check();
+        for (let ox = -1; ox <= 1; ox++)
+          for (let oy = -3; oy <= 1; oy++)
+            for (let oz = -1; oz <= 1; oz++) {
+              const b = bot.blockAt(p.offset(dx + ox, oy, dz + oz));
+              if (danger(b)) throw new Error(`stopped descending at y=${p.y}: ${b.name} ahead - call descend again (new random direction) or stop here`);
+            }
+        const floor = bot.blockAt(p.offset(dx, -2, dz));
+        if (floor?.name === 'bedrock') break;
+        if (isOpen(floor) && isOpen(bot.blockAt(p.offset(dx, -3, dz))) && isOpen(bot.blockAt(p.offset(dx, -4, dz))))
+          throw new Error(`stopped at y=${p.y}: big drop ahead (cave below) - use explore_cave or descend again`);
+        for (const c of [p.offset(dx, 1, dz), p.offset(dx, 0, dz), p.offset(dx, -1, dz)]) {
+          const b = bot.blockAt(c);
+          if (!b || isOpen(b)) continue;
+          if (b.diggable === false) throw new Error(`cannot dig ${b.name} at y=${c.y}`);
+          await equipFor(b);
+          check();
+          await bot.dig(b);
+        }
+        const t = p.offset(dx, -1, dz);
+        await goto(t.x, t.y, t.z, 0);
+        p = bot.entity.position.floored();
+        steps++;
+      }
+      return p.y;
+    },
+
+    /** Walk into a nearby cave (finds cave air with a floor). Returns where it went. */
+    async exploreCave(maxDistance = 32) {
+      check();
+      const id = reg.blocksByName.cave_air?.id;
+      const me = bot.entity.position;
+      const spots = (id === undefined ? [] : bot.findBlocks({ matching: id, maxDistance, count: 300 })).filter((q) => {
+        const below = bot.blockAt(q.offset(0, -1, 0));
+        return below && below.boundingBox === 'block' && q.distanceTo(me) > 6;
+      });
+      if (!spots.length) throw new Error('no cave nearby - use descend_mine to dig down, or explore_area to look elsewhere');
+      const t = spots[Math.floor(Math.random() * spots.length)];
+      await goto(t.x, t.y, t.z, 1);
+      return { x: t.x, y: t.y, z: t.z };
+    },
+
+    /** Dig 3 blocks down and close the roof: a safe hole for the night. */
+    async shelter(blockName) {
+      check();
+      const p = bot.entity.position.floored();
+      const roof = bot.blockAt(p.offset(0, 2, 0)); // above the head (bot is 2 blocks tall)
+      const walls = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([x, z]) => !isOpen(bot.blockAt(p.offset(x, 0, z))) && !isOpen(bot.blockAt(p.offset(x, 1, z))));
+      if (roof && !isOpen(roof) && walls) return 'already sheltered';
+      const below = [1, 2, 3, 4].map((d) => bot.blockAt(p.offset(0, -d, 0)));
+      for (const b of below)
+        if (!b || isOpen(b) || b.name.includes('lava') || b.diggable === false)
+          throw new Error(`cannot dig a shelter here (${b?.name ?? 'nothing'} below) - move to solid ground first`);
+      const COVER = ['dirt', 'cobblestone', 'cobbled_deepslate', 'stone', 'andesite', 'diorite', 'granite', 'netherrack', 'gravel', 'sand'];
+      const cover =
+        blockName ??
+        bot.inventory.items().find((i) => COVER.includes(i.name) || i.name.endsWith('_planks'))?.name;
+      for (const b of below.slice(0, 3)) {
+        await equipFor(b);
+        check();
+        await bot.dig(b);
+      }
+      await sleep(900); // fall to the bottom
+      const q = bot.entity.position.floored();
+      const roofCover = cover ?? bot.inventory.items().find((i) => COVER.includes(i.name))?.name; // dirt we just dug
+      if (!roofCover) throw new Error('dug the hole but have no block to close the roof (need dirt/cobblestone/planks)');
+      await placeAtRaw(q.x, q.y + 2, q.z, roofCover);
+      return { x: q.x, y: q.y, z: q.z };
+    },
+
     /** Wander to find new terrain: walk ~distance blocks in a random direction. */
     async explore(distance = 30) {
       const a = Math.random() * Math.PI * 2;
@@ -342,7 +433,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
   // Body actions run one at a time: Promise.all([gather a, gather b]) would make two
   // pathfinder goals cancel each other ("Path was stopped"). useSkill is not queued
   // (it calls these itself, queuing it would deadlock).
-  const SERIAL = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat', 'placeAt', 'digAt', 'equip', 'block']);
+  const SERIAL = new Set(BODY_ACTIONS);
   let queue = Promise.resolve();
   for (const k of SERIAL) {
     const fn = api[k];
@@ -361,7 +452,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     if (!ctx.errors) ctx.errors = [];
     if (ctx.errors.length < 10) ctx.errors.push(`api.${k}: ${e?.message ?? e}`);
   };
-  const ACTIONS = new Set(['gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat', 'placeAt', 'digAt', 'equip', 'block', 'useSkill']);
+  const ACTIONS = new Set([...BODY_ACTIONS, 'useSkill']);
   for (const [k, fn] of Object.entries(api)) {
     if (typeof fn !== 'function') continue;
     api[k] = (...a) => {

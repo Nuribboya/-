@@ -437,3 +437,117 @@ test('gather matcher: iron_ore also matches deepslate_iron_ore', async () => {
   assert.ok(matching({ name: 'iron_ore' }) && matching({ name: 'deepslate_iron_ore' }));
   assert.ok(!matching({ name: 'gold_ore' }));
 });
+
+// ---- tiny simulated world for movement tools ----
+async function fakeWorld({ solidBelow = 64, overrides = {}, start = [0.5, 64, 0.5], items = [] } = {}) {
+  const { Vec3 } = await import('vec3');
+  const blocks = new Map(Object.entries(overrides));
+  const key = (p) => `${p.x},${p.y},${p.z}`;
+  const blockAt = (p) => {
+    p = new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z));
+    const name = blocks.get(key(p)) ?? (p.y < solidBelow ? 'stone' : 'air');
+    const open = name === 'air' || name === 'cave_air' || name === 'water' || name.includes('lava');
+    return { name, position: p, boundingBox: open ? 'empty' : 'block', diggable: name !== 'bedrock', material: 'mineable/pickaxe' };
+  };
+  const me = { position: new Vec3(...start) };
+  const fall = () => {
+    while (blockAt(me.position.offset(0, -1, 0)).boundingBox === 'empty' && me.position.y > -64) me.position.y -= 1;
+  };
+  const bot = {
+    registry: { items: {}, blocksByName: { cave_air: { id: 999 } } },
+    entity: me,
+    entities: {},
+    blockAt,
+    inventory: { items: () => items, slots: {} },
+    equip: async () => {},
+    dig: async (b) => {
+      blocks.set(key(b.position), 'air');
+      fall();
+    },
+    placeBlock: async (ref, face) => blocks.set(key(ref.position.plus(face)), 'cobblestone'),
+    pathfinder: {
+      goto: async (g) => {
+        me.position = new Vec3(g.x + 0.5, g.y, g.z + 0.5);
+        fall();
+      },
+    },
+    findBlocks: () => [],
+  };
+  return { bot, blocks, Vec3 };
+}
+
+test('descend: staircase down to target y, stops at lava', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot } = await fakeWorld();
+  const y = await createApi(bot, { aborted: false }).descend(58);
+  assert.ok(y <= 58, `reached y=${y}`);
+
+  // lava all around below -> refuses to walk into it
+  const lava = {};
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) lava[`${x},61,${z}`] = 'lava';
+  const w2 = await fakeWorld({ overrides: lava });
+  await assert.rejects(createApi(w2.bot, { aborted: false }).descend(50), /lava/);
+});
+
+test('shelter: digs 3 down, closes the roof, second call is a no-op', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot, blocks } = await fakeWorld({ items: [{ name: 'cobblestone', type: 1 }] });
+  const api = createApi(bot, { aborted: false });
+  const pos = await api.shelter();
+  assert.equal(pos.y, 61);
+  assert.equal(blocks.get('0,63,0'), 'cobblestone'); // roof above the head
+  assert.equal(await api.shelter(), 'already sheltered');
+
+  // no ground (standing over a cave) -> refuses
+  const w2 = await fakeWorld({ overrides: { '0,62,0': 'cave_air' }, items: [{ name: 'dirt', type: 1 }] });
+  await assert.rejects(createApi(w2.bot, { aborted: false }).shelter(), /cannot dig a shelter/);
+});
+
+test('exploreCave walks to cave air with a floor; ore hint points to the right depth', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { oreHint } = await import('../src/knowledge.js');
+  const { bot, Vec3 } = await fakeWorld({ overrides: { '10,40,0': 'cave_air' } });
+  bot.findBlocks = () => [new Vec3(10, 40, 0)];
+  const at = await createApi(bot, { aborted: false }).exploreCave();
+  assert.deepEqual(at, { x: 10, y: 40, z: 0 });
+  bot.findBlocks = () => [];
+  await assert.rejects(createApi(bot, { aborted: false }).exploreCave(), /no cave nearby/);
+  assert.match(oreHint('diamond_ore', 70), /descend_mine \{y: -58\}/);
+  assert.match(oreHint('iron_ore', 20), /explore/);
+});
+
+test('self-chosen goals: pick, keep, complete, and give up', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const dir = tmp();
+  const bot = Object.assign(new EventEmitter(), { registry: { itemsByName: { iron_chestplate: {} } } });
+  let asked = 0;
+  const llm = { ask: async () => (asked++, '{"goal":"철 갑옷 만들기","item":"iron_chestplate","count":1}'), spentUsd: 0 };
+  const events = { log() {}, update() {} };
+  const memory = new Memory(dir);
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory, events, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'brains'), freeGoalMaxSteps: 2 } });
+  const free = { id: 'free', text: 'x' };
+  const obs = { inv: {}, text: '상태' };
+
+  const g1 = await agent.resolveGoal(free, obs);
+  assert.equal(g1.text, '철 갑옷 만들기');
+  assert.deepEqual(g1.target, { item: 'iron_chestplate', count: 1 });
+  await agent.resolveGoal(free, obs); // kept, no new question
+  assert.equal(asked, 1);
+  await agent.resolveGoal(free, { ...obs, inv: { iron_chestplate: 1 } }); // done -> asks for a new goal
+  assert.equal(asked, 2);
+  assert.equal(memory.data.goalHistory.at(-1).result, '달성');
+  await agent.resolveGoal(free, obs);
+  await agent.resolveGoal(free, obs);
+  await agent.resolveGoal(free, obs); // over freeGoalMaxSteps -> dropped, new goal
+  assert.equal(memory.data.goalHistory.at(-1).result, '포기');
+  // unknown item from the model -> goal without a target, not a crash
+  llm.ask = async () => '{"goal":"집 짓기","item":"house","count":1}';
+  memory.data.freeGoal = null;
+  assert.equal((await agent.resolveGoal(free, obs)).target, null);
+  // curriculum hands over to free goals after the iron pickaxe
+  const { nextGoal } = await import('../src/curriculum.js');
+  const m2 = new Memory(tmp());
+  assert.equal(nextGoal({ iron_pickaxe: 1 }, m2).id, 'free');
+});

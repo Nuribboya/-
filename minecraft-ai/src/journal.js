@@ -66,6 +66,9 @@ export class Journal {
         case 'skill_fail': return `${time} ❌ ${e.name}: ${e.error}`;
         case 'new_skill': return `${time} 🎓 ${e.name}`;
         case 'milestone': return `${time} 🏁 ${e.id}`;
+        case 'self_goal': return `${time} 🎯 새 목표: ${e.goal}`;
+        case 'self_goal_done': return `${time} 🏁 목표 달성: ${e.goal}`;
+        case 'self_goal_dropped': return `${time} 🏳️ 목표 포기: ${e.goal}`;
         case 'consolidate': return `${time} 🧹 정리: ${e.archived?.length ?? 0}개 보관`;
         default: return `${time} ${e.type}`;
       }

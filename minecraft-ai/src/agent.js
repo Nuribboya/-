@@ -9,7 +9,7 @@ import { Skills } from './skills.js';
 import { Journal } from './journal.js';
 import { Brains } from './brain.js';
 import { plan as makePlan, stepText, stepToAction, knowledgeText } from './knowledge.js';
-import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
+import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, GOAL_SYSTEM, parseWriterReply } from './prompts.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (v, n = 400) => {
@@ -147,7 +147,7 @@ export class Agent {
   async step() {
     const obs = observe(this.bot);
     const before = new Set(this.memory.data.achieved);
-    const goal = nextGoal(obs.inv, this.memory);
+    const goal = await this.resolveGoal(nextGoal(obs.inv, this.memory), obs);
     for (const id of this.memory.data.achieved) {
       if (!before.has(id)) {
         this.journal.add('milestone', { id });
@@ -275,7 +275,7 @@ export class Agent {
     this.events.log(`🔁 반성 시간: 반복 실패 ${repeated.length}개(저장된 스킬 ${failing.length}개 수리), 죽음 ${digest.deaths.length}회 분석`);
 
     const obs = observe(this.bot);
-    const goal = nextGoal(obs.inv, this.memory);
+    const goal = await this.resolveGoal(nextGoal(obs.inv, this.memory), obs);
     for (const [name, f] of failing.slice(0, 2)) {
       const request =
         `스킬 "${name}"이(가) 최근 ${f.n}번 실패했다. 에러들: ${f.errors.join(' | ')}\n` +
@@ -297,6 +297,60 @@ export class Agent {
       this.journal.add('reflect', { lessons: this.memory.data.lessons.length });
       this.events.log(`🧩 교훈 ${this.memory.data.lessons.length}개로 정리`);
     }
+  }
+
+  /**
+   * After the fixed tool path, the bot picks its own goals like a player would.
+   * A goal with a target item is done when the inventory has it; any goal is dropped
+   * after freeGoalMaxSteps turns so it can't get stuck forever.
+   */
+  async resolveGoal(goal, obs) {
+    if (goal.id !== 'free') return goal;
+    const m = this.memory.data;
+    m.goalHistory ??= [];
+    const fg = m.freeGoal;
+    if (fg) {
+      fg.steps = (fg.steps ?? 0) + 1;
+      const done = fg.target && (obs.inv[fg.target.item] ?? 0) >= fg.target.count;
+      if (done || fg.steps > this.config.freeGoalMaxSteps) {
+        m.goalHistory = [...m.goalHistory, { goal: fg.text, result: done ? '달성' : '포기' }].slice(-10);
+        m.freeGoal = null;
+        this.journal.add(done ? 'self_goal_done' : 'self_goal_dropped', { goal: fg.text });
+        this.events.log(done ? `🏁 스스로 정한 목표 달성: ${fg.text}` : `🏳️ 목표 포기 (${fg.steps}턴): ${fg.text}`);
+        if (done) this.#snapshot(`self-${fg.target.item}`);
+        else this.memory.addLesson(`"${fg.text}"은(는) ${fg.steps}턴 안에 못 했다 - 더 작게 나누거나 다른 방법`);
+      } else {
+        this.memory.save();
+        return { id: 'free', text: fg.text, target: fg.target };
+      }
+    }
+
+    const reg = this.bot.registry;
+    const text = await this.llm.ask(
+      'fast',
+      GOAL_SYSTEM,
+      [
+        obs.text,
+        this.journal.deathSummary() ? `죽음 기록: ${this.journal.deathSummary()}` : '',
+        `최근 목표: ${m.goalHistory.length ? m.goalHistory.map((g) => `${g.goal}(${g.result})`).join(', ') : '없음'}`,
+      ].join('\n'),
+      { maxTokens: 800 },
+    );
+    let g = {};
+    try {
+      g = parseJson(text);
+    } catch {}
+    const item = typeof g.item === 'string' && reg.itemsByName[g.item] ? g.item : null;
+    m.freeGoal = {
+      text: String(g.goal || '주변을 탐험하며 쓸만한 자원 모으기').slice(0, 120),
+      target: item ? { item, count: Math.max(1, Math.min(64, Number(g.count) || 1)) } : null,
+      steps: 0,
+      setAt: new Date().toISOString(),
+    };
+    this.memory.save();
+    this.journal.add('self_goal', { goal: m.freeGoal.text, target: m.freeGoal.target });
+    this.events.log(`🎯 스스로 정한 새 목표: ${m.freeGoal.text}${item ? ` (${item} x${m.freeGoal.target.count})` : ''}`);
+    return { id: 'free', text: m.freeGoal.text, target: m.freeGoal.target };
   }
 
   /** Data-driven plan for the current goal + the concrete next skill call. */
@@ -353,7 +407,7 @@ export class Agent {
       const before = snapshotState(this.bot);
       const out = await this.#exec(this.skills.code(name), args);
       const d = diffState(before, snapshotState(this.bot));
-      if (!d.effect) {
+      if (!d.effect && !this.skills.index[name]?.passive) {
         // Finished without error but changed nothing: not a real success.
         this.skills.record(name, false);
         this.journal.add('skill_fail', { name, error: '효과 없음 (인벤토리/위치/허기/몹 변화 없음)' });

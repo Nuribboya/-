@@ -1,11 +1,12 @@
 import vm from 'node:vm';
+import { BODY_ACTIONS, OTHER_ASYNC } from './api-names.js';
 
 // NOTE: node:vm is NOT a hard security boundary. This blocks the obvious escapes in
 // model-written code, but run the bot in a throwaway container / dedicated machine.
 const BANNED =
   /\b(process|require|import|eval|Function|constructor|globalThis|global|child_process|fs|__proto__|prototype|Reflect|Proxy)\b/;
 
-const ASYNC_API = 'gather|craft|place|smelt|goTo|explore|attack|eat|sleep|useSkill|placeAt|digAt|equip|block';
+const ASYNC_API = [...BODY_ACTIONS, ...OTHER_ASYNC].join('|');
 const FLOATING = new RegExp(`^\\s*api\\.(${ASYNC_API})\\(`, 'm');
 
 const stripLiterals = (code) =>
