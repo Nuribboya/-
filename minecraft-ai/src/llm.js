@@ -39,10 +39,10 @@ export class LLM {
    * back much faster when the model is told to stop early. Claude keeps `maxTokens`, because its
    * thinking also counts toward that limit.
    */
-  async ask(tier, system, messages, { maxTokens = 1500, localMaxTokens = null } = {}) {
+  async ask(tier, system, messages, { maxTokens = 1500, localMaxTokens = null, json = tier === 'fast' } = {}) {
     const { provider, model } = this.config[tier];
     const msgs = typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages;
-    if (provider === 'ollama') return this.#ollama(model, system, msgs, tier === 'fast', localMaxTokens ?? Math.min(maxTokens, 2048));
+    if (provider === 'ollama') return this.#ollama(model, system, msgs, json, localMaxTokens ?? Math.min(maxTokens, 2048));
     if (provider === 'anthropic') return this.#anthropicCall(tier, model, system, msgs, maxTokens);
     throw new Error(`unknown provider: ${provider}`);
   }

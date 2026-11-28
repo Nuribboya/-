@@ -93,7 +93,15 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       if (n.endsWith('_planks')) hints.push(`await api.craft('${n}') turns 1 ${n.replace('_planks', '_log')} into 4 ${n}`);
       else if (n === 'stick') hints.push("await api.craft('stick') turns 2 planks into 4 sticks");
     }
-    const tableNote = best.r.requiresTable && !tableNearby ? ' Also needs a crafting_table PLACED within 32 blocks (await api.place("crafting_table")).' : '';
+    const needTable = best.r.requiresTable && !tableNearby;
+    const missing = Object.entries(best.need).filter(([n, c]) => (inv[n] ?? 0) < c);
+    if (!missing.length && needTable) {
+      const tableHint = inv.crafting_table
+        ? 'place the one you carry: place_block {block: "crafting_table"}'
+        : 'make one (4 planks) and place it, or go back to the one you placed';
+      return `cannot craft ${name}: you HAVE all ingredients (${parts.join(', ')}), only a crafting_table is missing within 32 blocks - ${tableHint}`;
+    }
+    const tableNote = needTable ? ' Also needs a crafting_table PLACED within 32 blocks (await api.place("crafting_table")).' : '';
     return `cannot craft ${name}: needs ${parts.join(', ')}.${tableNote}${hints.length ? ' Next step: ' + hints.join('; ') : ''}`;
   };
 
@@ -263,7 +271,13 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       while (got < count) {
         check();
         const [pos] = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 1 });
-        if (!pos) throw new Error(`no ${name} within ${maxDistance} blocks (got ${got}/${count}) - ${oreHint(name, Math.floor(bot.entity.position.y))}`);
+        if (!pos) {
+          const y = Math.floor(bot.entity.position.y);
+          const hint = name === 'log' && y < 55
+            ? `you are underground (y=${y}) and trees grow on the surface: run go_to_surface first`
+            : oreHint(name, y);
+          throw new Error(`no ${name} within ${maxDistance} blocks (got ${got}/${count}) - ${hint}`);
+        }
         await goto(pos.x, pos.y, pos.z, 2);
         const block = bot.blockAt(pos);
         if (!block || !matcherFor(name)(block)) continue;
@@ -550,6 +564,19 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         steps++;
       }
       return p.y;
+    },
+
+    /**
+     * Go up to the surface (default y=70): the pathfinder digs and pillars as needed.
+     * Use it when stuck underground without wood, or to get out of a cave.
+     */
+    async ascend(targetY = 70) {
+      check();
+      const start = Math.floor(bot.entity.position.y);
+      if (start >= targetY) return start;
+      await withTimeout(bot.pathfinder.goto(new goals.GoalY(targetY)), 90000, `could not climb from y=${start} to y=${targetY} within 90s - try again (it continues from where it stopped)`);
+      check();
+      return Math.floor(bot.entity.position.y);
     },
 
     /** Walk into a nearby cave (finds cave air with a floor). Returns where it went. */

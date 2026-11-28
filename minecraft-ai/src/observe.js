@@ -10,6 +10,18 @@ export function inventoryOf(bot) {
   return inv;
 }
 
+/** Durability of tools/armor in the inventory, with a warning when one is about to break. */
+function toolsText(bot) {
+  const parts = [];
+  for (const it of bot.inventory.items()) {
+    if (!it.maxDurability || !/_(pickaxe|axe|shovel|sword|hoe|helmet|chestplate|leggings|boots)$|^shield$/.test(it.name)) continue;
+    const left = Math.max(0, it.maxDurability - (it.durabilityUsed ?? 0));
+    const pct = Math.round((left / it.maxDurability) * 100);
+    parts.push(`${it.name} ${pct}%${pct <= 15 ? '(곧 부서짐! 새로 만들 재료 준비)' : ''}`);
+  }
+  return parts.length ? `도구 내구도: ${parts.join(', ')}` : '도구 내구도: 도구 없음';
+}
+
 /** Text snapshot of the world for the model. */
 export function observe(bot) {
   const p = bot.entity.position;
@@ -36,6 +48,7 @@ export function observe(bot) {
       `위치: (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) / 체력 ${Math.round(bot.health)}/20 / 허기 ${Math.round(bot.food)}/20`,
       `시간: ${isNight(bot) ? '밤 (지표에 적대 몹 많음 - 지하 작업 추천)' : '낮'}`,
       `인벤토리: ${Object.keys(inv).length ? JSON.stringify(inv) : '비어있음'}`,
+      toolsText(bot),
       `주변 블록(24칸, 개수/최단거리): ${Object.keys(near).length ? JSON.stringify(near) : '특별한 것 없음'}`,
       `주변 생물: ${mobs.length ? mobs.map((m) => `${m.name}${m.hostile ? '(적대)' : ''}@${m.dist}`).join(', ') : '없음'}`,
     ].join('\n'),

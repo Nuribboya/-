@@ -40,7 +40,7 @@ function connect() {
     const movements = new Movements(bot);
     // Pathfinder pillars up with dirt + cobblestone by default. Cobblestone is needed for the
     // furnace and stone tools, so build with junk blocks instead.
-    movements.scafoldingBlocks = ['dirt', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack']
+    movements.scafoldingBlocks = ['dirt', 'cobbled_deepslate', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack']
       .map((n) => bot.registry.itemsByName[n]?.id)
       .filter((id) => id !== undefined);
     bot.pathfinder.setMovements(movements);

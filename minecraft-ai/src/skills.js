@@ -45,6 +45,11 @@ const SEEDS = {
     args: { y: -58 },
     code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
   },
+  go_to_surface: {
+    description: '지하에서 지상으로 올라간다 (기본 y=70). 나무가 필요하거나 지하에 갇혔을 때',
+    args: { y: 70 },
+    code: `const y = await api.ascend(args.y ?? 70);\nreturn { y };`,
+  },
   explore_cave: {
     description: '근처 동굴 안으로 들어가 둘러본다 (광석 찾기)',
     args: {},

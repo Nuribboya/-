@@ -437,9 +437,15 @@ export class Agent {
       'smart',
       REFLECT_SYSTEM,
       `기존 교훈:\n${this.memory.data.lessons.map((l) => '- ' + l).join('\n') || '- 없음'}\n\n최근 일지:\n${this.journal.recentText(40)}\n\n${this.journal.deathSummary()}`,
-      { maxTokens: 2000, localMaxTokens: 600 },
+      { maxTokens: 2000, localMaxTokens: 1200, json: true },
     );
-    const { lessons } = parseJson(text);
+    let lessons = null;
+    try {
+      ({ lessons } = parseJson(text));
+    } catch {
+      this.events.log('⚠️ 교훈 정리 답변이 JSON이 아니어서 이번엔 건너뜀');
+      return;
+    }
     if (Array.isArray(lessons) && lessons.length) {
       this.memory.data.lessons = lessons.filter((l) => typeof l === 'string').slice(0, 8);
       this.memory.save();

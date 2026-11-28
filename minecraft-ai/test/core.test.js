@@ -1159,3 +1159,56 @@ test('agent: the bot\'s advancement chat line goes to the journal', async () => 
   assert.deepEqual(memory.data.advancementsFromChat, ['minecraft:story/mine_diamond']);
   bot._client.emit('advancements', { reset: true, advancementMapping: [], progressMapping: [] }); // no crash
 });
+
+test('stuck underground: wood hint says go up, ascend climbs, craft says only the table is missing', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const require = createRequire(import.meta.url);
+  const reg = require('prismarine-registry')('26.1');
+  const Recipe = require('prismarine-recipe')(reg).Recipe;
+  const pos = new Vec3(0, -40, 0);
+  const inv = [
+    { name: 'cobbled_deepslate', type: reg.itemsByName.cobbled_deepslate.id, count: 64 },
+    { name: 'stick', type: reg.itemsByName.stick.id, count: 8 },
+  ];
+  let goal = null;
+  const bot = {
+    registry: reg,
+    entity: { position: pos },
+    inventory: { items: () => inv },
+    findBlocks: () => [],
+    findBlock: () => null,
+    recipesFor: () => [],
+    recipesAll: (id, meta, table) => Recipe.find(id, meta).filter((r) => !r.requiresTable || table),
+    pathfinder: { goto: async (g) => ((goal = g), (pos.y = g.y)) },
+  };
+  const api = createApi(bot, { aborted: false });
+  await assert.rejects(api.gather('log', 2), /underground \(y=-40\).*go_to_surface/);
+  await assert.rejects(api.craft('stone_pickaxe'), /you HAVE all ingredients .*only a crafting_table is missing/);
+  assert.equal(await api.ascend(70), 70);
+  assert.equal(goal.y, 70);
+  assert.equal(await api.ascend(60), 70); // already above
+});
+
+test('observation shows tool durability and warns before a tool breaks', async () => {
+  const { observe } = await import('../src/observe.js');
+  const { Vec3 } = await import('vec3');
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    entities: {},
+    health: 20,
+    food: 20,
+    time: { timeOfDay: 1000 },
+    findBlocks: () => [],
+    inventory: { items: () => [
+      { name: 'iron_pickaxe', count: 1, maxDurability: 250, durabilityUsed: 230 },
+      { name: 'iron_helmet', count: 1, maxDurability: 165, durabilityUsed: 0 },
+      { name: 'cobblestone', count: 5 },
+    ] },
+  };
+  const text = observe(bot).text;
+  assert.match(text, /iron_pickaxe 8%\(곧 부서짐/);
+  assert.match(text, /iron_helmet 100%/);
+  assert.doesNotMatch(text, /cobblestone \d+%/);
+});

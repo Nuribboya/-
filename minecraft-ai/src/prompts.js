@@ -9,6 +9,7 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.placeAt(x,y,z, blockName): 정확한 좌표에 블록 설치 (옆에 단단한 블록이 있어야 함, 내 몸 위치(발/머리)에는 불가)
 - api.digAt(x,y,z): 정확한 좌표의 블록 캐기 (예: 발밑 파고 숨기 = api.digAt(p.x, p.y-1, p.z))
 - api.descend(targetY=-58): 계단식으로 파 내려가기 (용암/물/낭떠러지 감지하면 에러로 멈춤)
+- api.ascend(targetY=70): 지상으로 올라가기
 - api.exploreCave(maxDistance=32): 근처 동굴 안으로 이동
 - api.shelter(blockName?): 땅 3칸 파고 들어가 위를 막는 은신처 (위급할 때)
 - api.sleepInBed(): 밤에 근처 침대(없으면 인벤토리 침대를 설치)에서 자기
@@ -38,6 +39,7 @@ export const DECISION_SYSTEM = `너는 마인크래프트(자바 에디션)를 �
 - 생존 우선: 체력 8 이하, 허기 6 이하, 밤에 적대 몹이 가까우면 먼저 대응 (먹기/싸우기/도망/은신).
 - 밤에도 쉬지 않고 계속 작업한다. 밤엔 지표에 적대 몹이 많으니 광질(descend_mine, mine_block)이나 동굴 탐험 같은 지하 작업을 하면 좋다. 체력이 낮고 적대 몹에 몰렸을 때만 night_shelter로 잠깐 숨는다. 밤에 쉬거나 기다리라는 예전 교훈은 따르지 않는다.
 - 광석이 근처에 없으면: 광석 높이로 descend_mine, 동굴이 보이면 explore_cave, 지표면은 explore_area.
+- 지하에서 나무(원목)가 필요하면 go_to_surface로 먼저 올라간다. 도구 내구도가 낮으면 부서지기 전에 새 도구 재료를 챙긴다.
 - '자동 계획'은 게임 데이터로 계산한 정답 순서다. 위급한 생존 상황이 아니면 follow_plan으로 여러 단계를 한 번에 실행하는 것이 가장 빠르다 (또는 '추천 다음 행동' 하나).
 - "skill"에는 '보유 스킬' 목록에 실제로 있는 이름만 쓴다. 실패해서 저장되지 않은 스킬 이름은 존재하지 않는다.
 - 현재 목표를 한 단계씩 진행. 이미 있는 스킬로 되면 그걸 쓴다 (원목은 collect_logs, 제작은 craft_item, 설치는 place_block). 맞는 스킬이 없거나 연속 실패 중이면 write_skill.
