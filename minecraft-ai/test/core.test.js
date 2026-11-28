@@ -676,3 +676,31 @@ test('one full decision turn: observe -> plan -> model picks a skill -> run -> j
   assert.match(agent.lastResult, /^실패: no log within 48 blocks/); // ran for real, nothing around
   assert.equal(journal.entries.at(-1).type, 'skill_fail');
 });
+
+test('craft only asks mineflayer for as many crafts as the ingredients allow', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const inv = [{ name: 'oak_log', type: 10, count: 2 }];
+  let asked = null;
+  const logs = [];
+  const bot = {
+    registry: { itemsByName: { oak_planks: { id: 20 } }, items: {} },
+    entity: { position: { floored: () => ({}) } },
+    inventory: { items: () => inv },
+    recipesFor: () => [{ delta: [{ id: 10, count: -1 }, { id: 20, count: 4 }], requiresTable: false }],
+    craft: async (r, n) => {
+      asked = n;
+      inv[0].count -= n;
+      inv.push({ name: 'oak_planks', type: 20, count: 4 * n });
+    },
+  };
+  const api = createApi(bot, { aborted: false }, (m) => logs.push(m));
+  assert.equal(await api.craft('oak_planks', 4), 8); // 2 logs -> only 2 crafts
+  assert.equal(asked, 2);
+  assert.match(logs[0], /asked for 4 crafts, ingredients only allow 2/);
+
+  bot.craft = async () => {
+    throw new Error('Error: Event updateSlot:0 did not fire within timeout of 20000ms');
+  };
+  inv[0].count = 1;
+  await assert.rejects(api.craft('oak_planks', 1), /got stuck \(server did not answer\)/);
+});

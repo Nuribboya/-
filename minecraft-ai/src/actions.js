@@ -210,7 +210,24 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         if (!recipe) throw new Error(explainCraft(name, item, true));
         await goto(table.position.x, table.position.y, table.position.z, 3);
       }
-      await bot.craft(recipe, times, table);
+      // mineflayer repeats the craft `times` times without re-checking ingredients; once they run
+      // out it waits 20s for a result that never comes ("updateSlot:0 did not fire"). So only
+      // ask for as many crafts as the inventory can actually pay for.
+      const need = {};
+      for (const d of recipe.delta) if (d.count < 0) need[d.id] = (need[d.id] ?? 0) - d.count;
+      const haveOf = (id) => bot.inventory.items().filter((i) => i.type === Number(id)).reduce((n, i) => n + i.count, 0);
+      const affordable = Math.min(...Object.entries(need).map(([id, c]) => Math.floor(haveOf(id) / c)));
+      const n = Math.max(1, Math.min(Math.floor(Number(times)) || 1, affordable));
+      if (n < times) log(`${name}: asked for ${times} crafts, ingredients only allow ${n}`);
+      const before = inventoryOf(bot)[name] ?? 0;
+      try {
+        await bot.craft(recipe, n, table);
+      } catch (e) {
+        const made = (inventoryOf(bot)[name] ?? 0) - before;
+        if (/did not fire|timeout/i.test(e.message))
+          throw new Error(`crafting ${name} got stuck (server did not answer), made ${made} so far - stand next to the crafting table and try again`);
+        throw e;
+      }
       return inventoryOf(bot)[name] ?? 0;
     },
 
