@@ -24,6 +24,19 @@ const NEXT_GOALS = [
   { item: 'diamond_sword', count: 1, why: '최고 무기' },
 ];
 
+// After the advancements: everything up to a lit nether portal (not going in yet).
+const NETHER_PREP = [
+  { id: 'np_pickaxe', text: '네더 준비 1/4: 다이아 곡괭이 (흑요석은 이것만 캔다)', target: { item: 'diamond_pickaxe', count: 1 } },
+  { id: 'np_obsidian', text: '네더 준비 2/4: 흑요석 10개 (get_obsidian: 자연산을 캐거나 용암에 물을 부어 만들기)', target: { item: 'obsidian', count: 10 } },
+  { id: 'np_flint', text: '네더 준비 3/4: 부싯돌과 부시 (철 1 + 자갈에서 나오는 부싯돌 1)', target: { item: 'flint_and_steel', count: 1 } },
+  {
+    id: 'np_portal',
+    text: '네더 준비 4/4: 평평한 곳에 포탈 틀을 짓고 불 붙이기 (들어가지는 않음)',
+    target: null,
+    finish: { text: '포탈 짓고 불 붙이기', action: { skill: 'build_nether_portal', args: {} } },
+  },
+];
+
 export class Goals {
   constructor({ bot, llm, memory, journal, events, config, snapshot = () => {}, advancements = null }) {
     Object.assign(this, { bot, llm, memory, journal, events, config, snapshot, advancements });
@@ -54,7 +67,7 @@ export class Goals {
     const m = this.memory.data;
     m.goalHistory ??= [];
     const fg = m.freeGoal;
-    const asGoal = (g) => ({ id: 'free', text: g.text, target: g.target, finish: g.finish ?? null, advId: g.advId ?? null });
+    const asGoal = (g) => ({ id: 'free', text: g.text, target: g.target, finish: g.finish ?? null, advId: g.advId ?? null, prepId: g.prepId ?? null });
 
     if (fg && !advance) return asGoal(fg);
     if (!fg && !advance) return { ...fallback, target: null };
@@ -64,7 +77,11 @@ export class Goals {
       fg.steps = (fg.steps ?? 0) + 1;
       const haveTarget = fg.target && (owned[fg.target.item] ?? 0) >= fg.target.count;
       // Advancement goals are done when the server says so (an item-only one also when we have it).
-      const done = fg.advId ? this.advancements?.isDone(fg.advId) || (haveTarget && !fg.finish) : haveTarget;
+      const done = fg.prepId === 'np_portal'
+        ? !!m.portalAt
+        : fg.advId
+          ? this.advancements?.isDone(fg.advId) || (haveTarget && !fg.finish)
+          : haveTarget;
       if (!done && fg.steps <= this.config.freeGoalMaxSteps) {
         this.memory.save();
         return asGoal(fg);
@@ -86,6 +103,19 @@ export class Goals {
         this.memory.save();
         this.journal.add('self_goal', { goal: adv.text, target: adv.target, advancement: adv.title });
         this.events.log(`🏆 다음 목표 (발전 과제): ${adv.title}`);
+        return asGoal(m.freeGoal);
+      }
+    }
+
+    // Then the nether preparation, step by step (deterministic too).
+    if (this.config.netherPrep !== false && !m.portalAt) {
+      const step = NETHER_PREP.find((p) => (p.target ? (owned[p.target.item] ?? 0) < p.target.count : true));
+      // the steps build on each other: once obsidian/flint are in hand, earlier steps are done
+      if (step) {
+        m.freeGoal = { text: step.text, target: step.target, finish: step.finish ?? null, prepId: step.id, steps: 0, setAt: new Date().toISOString() };
+        this.memory.save();
+        this.journal.add('self_goal', { goal: step.text, target: step.target });
+        this.events.log(`🌋 다음 목표 (네더 준비): ${step.text}`);
         return asGoal(m.freeGoal);
       }
     }

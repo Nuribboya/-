@@ -13,6 +13,10 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.exploreCave(maxDistance=32): 근처 동굴 안으로 이동
 - api.shelter(blockName?): 땅 3칸 파고 들어가 위를 막는 은신처 (위급할 때)
 - api.sleepInBed(): 밤에 근처 침대(없으면 인벤토리 침대를 설치)에서 자기
+- api.fillBucket(liquid='water'): 빈 양동이로 물/용암 원천 뜨기
+- api.pourBucket(x,y,z, bucketName='water_bucket'): 그 칸에 물(또는 용암) 붓기
+- api.makeObsidian(count=10): 흑요석 얻기 (자연산 캐기 → 없으면 용암에 물 부어 만들기, 다이아 곡괭이 필요)
+- api.buildPortal(): 네더 포탈 틀 짓고 불 붙이기 (흑요석 10, 모서리 블록 4, 부싯돌과 부시)
 - api.equip(itemName, slot='hand'): 장착. slot = hand | off-hand | head | torso | legs | feet (갑옷, 방패, 칼)
 - api.block(ms=1500): 왼손(off-hand) 방패 들기, 최대 5초. 먼저 await api.equip('shield','off-hand')
 - api.eat()

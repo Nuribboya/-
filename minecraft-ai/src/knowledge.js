@@ -38,9 +38,12 @@ const MINE = {
   dirt: 'dirt',
   sand: 'sand',
   gravel: 'gravel',
-  flint: 'gravel',
   clay_ball: 'clay',
+  obsidian: 'obsidian', // needs a diamond pickaxe; get_obsidian also knows how to make it
 };
+
+// Items that only drop sometimes from a block: mine that block until enough of the item came out.
+export const CHANCE_DROP = { flint: 'gravel' };
 
 // Items you get by killing a mob (white wool: sheep are mostly white).
 export const MOB_DROP = {
@@ -179,6 +182,11 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
     if (have) take(name, have);
     if (depth > 25) return steps.push({ do: 'unknown', item: name, count: missing });
 
+    if (CHANCE_DROP[name]) {
+      const block = CHANCE_DROP[name];
+      return steps.push({ do: 'gather', block, item: name, count: missing, until: name, tool: minTool(reg, block) });
+    }
+
     const mineFrom = MINE[name] ?? (name.endsWith('_log') ? name : null);
     if (mineFrom) {
       const tool = minTool(reg, mineFrom);
@@ -223,7 +231,7 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
   // and merge back-to-back crafts of the same item.
   const merged = [];
   for (const s of steps) {
-    const first = s.do === 'gather' && merged.find((m) => m.do === 'gather' && m.block === s.block);
+    const first = s.do === 'gather' && merged.find((m) => m.do === 'gather' && m.block === s.block && m.until === s.until);
     const prev = merged.at(-1);
     if (first) first.count += s.count;
     else if (s.do === 'craft' && prev?.do === 'craft' && prev.item === s.item) prev.times += s.times;
@@ -238,9 +246,10 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
 export function stepToAction(s) {
   switch (s.do) {
     case 'gather':
-      return s.block.endsWith('_log')
-        ? { skill: 'collect_logs', args: { count: s.count } }
-        : { skill: 'mine_block', args: { block: s.block, count: s.count } };
+      if (s.block.endsWith('_log')) return { skill: 'collect_logs', args: { count: s.count } };
+      if (s.item === 'obsidian') return { skill: 'get_obsidian', args: { count: s.count } };
+      if (s.until) return { skill: 'mine_block', args: { block: s.block, count: s.count, until: s.until } };
+      return { skill: 'mine_block', args: { block: s.block, count: s.count } };
     case 'craft':
       return { skill: 'craft_item', args: { item: s.item, count: s.times } };
     case 'smelt':
@@ -257,6 +266,8 @@ export function stepToAction(s) {
 export function stepText(s) {
   switch (s.do) {
     case 'gather':
+      if (s.until) return `${s.block} 캐기 (${s.item} x${s.count} 나올 때까지)`;
+      if (s.item === 'obsidian') return `흑요석 x${s.count} 얻기 (다이아 곡괭이로 캐거나, 용암에 물을 부어 만들기)`;
       return `${s.block} 캐기 x${s.count}${s.tool ? ` (${s.tool} 이상 필요)` : ''}`;
     case 'craft':
       return `${s.item} 제작 x${s.times}회${s.table ? ' (작업대 옆에서)' : ''}`;

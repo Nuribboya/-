@@ -499,6 +499,7 @@ export class Agent {
     const logs = [];
     let depth = 0;
     const hooks = {
+      onPortal: (pos) => this.#portalBuilt(pos),
       torches: this.config.torches,
       descendScan: this.policy.descendScan,
       planNext: () => this.goals.nextAction(this.currentGoal, inventoryOf(this.bot)),
@@ -735,6 +736,15 @@ export class Agent {
       this.journal.add('reflect', { lessons: this.memory.data.lessons.length });
       this.events.log(`🧩 교훈 ${this.memory.data.lessons.length}개로 정리`);
     }
+  }
+
+  #portalBuilt(pos) {
+    if (this.memory.data.portalAt) return;
+    this.memory.data.portalAt = pos;
+    this.memory.save();
+    this.journal.add('portal', { where: `${pos.x},${pos.y},${pos.z}` });
+    this.events.log(`🌀 네더 포탈 완성! (${pos.x},${pos.y},${pos.z}) - 네더 진출 준비 끝`);
+    this.#snapshot('nether-portal');
   }
 
   /** Snapshot the brain, then archive useless/failing skills. */

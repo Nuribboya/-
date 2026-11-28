@@ -170,7 +170,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       }
     }
     if (!ref) throw new Error(`nothing solid next to (${target.x},${target.y},${target.z}) to attach the block to`);
-    if (bot.entity.position.distanceTo(target) > 4) await goto(target.x, target.y, target.z, 3);
+    // reach is measured from the eyes to the block centre (the top of a portal frame is high)
+    if (bot.entity.position.offset(0, 1.62, 0).distanceTo(target.offset(0.5, 0.5, 0.5)) > 4.5) await goto(target.x, target.y, target.z, 3);
     await clearCell(target);
     await bot.equip(item, 'hand');
     check();
@@ -311,6 +312,45 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     throw new Error(isBed ? 'no flat 2-block spot next to you for the bed - move to open flat ground' : 'no free spot within 4 blocks to place the block - explore_area to open ground first');
   };
 
+  let raw = null; // unqueued versions, for tools that use other tools (a queued call would deadlock)
+
+  /** Scoop the nearest source block of `liquid` with an empty bucket. */
+  const fillBucketRaw = async (liquid = 'water') => {
+    check();
+    const bucket = bot.inventory.items().find((i) => i.name === 'bucket');
+    if (!bucket) throw new Error('no empty bucket (bucket = 3 iron ingots)');
+    const isSource = (b) => b.name === liquid && String(b.getProperties?.().level ?? b.metadata) === '0';
+    const src = bot.findBlock({ matching: isSource, maxDistance: 32 });
+    if (!src) throw new Error(`no ${liquid} source block within 32 blocks`);
+    if (bot.entity.position.distanceTo(src.position) > 4)
+      await withTimeout(goto(src.position.x, src.position.y, src.position.z, 3), 40000, `could not reach the ${liquid}`);
+    await bot.equip(bucket, 'hand');
+    await bot.lookAt(src.position.offset(0.5, 0.5, 0.5), true);
+    check();
+    bot.activateItem();
+    await sleep(700);
+    if (!bot.inventory.items().some((i) => i.name === `${liquid}_bucket`)) throw new Error(`tried to scoop ${liquid} but got no ${liquid}_bucket`);
+    return `${liquid}_bucket`;
+  };
+
+  /** Pour a full bucket into cell `t` (clicks a solid block next to it, on the face toward it). */
+  const pourRaw = async (t, bucketName = 'water_bucket') => {
+    check();
+    const item = bot.inventory.items().find((i) => i.name === bucketName);
+    if (!item) throw new Error(`no ${bucketName}`);
+    if (bot.entity.position.distanceTo(t) > 4) await withTimeout(goto(t.x, t.y, t.z, 3), 30000, 'could not get close enough to pour');
+    for (const [dx, dy, dz] of NEIGHBORS) {
+      const ref = bot.blockAt(t.offset(dx, dy, dz));
+      if (!ref || ref.boundingBox !== 'block') continue;
+      await bot.equip(item, 'hand');
+      check();
+      await bot.activateBlock(ref, new Vec3(-dx, -dy, -dz));
+      await sleep(500);
+      return t;
+    }
+    throw new Error('nothing solid next to that spot to pour against');
+  };
+
   const api = {
     log,
     /** Run another saved skill by name from inside a skill: await api.useSkill('collect_logs', {count: 3}) */
@@ -366,7 +406,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     goTo: goto,
 
     /** Mine `count` blocks. name 'log' = any log. Walks to them, equips best tool, picks up drops. */
-    async gather(name, count = 1, maxDistance = 48) {
+    async gather(name, count = 1, maxDistance = 48, untilItem = null) {
       if (!name || typeof name !== 'string') throw new Error("which block? give a block name, e.g. mine_block {block: 'stone', count: 3} or {block: 'iron_ore'}");
       // The model often asks for the drop (raw_iron, cobblestone, coal) instead of the block.
       const mapped = blockForItem(name);
@@ -381,7 +421,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       }
       let got = 0;
       const unsafe = new Set();
-      while (got < count) {
+      // "until": e.g. gravel until enough flint came out (flint only drops sometimes)
+      const untilGoal = untilItem ? (inventoryOf(bot)[untilItem] ?? 0) + count : null;
+      const more = () => (untilItem ? (inventoryOf(bot)[untilItem] ?? 0) < untilGoal && got < count * 40 : got < count);
+      while (more()) {
         check();
         const pos = pickTarget(name, maxDistance, unsafe);
         if (!pos && unsafe.size) throw new Error(`the only ${name} nearby (got ${got}/${count}) are next to water/lava or under sand - unsafe to dig, look elsewhere`);
@@ -772,6 +815,147 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       return { moved: bot.entity.position.distanceTo(start) >= 1 };
     },
 
+    fillBucket: (liquid = 'water') => fillBucketRaw(liquid),
+
+    /** Pour water (or lava) from a full bucket into the cell at x, y, z. */
+    pourBucket: (x, y, z, bucketName = 'water_bucket') => pourRaw(new Vec3(Math.floor(x), Math.floor(y), Math.floor(z)), bucketName),
+
+    /**
+     * Get `count` obsidian: mine natural obsidian nearby if there is safe one, otherwise make it -
+     * pour water onto a lava pool (lava source blocks it reaches turn into obsidian), take the
+     * water back, and mine the new obsidian that does not touch lava. Needs a diamond pickaxe.
+     */
+    async makeObsidian(count = 10) {
+      check();
+      const have = () => inventoryOf(bot).obsidian ?? 0;
+      const start = have();
+      const pick = bestTool('pickaxe');
+      if (!pick || !/^(diamond|netherite)_pickaxe$/.test(pick.name)) throw new Error('obsidian can only be mined with a diamond pickaxe - make one first');
+      try {
+        await raw.gather('obsidian', count, 32);
+        return { made: have() - start, how: 'mined natural obsidian' };
+      } catch (e) {
+        log(`natural obsidian not enough: ${e.message}`);
+      }
+      const isLavaSource = (b) => b.name === 'lava' && String(b.getProperties?.().level ?? b.metadata) === '0';
+      for (let round = 1; have() - start < count && round <= 4; round++) {
+        check();
+        if (!inventoryOf(bot).water_bucket) await fillBucketRaw('water');
+        // Where to pour: the open cell right above a lava source if something solid touches it,
+        // else an open cell beside it on solid ground (the water then flows over the lava).
+        const dry = (c) => {
+          const b = bot.blockAt(c);
+          return isOpen(b) && !LIQUID.test(b?.name ?? '');
+        };
+        const hasSurface = (c) => NEIGHBORS.some(([x, y, z]) => bot.blockAt(c.offset(x, y, z))?.boundingBox === 'block');
+        let lavaAt = null;
+        let t = null;
+        for (const p of bot.findBlocks({ matching: isLavaSource, maxDistance: 32, count: 64 })) {
+          const above = p.offset(0, 1, 0);
+          if (!dry(above)) continue;
+          if (hasSurface(above)) {
+            [lavaAt, t] = [p, above];
+            break;
+          }
+          const side = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+            .map(([x, z]) => above.offset(x, 0, z))
+            .find((c) => dry(c) && bot.blockAt(c.offset(0, -1, 0))?.boundingBox === 'block');
+          if (side) {
+            [lavaAt, t] = [p, side];
+            break;
+          }
+        }
+        if (!t) throw new Error(`need a lava pool with solid ground beside it within 32 blocks (got ${have() - start}/${count} obsidian)`);
+        log(`pouring water onto lava at (${lavaAt.x},${lavaAt.y},${lavaAt.z})`);
+        await pourRaw(t, 'water_bucket');
+        await sleep(2500); // the water spreads; lava sources it reaches become obsidian
+        if (inventoryOf(bot).bucket) {
+          // scoop the water back so it stops flowing
+          try {
+            await bot.equip(bot.inventory.items().find((i) => i.name === 'bucket'), 'hand');
+            await bot.lookAt(t.offset(0.5, 0.5, 0.5), true);
+            bot.activateItem();
+            await sleep(600);
+          } catch {}
+        }
+        try {
+          await raw.gather('obsidian', count - (have() - start), 12);
+        } catch (e) {
+          log(`mining the new obsidian: ${e.message}`);
+        }
+      }
+      const made = have() - start;
+      if (!made) throw new Error('could not get obsidian here (the new obsidian still touches lava, unsafe to mine) - try another lava pool');
+      return { made };
+    },
+
+    /**
+     * Build a nether portal frame (10 obsidian + 4 filler corner blocks) on flat clear ground
+     * nearby and light it with flint and steel. Does not go in.
+     */
+    async buildPortal() {
+      check();
+      const existing = bot.findBlock({ matching: (b) => b.name === 'nether_portal', maxDistance: 16 });
+      if (existing) {
+        hooks.onPortal?.({ x: existing.position.x, y: existing.position.y, z: existing.position.z });
+        return { portal: existing.position, note: 'a lit portal already exists here' };
+      }
+      const inv = inventoryOf(bot);
+      if ((inv.obsidian ?? 0) < 10) throw new Error(`need 10 obsidian (have ${inv.obsidian ?? 0})`);
+      if (!inv.flint_and_steel) throw new Error('need flint_and_steel to light it (1 iron ingot + 1 flint)');
+      const FILL = ['cobblestone', 'cobbled_deepslate', 'dirt', 'stone', 'andesite', 'diorite', 'granite', 'netherrack', 'tuff'];
+      const isFill = (n) => FILL.includes(n) || n.endsWith('_planks');
+      const fillCount = bot.inventory.items().filter((i) => isFill(i.name)).reduce((n, i) => n + i.count, 0);
+      if (fillCount < 4) throw new Error('need 4 filler blocks for the corners (dirt, cobblestone or planks)');
+
+      const solid = (p) => bot.blockAt(p)?.boundingBox === 'block';
+      const clear = (p) => {
+        const b = bot.blockAt(p);
+        return isOpen(b) && !LIQUID.test(b?.name ?? '');
+      };
+      const base = bot.entity.position.floored();
+      let site = null;
+      for (let dx = -6; dx <= 6; dx++)
+        for (let dz = -6; dz <= 6; dz++)
+          for (let dy = -2; dy <= 2; dy++)
+            for (const axis of ['x', 'z']) {
+              const o = base.offset(dx, dy, dz);
+              // frame column i (0..3), height h (0..4), d = distance in front of the frame
+              const at = (i, h, d = 0) => (axis === 'x' ? o.offset(i, h, d) : o.offset(d, h, i));
+              const ok =
+                [0, 1, 2, 3].every((i) => solid(at(i, -1)) && [0, 1, 2, 3, 4].every((h) => clear(at(i, h)))) &&
+                solid(at(1, -1, -2)) && clear(at(1, 0, -2)) && clear(at(1, 1, -2)) && clear(at(1, 0, -1)) && clear(at(1, 1, -1));
+              if (ok && (!site || o.distanceTo(base) < site.o.distanceTo(base))) site = { o, at };
+            }
+      if (!site) throw new Error('no flat, clear 4 wide x 5 high spot within 6 blocks - move to open flat ground');
+      const { at } = site;
+      const stand = at(1, 0, -2);
+      await withTimeout(goto(stand.x, stand.y, stand.z, 0), 20000, 'could not reach the building spot').catch(() => {});
+
+      // corners can be any block; obsidian only where it counts
+      const ORDER = [[0, 0, 'f'], [3, 0, 'f'], [1, 0, 'o'], [2, 0, 'o'], [0, 1, 'o'], [0, 2, 'o'], [0, 3, 'o'], [3, 1, 'o'], [3, 2, 'o'], [3, 3, 'o'], [0, 4, 'f'], [3, 4, 'f'], [1, 4, 'o'], [2, 4, 'o']];
+      for (const [i, h, kind] of ORDER) {
+        check();
+        const p = at(i, h);
+        const here = bot.blockAt(p);
+        if (kind === 'f' && here?.boundingBox === 'block') continue;
+        if (kind === 'o' && here?.name === 'obsidian') continue;
+        const item = kind === 'o' ? 'obsidian' : bot.inventory.items().find((it) => isFill(it.name))?.name;
+        await placeAtRaw(p.x, p.y, p.z, item);
+      }
+      const fs = bot.inventory.items().find((i) => i.name === 'flint_and_steel');
+      await bot.equip(fs, 'hand');
+      check();
+      await bot.activateBlock(bot.blockAt(at(1, 0)), new Vec3(0, 1, 0));
+      await sleep(1000);
+      const inside = at(1, 1);
+      if (bot.blockAt(inside)?.name !== 'nether_portal')
+        throw new Error('frame built but it did not light - the 2x3 inside must be empty; try build_nether_portal again');
+      hooks.onPortal?.({ x: inside.x, y: inside.y, z: inside.z });
+      log(`🌀 nether portal lit at (${inside.x},${inside.y},${inside.z})`);
+      return { portal: { x: inside.x, y: inside.y, z: inside.z } };
+    },
+
     /** Walk into a nearby cave (finds cave air with a floor). Returns where it went. */
     async exploreCave(maxDistance = 32) {
       check();
@@ -827,6 +1011,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await goto(p.x + Math.cos(a) * distance, p.y, p.z + Math.sin(a) * distance, 3);
     },
   };
+  raw = { ...api };
+
   // Body actions run one at a time: Promise.all([gather a, gather b]) would make two
   // pathfinder goals cancel each other ("Path was stopped"). useSkill is not queued
   // (it calls these itself, queuing it would deadlock).

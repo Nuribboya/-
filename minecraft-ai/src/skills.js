@@ -33,7 +33,7 @@ const SEEDS = {
   mine_block: {
     description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄; raw_iron처럼 아이템 이름도 됨). 맞는 곡괭이 필요',
     args: { block: 'stone', count: 3 },
-    code: `await api.gather(args.block ?? args.item ?? args.ore ?? args.name, args.count ?? 1);\nreturn api.inventory();`,
+    code: `await api.gather(args.block ?? args.item ?? args.ore ?? args.name, args.count ?? 1, 48, args.until ?? null);\nreturn api.inventory();`,
   },
   smelt_item: {
     description: '근처 화로에서 item을 count개 굽는다 (예: raw_iron). 연료는 가진 것 중 자동 선택 (fuel로 지정 가능)',
@@ -44,6 +44,23 @@ const SEEDS = {
     description: '계단식으로 파 내려간다 (기본 y=-58 다이아 높이). 용암/물/낭떠러지가 보이면 멈춘다',
     args: { y: -58 },
     code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
+  },
+  fill_bucket: {
+    description: '빈 양동이로 가까운 물(또는 용암) 원천을 뜬다 (liquid = water | lava)',
+    args: { liquid: 'water' },
+    code: `return await api.fillBucket(args.liquid ?? 'water');`,
+  },
+  get_obsidian: {
+    description: '흑요석을 count개 얻는다: 근처 자연산을 캐고, 없으면 용암 웅덩이에 물을 부어 만들어서 캔다 (다이아 곡괭이 필요)',
+    args: { count: 10 },
+    timeoutMul: 4,
+    code: `return await api.makeObsidian(args.count ?? 10);`,
+  },
+  build_nether_portal: {
+    description: '평평한 곳에 네더 포탈 틀(흑요석 10 + 모서리 블록 4)을 짓고 부싯돌과 부시로 불을 붙인다 (들어가지는 않음)',
+    args: {},
+    timeoutMul: 3,
+    code: `return await api.buildPortal();`,
   },
   unstuck: {
     description: '벽이나 구석에 끼었을 때 빠져나오기 (막힌 블록을 부수고 다른 방향으로 이동)',

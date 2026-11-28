@@ -323,7 +323,7 @@ test('skills.closest maps made-up names to existing skills', () => {
   assert.equal(s.closest('collect_logs_v2'), 'collect_logs');
   assert.equal(s.closest('explore_area_safely'), 'explore_area');
   assert.equal(s.closest('eat_some_food'), 'eat_food');
-  assert.equal(s.closest('build_nether_portal'), null);
+  assert.equal(s.closest('tame_a_wolf'), null);
 });
 
 test('goto retries once when a stale stop cancels the first move', async () => {
@@ -529,7 +529,7 @@ test('self-chosen goals: pick, keep, complete, and give up', async () => {
   let asked = 0;
   const llm = { ask: async () => (asked++, '{"goal":"철 갑옷 만들기","item":"iron_chestplate","count":1}') };
   const memory = new Memory(dir);
-  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 2 } });
+  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 2 , netherPrep: false } });
   const base = { iron_pickaxe: 1 }; // fixed tool path done -> free goals
   const obs = { inv: base, text: '상태' };
 
@@ -563,7 +563,7 @@ test('free goals: no repeating what we already own (incl. worn armor) or just di
   let reply = '{"goal":"철 도끼 만들기","item":"iron_axe","count":1}';
   const prompts = [];
   const llm = { ask: async (t, sys, user) => (prompts.push(user), reply) };
-  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 } });
+  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 , netherPrep: false } });
   const inv = { iron_pickaxe: 1, iron_axe: 1 };
 
   const g = await goals.current({ inv, text: '' });
@@ -599,7 +599,7 @@ test('reading the goal (advance:false) neither spends a turn nor asks the model'
   let asked = 0;
   const llm = { ask: async () => (asked++, '{"goal":"침대 만들기","item":"white_bed","count":1}') };
   const memory = new Memory(dir);
-  const goals = new Goals({ bot: { registry: { itemsByName: { white_bed: {} } } }, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 } });
+  const goals = new Goals({ bot: { registry: { itemsByName: { white_bed: {} } } }, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 , netherPrep: false } });
   const obs = { inv: { iron_pickaxe: 1 }, text: '' };
   const g0 = await goals.current(obs, { advance: false }); // no goal yet: no LLM call
   assert.equal(asked, 0);
@@ -1157,7 +1157,7 @@ test('advancement goals: make the item, then do the finishing action, done when 
   assert.match(g3.text, /Husbandry/); // on to the next one
 
   // turned off -> back to the model/candidates
-  const g4goals = new Goals({ bot: { registry: reg, inventory: { slots: {} } }, llm: { ask: async () => '{"goal":"x","item":"shield","count":1}' }, memory: new Memory(tmp()), journal: new Journal(tmp()), events: { log() {} }, config: { freeGoalMaxSteps: 80, advancementGoals: false }, advancements: new Advancements() });
+  const g4goals = new Goals({ bot: { registry: reg, inventory: { slots: {} } }, llm: { ask: async () => '{"goal":"x","item":"shield","count":1}' }, memory: new Memory(tmp()), journal: new Journal(tmp()), events: { log() {} }, config: { freeGoalMaxSteps: 80, advancementGoals: false, netherPrep: false }, advancements: new Advancements() });
   assert.equal((await g4goals.current({ inv: { iron_pickaxe: 1 }, text: '' })).target.item, 'shield');
 });
 
@@ -1769,4 +1769,154 @@ test('no pickaxe: pathfinder may not break stone/ores (dirt/wood still fine); li
   assert.ok(!movements.blocksCantBreak.has(id('stone')));
   assert.ok(movements.blocksCantBreak.has(id('chest'))); // the pathfinder's own defaults are untouched
   assert.doesNotMatch(observe(bot).text, /곡괭이 없음/);
+});
+
+// fake world helpers for the nether tools: liquids are source blocks, findBlocks scans the overrides
+async function liquidWorld(opts) {
+  const w = await fakeWorld(opts);
+  const base = w.bot.blockAt;
+  w.bot.blockAt = (p) => ({ ...base(p), metadata: 0, getProperties: () => ({ level: '0' }) });
+  const scan = (matching, maxDistance = 32) => {
+    const out = [];
+    for (const k of w.blocks.keys()) {
+      const p = new w.Vec3(...k.split(',').map(Number));
+      const b = w.bot.blockAt(p);
+      const ok = typeof matching === 'function' ? matching(b) : b && matching === b.name;
+      if (ok && p.distanceTo(w.bot.entity.position) <= maxDistance) out.push(p);
+    }
+    return out.sort((a, c) => a.distanceTo(w.bot.entity.position) - c.distanceTo(w.bot.entity.position));
+  };
+  w.bot.findBlocks = ({ matching, maxDistance }) => scan(matching, maxDistance);
+  w.bot.findBlock = ({ matching, maxDistance }) => {
+    const [p] = scan(matching, maxDistance);
+    return p ? w.bot.blockAt(p) : null;
+  };
+  w.bot.lookAt = async () => {};
+  w.bot.registry.blocksByName.obsidian = { id: 50 };
+  w.bot.registry.blocksByName.gravel = { id: 51 };
+  return w;
+}
+
+test('flint: mine gravel until enough flint has dropped', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const gravel = {};
+  for (let x = 2; x <= 9; x++) gravel[`${x},64,0`] = 'gravel';
+  const w = await liquidWorld({ overrides: gravel });
+  const inv = [];
+  w.bot.inventory.items = () => inv;
+  let digs = 0;
+  const dig = w.bot.dig;
+  w.bot.dig = async (b) => {
+    digs++;
+    if (digs === 3) inv.push({ name: 'flint', count: 1 }); // flint only sometimes
+    return dig(b);
+  };
+  await createApi(w.bot, { aborted: false }).gather('gravel', 1, 48, 'flint');
+  assert.equal(digs, 3); // stopped as soon as the flint came out
+});
+
+test('nether portal: frame of 10 obsidian + 4 corners on flat ground, lit with flint and steel', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const w = await liquidWorld();
+  const inv = [
+    { name: 'obsidian', type: 1, count: 10 },
+    { name: 'flint_and_steel', type: 2, count: 1 },
+    { name: 'dirt', type: 3, count: 6 },
+  ];
+  w.bot.inventory.items = () => inv;
+  const placed = [];
+  w.bot.equip = async (item) => (w.bot.held = item.name);
+  w.bot.placeBlock = async (ref, face) => {
+    const p = ref.position.plus(face);
+    w.blocks.set(`${p.x},${p.y},${p.z}`, w.bot.held);
+    placed.push(w.bot.held);
+  };
+  w.bot.activateBlock = async (block, face) => {
+    // flint and steel on the bottom obsidian: the inside fills with portal blocks
+    assert.equal(w.bot.held, 'flint_and_steel');
+    assert.equal(block.name, 'obsidian');
+    const p = block.position.plus(face);
+    w.blocks.set(`${p.x},${p.y},${p.z}`, 'nether_portal');
+  };
+  let built = null;
+  const r = await createApi(w.bot, { aborted: false }, () => {}, { onPortal: (pos) => (built = pos) }).buildPortal();
+  assert.equal(placed.filter((n) => n === 'obsidian').length, 10);
+  assert.equal(placed.filter((n) => n === 'dirt').length, 4); // corners
+  assert.deepEqual(built, r.portal);
+
+  // missing pieces are named
+  inv[0].count = 7;
+  w.blocks.clear();
+  await assert.rejects(createApi(w.bot, { aborted: false }).buildPortal(), /need 10 obsidian \(have 7\)/);
+});
+
+test('obsidian: natural first; otherwise pour water on lava, scoop it back, mine the new obsidian', async () => {
+  const { createApi } = await import('../src/actions.js');
+  // a 1-block lava pool in the ground at (3,63,0), water source at (-4,63,0) to fill the bucket from
+  const w = await liquidWorld({ overrides: { '3,63,0': 'lava', '-4,63,0': 'water' } });
+  const inv = [
+    { name: 'diamond_pickaxe', type: 1, count: 1 },
+    { name: 'bucket', type: 2, count: 1 },
+  ];
+  w.bot.inventory.items = () => inv;
+  const swap = (from, to) => {
+    const i = inv.findIndex((it) => it.name === from);
+    if (i >= 0) inv[i] = { ...inv[i], name: to };
+  };
+  w.bot.equip = async (item) => (w.bot.held = item?.name);
+  w.bot.activateItem = () => {
+    if (w.bot.held === 'bucket') swap('bucket', 'water_bucket'); // scooping water
+  };
+  w.bot.activateBlock = async (ref, face) => {
+    // a pool in flat ground: nothing to click above the lava, so the water goes on the ground
+    // right beside it and flows over -> the lava source turns into obsidian
+    assert.equal(w.bot.held, 'water_bucket');
+    const p = ref.position.plus(face);
+    assert.equal(p.y, 64);
+    assert.equal(Math.abs(p.x - 3) + Math.abs(p.z), 1);
+    w.blocks.set('3,63,0', 'obsidian');
+    swap('water_bucket', 'bucket');
+  };
+  const dig = w.bot.dig;
+  w.bot.dig = async (b) => {
+    if (b.name === 'obsidian') inv.push({ name: 'obsidian', type: 9, count: 1 });
+    return dig(b);
+  };
+  const logs = [];
+  const r = await createApi(w.bot, { aborted: false }, (m) => logs.push(m)).makeObsidian(1);
+  assert.equal(r.made, 1);
+  assert.ok(logs.some((l) => /pouring water onto lava at \(3,63,0\)/.test(l)));
+
+  // without a diamond pickaxe it refuses up front
+  inv.splice(0, 1);
+  await assert.rejects(createApi(w.bot, { aborted: false }).makeObsidian(1), /diamond pickaxe/);
+});
+
+test('goals: nether preparation steps follow the advancements, done when the portal is lit', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Advancements } = await import('../src/advancements.js');
+  const { Journal } = await import('../src/journal.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const memory = new Memory(dir);
+  const adv = new Advancements();
+  for (const id of (await import('../src/advancements.js')).ADVANCEMENT_GOALS.map((a) => a.id)) adv.fromChat.add(id); // all done
+  const goals = new Goals({ bot: { registry: reg, findBlock: () => null, inventory: { slots: {} } }, llm: { ask: async () => '{}' }, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 }, advancements: adv });
+  const base = { iron_pickaxe: 1 };
+  assert.match((await goals.current({ inv: base, text: '' })).text, /1\/4: 다이아 곡괭이/);
+  memory.data.freeGoal = null;
+  assert.match((await goals.current({ inv: { ...base, diamond_pickaxe: 1 }, text: '' })).text, /2\/4: 흑요석/);
+  memory.data.freeGoal = null;
+  const g3 = await goals.current({ inv: { ...base, diamond_pickaxe: 1, obsidian: 10 }, text: '' });
+  assert.match(g3.text, /3\/4: 부싯돌/);
+  assert.deepEqual(goals.nextAction(g3, { ...base, diamond_pickaxe: 1, obsidian: 10, iron_ingot: 1 }), { skill: 'mine_block', args: { block: 'gravel', count: 1, until: 'flint' } });
+  memory.data.freeGoal = null;
+  const g4 = await goals.current({ inv: { ...base, diamond_pickaxe: 1, obsidian: 10, flint_and_steel: 1 }, text: '' });
+  assert.match(g4.text, /4\/4: .*포탈/);
+  assert.deepEqual(goals.nextAction(g4, {}), { skill: 'build_nether_portal', args: {} });
+  memory.data.portalAt = { x: 1, y: 64, z: 1 };
+  const g5 = await goals.current({ inv: base, text: '' });
+  assert.equal(memory.data.goalHistory.at(-1).result, '달성');
+  assert.doesNotMatch(g5.text, /네더 준비/); // done: back to self-chosen goals
 });
