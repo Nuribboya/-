@@ -19,6 +19,16 @@ const SEEDS = {
     args: { block: 'crafting_table' },
     code: `await api.place(args.block);\nreturn 'placed';`,
   },
+  mine_block: {
+    description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄). 맞는 곡괭이 필요',
+    args: { block: 'stone', count: 3 },
+    code: `await api.gather(args.block, args.count ?? 1);\nreturn api.inventory();`,
+  },
+  smelt_item: {
+    description: '근처 화로에서 item을 count개 굽는다 (예: raw_iron). fuel = coal 또는 oak_planks 등',
+    args: { item: 'raw_iron', count: 1, fuel: 'coal' },
+    code: `await api.smelt(args.item, args.count ?? 1, args.fuel ?? 'coal');\nreturn api.inventory();`,
+  },
   eat_food: {
     description: '가진 음식 중 가장 좋은 것을 먹는다',
     args: {},

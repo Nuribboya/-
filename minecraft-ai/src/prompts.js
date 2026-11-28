@@ -12,6 +12,7 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.block(ms=1500): 왼손(off-hand) 방패 들기, 최대 5초. 먼저 await api.equip('shield','off-hand')
 - api.eat()
 - 저장된 스킬 호출: await api.스킬이름({인자}) 예) await api.collect_logs({count: 3}). 또는 await api.useSkill('collect_logs', {count: 3}). '보유 스킬' 목록에 있는 이름만 가능. 작은 스킬을 조합해 큰 스킬을 만들 때 쓴다.
+- 지식 함수(동기, 게임 데이터): api.recipe(item) -> {ingredients, makes, requiresTable}, api.toolFor(block) -> 필요한 최소 곡괭이, api.plan(item, count) -> 단계별 계획 문자열 배열
 - 동기 함수: api.nearbyMobs(maxDistance=16) -> [{name,x,y,z,dist,hostile}] (가까운 순), api.inventory() -> {itemName: count}, api.has(name,n), api.countBlocks(name,maxDistance), api.position(), api.health(), api.food(), api.log(msg), api.chat(msg)
 - api.sleep(ms)
 활용 예: 도망 = 가장 가까운 적대몹 좌표의 반대 방향으로 api.goTo. 은신처 = 내 주변 4방향과 머리 위(y+2)에 api.placeAt으로 블록(dirt, cobblestone 등). 갑옷이 있으면 api.equip으로 입기.
@@ -30,6 +31,7 @@ export const DECISION_SYSTEM = `너는 마인크래프트(자바 에디션)를 �
 
 판단 원칙:
 - 생존 우선: 체력 8 이하, 허기 6 이하, 밤에 적대 몹이 가까우면 먼저 대응 (먹기/싸우기/도망/은신).
+- '자동 계획'은 게임 데이터로 계산한 정답 순서다. 위급한 생존 상황이 아니면 '추천 다음 행동'을 그대로 쓰는 것이 가장 빠르다.
 - "skill"에는 '보유 스킬' 목록에 실제로 있는 이름만 쓴다. 실패해서 저장되지 않은 스킬 이름은 존재하지 않는다.
 - 현재 목표를 한 단계씩 진행. 이미 있는 스킬로 되면 그걸 쓴다 (원목은 collect_logs, 제작은 craft_item, 설치는 place_block). 맞는 스킬이 없거나 연속 실패 중이면 write_skill.
 - 직전 결과의 에러 메시지를 읽고 원인을 해결하는 방향으로 다음 행동을 고른다. 같은 실패를 반복하지 않는다.

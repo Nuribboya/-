@@ -1,9 +1,10 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
+import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText } from './knowledge.js';
 
 const { goals } = pf;
-const TIER = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden'];
+const TIER = ['netherite', 'diamond', 'iron', 'copper', 'stone', 'golden', 'wooden'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NEIGHBORS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
 const EQUIP_SLOTS = { hand: 'hand', 'off-hand': 'off-hand', offhand: 'off-hand', head: 'head', torso: 'torso', chest: 'torso', legs: 'legs', feet: 'feet' };
@@ -20,7 +21,11 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     if (ctx.aborted) throw new Error('skill timed out / aborted');
   };
 
-  const matcherFor = (name) => (name === 'log' ? (b) => b.name.endsWith('_log') : (b) => b.name === name);
+  const matcherFor = (name) => {
+    if (name === 'log') return (b) => b.name.endsWith('_log');
+    if (name.endsWith('_ore') && !name.startsWith('deepslate_')) return (b) => b.name === name || b.name === `deepslate_${name}`;
+    return (b) => b.name === name;
+  };
 
   const goto = async (x, y, z, range = 1) => {
     check();
@@ -184,7 +189,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await goto(furnaceBlock.position.x, furnaceBlock.position.y, furnaceBlock.position.z, 2);
       const furnace = await bot.openFurnace(furnaceBlock);
       try {
-        await furnace.putFuel(fuelItem.type, null, Math.min(fuelItem.count, Math.max(1, Math.ceil(count / 8))));
+        const per = fuelValue(fuel) || 1;
+        const fuelCount = Math.max(1, Math.ceil(count / per));
+        if (fuelItem.count < fuelCount) throw new Error(`need ${fuelCount} ${fuel} as fuel to smelt ${count} (have ${fuelItem.count}); coal smelts 8, planks 1.5 each`);
+        await furnace.putFuel(fuelItem.type, null, fuelCount);
         await furnace.putInput(inItem.type, null, count);
         let collected = 0;
         for (let i = 0; i < count * 12 && collected < count; i++) {
@@ -229,6 +237,19 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       }
       return false;
     },
+
+    /** Recipe from game data: {ingredients: {name: count}, makes, requiresTable} or null if not craftable. */
+    recipe: (name) => recipeInfo(reg, name, inventoryOf(bot)),
+
+    /** Weakest tool that can mine this block, e.g. toolFor('iron_ore') -> 'stone_pickaxe' (null = hand). */
+    toolFor: (blockName) => minTool(reg, blockName),
+
+    /** Step-by-step plan (from game data) to get `count` x `item` from the current inventory, as text lines. */
+    plan: (item, count = 1) =>
+      makePlan(reg, inventoryOf(bot), item, count, {
+        tableNearby: !!bot.findBlock({ matching: reg.blocksByName.crafting_table.id, maxDistance: 32 }),
+        furnaceNearby: !!bot.findBlock({ matching: reg.blocksByName.furnace.id, maxDistance: 32 }),
+      }).map(stepText),
 
     /** Nearby living entities with coordinates, nearest first: [{name, x, y, z, dist, hostile}] */
     nearbyMobs(maxDistance = 16) {

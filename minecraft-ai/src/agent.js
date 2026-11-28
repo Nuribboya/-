@@ -8,6 +8,7 @@ import { runSkill } from './sandbox.js';
 import { Skills } from './skills.js';
 import { Journal } from './journal.js';
 import { Brains } from './brain.js';
+import { plan as makePlan, stepText, stepToAction, knowledgeText } from './knowledge.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -161,6 +162,7 @@ export class Agent {
       obs.text,
       `직전 행동: ${this.lastAction || '없음'}`,
       `직전 결과: ${short(this.lastResult)}`,
+      this.#planText(goal, obs.inv),
       `보유 스킬:\n${this.skills.describe()}`,
       this.writeCooldown > 0
         ? `⛔ 스킬 작성이 연속 실패해서 앞으로 ${this.writeCooldown}턴 동안 write_skill 금지. 반드시 보유 스킬 중 하나를 "skill"로 실행할 것 (예: collect_logs, craft_item, place_block, explore_area).`
@@ -170,7 +172,8 @@ export class Agent {
       `교훈:\n${lessons.length ? lessons.map((l) => '- ' + l).join('\n') : '- 아직 없음'}`,
     ].join('\n\n');
 
-    const reply = await this.llm.ask('fast', DECISION_SYSTEM, user, { maxTokens: 1500 });
+    this.system ??= `${DECISION_SYSTEM}\n\n${knowledgeText(this.bot.registry)}`;
+    const reply = await this.llm.ask('fast', this.system, user, { maxTokens: 1500 });
     const d = parseJson(reply);
     this.events.update({ thought: d.thought ?? '', goal: goal.text });
     this.events.log(`🧠 ${d.thought ?? ''}`);
@@ -293,6 +296,32 @@ export class Agent {
       this.memory.save();
       this.journal.add('reflect', { lessons: this.memory.data.lessons.length });
       this.events.log(`🧩 교훈 ${this.memory.data.lessons.length}개로 정리`);
+    }
+  }
+
+  /** Data-driven plan for the current goal + the concrete next skill call. */
+  #planText(goal, inv) {
+    const t = goal.target;
+    if (!t) return '';
+    try {
+      if (t.item === 'log') {
+        const have = Object.entries(inv).reduce((n, [k, v]) => (k.endsWith('_log') ? n + v : n), 0);
+        const next = { skill: 'collect_logs', args: { count: Math.max(1, t.count - have) } };
+        return `자동 계획(게임 데이터):\n1. 원목 캐기 x${next.args.count}\n추천 다음 행동: ${JSON.stringify(next)}`;
+      }
+      const reg = this.bot.registry;
+      const near = (b) => !!this.bot.findBlock({ matching: reg.blocksByName[b].id, maxDistance: 32 });
+      const steps = makePlan(reg, inv, t.item, t.count, { tableNearby: near('crafting_table'), furnaceNearby: near('furnace') });
+      if (!steps.length) return '';
+      const next = stepToAction(steps[0]);
+      return (
+        `자동 계획(게임 데이터, ${t.item} x${t.count}):\n` +
+        steps.slice(0, 8).map((st, i) => `${i + 1}. ${stepText(st)}`).join('\n') +
+        (steps.length > 8 ? `\n... (${steps.length - 8}단계 더)` : '') +
+        (next ? `\n추천 다음 행동: ${JSON.stringify(next)}` : '')
+      );
+    } catch (e) {
+      return `자동 계획 실패: ${e.message}`;
     }
   }
 

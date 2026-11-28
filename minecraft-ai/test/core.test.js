@@ -379,3 +379,61 @@ test('craft error explains the missing ingredients with real 26.1 recipes', asyn
   await assert.rejects(api.craft('wooden_pickaxe'), /needs a crafting_table PLACED/);
   assert.equal(ctx.errors.length, 2); // swallowed-or-not, every api error is recorded
 });
+
+test('knowledge: plans from real 26.1 game data', async () => {
+  const { plan, minTool, recipeInfo, stepToAction, knowledgeText } = await import('../src/knowledge.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+
+  // tools: easiest tool of the needed level
+  assert.equal(minTool(reg, 'stone'), 'wooden_pickaxe');
+  assert.equal(minTool(reg, 'iron_ore'), 'stone_pickaxe'); // not copper (needs smelting)
+  assert.equal(minTool(reg, 'diamond_ore'), 'iron_pickaxe');
+  assert.equal(minTool(reg, 'oak_log'), null);
+
+  // recipes prefer the wood we hold
+  assert.deepEqual(recipeInfo(reg, 'crafting_table', { birch_log: 2 }).ingredients, { birch_planks: 4 });
+
+  // empty hands -> wooden pickaxe: logs first, table placed before the pickaxe
+  const wp = plan(reg, {}, 'wooden_pickaxe', 1);
+  assert.equal(wp[0].do, 'gather');
+  assert.deepEqual(stepToAction(wp[0]), { skill: 'collect_logs', args: { count: 3 } });
+  const placeIdx = wp.findIndex((s) => s.do === 'place' && s.block === 'crafting_table');
+  const pickIdx = wp.findIndex((s) => s.do === 'craft' && s.item === 'wooden_pickaxe');
+  assert.ok(placeIdx >= 0 && placeIdx < pickIdx);
+
+  // stone pickaxe uses cobblestone from stone, not cobbled_deepslate
+  const sp = plan(reg, { wooden_pickaxe: 1, oak_planks: 2 }, 'stone_pickaxe', 1);
+  assert.ok(sp.some((s) => s.do === 'gather' && s.block === 'stone'));
+  assert.ok(!sp.some((s) => s.do === 'unknown'));
+
+  // iron ingot: mine iron_ore, build+place furnace, smelt
+  const ii = plan(reg, { stone_pickaxe: 1, cobblestone: 8, crafting_table: 1 }, 'iron_ingot', 3);
+  assert.deepEqual(stepToAction(ii[0]), { skill: 'mine_block', args: { block: 'iron_ore', count: 3 } });
+  assert.ok(ii.some((s) => s.do === 'place' && s.block === 'furnace'));
+  assert.equal(ii.at(-1).do, 'smelt');
+
+  // diamond from a stone pickaxe: full chain, nothing unknown, ends with mining diamond_ore
+  const di = plan(reg, { stone_pickaxe: 1 }, 'diamond', 1);
+  assert.ok(!di.some((s) => s.do === 'unknown'));
+  assert.equal(di.at(-1).block, 'diamond_ore');
+
+  // already have it -> empty plan
+  assert.deepEqual(plan(reg, { furnace: 1 }, 'furnace', 1), []);
+  assert.match(knowledgeText(reg), /diamond_ore=iron_pickaxe/);
+});
+
+test('ore matcher also accepts the deepslate variant; builtin seeds include mine_block/smelt_item', async () => {
+  const s = new Skills(tmp());
+  assert.ok(s.has('mine_block') && s.has('smelt_item'));
+  assert.ok(Skills.isBuiltin('mine_block'));
+});
+
+test('gather matcher: iron_ore also matches deepslate_iron_ore', async () => {
+  const { createApi } = await import('../src/actions.js');
+  let matching;
+  const bot = { registry: {}, entity: {}, findBlocks: (o) => ((matching = o.matching), []) };
+  createApi(bot, { aborted: false }).countBlocks('iron_ore');
+  assert.ok(matching({ name: 'iron_ore' }) && matching({ name: 'deepslate_iron_ore' }));
+  assert.ok(!matching({ name: 'gold_ore' }));
+});
