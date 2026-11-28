@@ -120,6 +120,19 @@ export class Skills {
     return Object.hasOwn(SEEDS, name);
   }
 
+  /**
+   * Names not worth writing at all, with the reason (or null if fine):
+   * - copies of a builtin (smelt_item_v2, collect_logs_fixed): the builtin already works
+   * - check/verify-only skills: they never change anything, and the prompt already has that info
+   */
+  static pointlessName(name) {
+    const base = Object.keys(SEEDS).find((b) => name !== b && name.startsWith(b + '_'));
+    if (base) return `"${name}" is a copy of the builtin skill "${base}", which already works - do not write it, run "${base}" (with args) instead`;
+    if (/^(check|verify|inspect|confirm|is|has|get)_/.test(name))
+      return `"${name}" only checks something - inventory and nearby blocks are already in the prompt. Only write skills that DO something (gather/craft/place/smelt/move/fight)`;
+    return null;
+  }
+
   save(name, description, args, code) {
     if (!NAME_RE.test(name)) throw new Error(`bad skill name: ${name}`);
     if (Skills.isBuiltin(name))

@@ -58,7 +58,7 @@ CODE:
 // async 함수 본문. api, args 사용. return 으로 결과 반환
 \`\`\`
 
-원칙: 기본 스킬(collect_logs, craft_item, place_block, eat_food, explore_area)은 수정 불가 - 새 이름으로 만들고 필요하면 api.useSkill로 호출한다. api 호출은 Promise.all 등으로 동시에 돌리지 말고 하나씩 await 한다. 작게 만들고, 실패 가능한 곳은 에러 메시지가 명확하도록 둔다 (try/catch로 삼키지 말 것). 작은 스킬을 조합하는 상위 스킬은 코드 안에서 await api.* 를 직접 호출해 구성한다.`;
+원칙: 기본 스킬(collect_logs, craft_item, place_block, mine_block, smelt_item, eat_food, explore_area 등)은 수정 불가이고 이미 잘 동작한다 - 그 복사본(smelt_item_v2 같은)이나 확인만 하는 스킬(check_..., verify_...)은 만들지 않는다. 기본 스킬을 조합해야 할 때만 새 이름으로 만들고 api.useSkill로 호출한다. api 호출은 Promise.all 등으로 동시에 돌리지 말고 하나씩 await 한다. 작게 만들고, 실패 가능한 곳은 에러 메시지가 명확하도록 둔다 (try/catch로 삼키지 말 것). 작은 스킬을 조합하는 상위 스킬은 코드 안에서 await api.* 를 직접 호출해 구성한다.`;
 
 export function parseWriterReply(text) {
   const name = text.match(/^NAME:\s*([a-z][a-z0-9_]*)/m)?.[1];

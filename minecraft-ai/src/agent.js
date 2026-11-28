@@ -308,6 +308,13 @@ export class Agent {
         if (!Skills.validName(parsed.name)) throw new Error(`잘못된 스킬 이름: ${parsed.name}`);
         if (Skills.isBuiltin(parsed.name))
           throw new Error(`"${parsed.name}" is a builtin skill and cannot be overwritten - use a different NAME`);
+        const pointless = Skills.pointlessName(parsed.name);
+        if (pointless) {
+          // Don't spend the remaining attempts on it: tell the decision model and stop here.
+          this.events.log(`🚫 작성 안 함: ${parsed.name}`);
+          this.journal.add('skill_fail', { name: parsed.name, error: short(pointless, 160), writing: true });
+          return `스킬 작성 안 함: ${pointless}`;
+        }
         this.events.log(`🛠️ 스킬 작성 시도 ${i}/${maxAttempts}: ${parsed.name}`);
         r = await this.#run(parsed.code, parsed.args, this.config.writeTestTimeoutMs);
         if (!r.ok) throw r.error;

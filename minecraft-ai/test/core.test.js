@@ -808,3 +808,23 @@ test('decision prompt lets the bot work at night', async () => {
   assert.doesNotMatch(DECISION_SYSTEM, /아침까지 쉰다/);
   assert.doesNotMatch(REFLECT_SYSTEM, /밤에는 .*대기/);
 });
+
+test('pointless skill names: builtin copies and check-only skills are refused without trying', async () => {
+  assert.match(Skills.pointlessName('smelt_item_v2'), /copy of the builtin skill "smelt_item"/);
+  assert.match(Skills.pointlessName('collect_logs_fixed'), /"collect_logs"/);
+  assert.match(Skills.pointlessName('check_furnace_and_materials'), /only checks something/);
+  assert.equal(Skills.pointlessName('build_iron_armor'), null);
+  assert.equal(Skills.pointlessName('collect_logs'), null); // the builtin itself is handled elsewhere
+
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const dir = tmp();
+  let calls = 0;
+  const llm = { ask: async () => (calls++, 'NAME: smelt_item_v2\nDESCRIPTION: x\nARGS: {}\nCODE:\n```js\nreturn 1;\n```') };
+  const bot = Object.assign(new EventEmitter(), { registry: {}, inventory: { items: () => [] } });
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b') } });
+  const out = await agent.writeSkill('굽기 고치기', { text: '' }, { text: '' });
+  assert.match(out, /^스킬 작성 안 함: .*smelt_item/);
+  assert.equal(calls, 1); // stopped after the first reply instead of 3 attempts
+});
