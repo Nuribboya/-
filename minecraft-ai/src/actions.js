@@ -97,6 +97,16 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     return `cannot craft ${name}: needs ${parts.join(', ')}.${tableNote}${hints.length ? ' Next step: ' + hints.join('; ') : ''}`;
   };
 
+  // Grass, flowers, leaf litter... are walk-through ("open") but the server won't always replace
+  // them when we place a block there ("the block is still leaf_litter"). Break them first.
+  const clearCell = async (p) => {
+    const b = bot.blockAt(p);
+    if (!b || b.name === 'air' || b.name === 'cave_air' || !isOpen(b)) return;
+    if (b.name.includes('water') || b.name.includes('lava')) return;
+    check();
+    await bot.dig(b);
+  };
+
   const placeAtRaw = async (x, y, z, name) => {
     check();
     const item = bot.inventory.items().find((i) => i.name === name);
@@ -118,6 +128,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     }
     if (!ref) throw new Error(`nothing solid next to (${target.x},${target.y},${target.z}) to attach the block to`);
     if (bot.entity.position.distanceTo(target) > 4) await goto(target.x, target.y, target.z, 3);
+    await clearCell(target);
     await bot.equip(item, 'hand');
     check();
     await bot.placeBlock(ref, face);
@@ -141,6 +152,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     for (const [dx, dz] of dirs) {
       const t = base.offset(dx, 0, dz);
       if (!free(t) || (isBed && !free(base.offset(2 * dx, 0, 2 * dz)))) continue;
+      await clearCell(t);
+      if (isBed) await clearCell(base.offset(2 * dx, 0, 2 * dz));
       await bot.equip(item, 'hand');
       if (isBed) await bot.lookAt(base.offset(2 * dx + 0.5, 0.5, 2 * dz + 0.5), true);
       check();

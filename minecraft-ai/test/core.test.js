@@ -704,3 +704,32 @@ test('craft only asks mineflayer for as many crafts as the ingredients allow', a
   inv[0].count = 1;
   await assert.rejects(api.craft('oak_planks', 1), /got stuck \(server did not answer\)/);
 });
+
+test('place clears leaf litter / grass in the target cell before placing', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { Vec3 } = await import('vec3');
+  const cells = new Map([['1,64,0', 'leaf_litter']]);
+  const order = [];
+  const blockAt = (p) => {
+    const name = cells.get(`${p.x},${p.y},${p.z}`) ?? (p.y < 64 ? 'grass_block' : 'air');
+    const open = name !== 'grass_block';
+    return { name, position: p, boundingBox: open ? 'empty' : 'block' };
+  };
+  const bot = {
+    registry: {},
+    entity: { position: new Vec3(0.5, 64, 0.5) },
+    blockAt,
+    inventory: { items: () => [{ name: 'furnace', type: 1 }] },
+    equip: async () => {},
+    dig: async (b) => {
+      order.push(`dig ${b.name}`);
+      cells.delete(`${b.position.x},${b.position.y},${b.position.z}`);
+    },
+    placeBlock: async (ref, face) => {
+      const t = ref.position.plus(face);
+      order.push(`place at ${t.x},${t.y},${t.z} (was ${blockAt(t).name})`);
+    },
+  };
+  await createApi(bot, { aborted: false }).place('furnace');
+  assert.deepEqual(order, ['dig leaf_litter', 'place at 1,64,0 (was air)']);
+});
