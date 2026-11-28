@@ -517,39 +517,68 @@ test('exploreCave walks to cave air with a floor; ore hint points to the right d
 });
 
 test('self-chosen goals: pick, keep, complete, and give up', async () => {
-  const { Agent } = await import('../src/agent.js');
+  const { Goals } = await import('../src/goals.js');
   const { Journal } = await import('../src/journal.js');
-  const { EventEmitter } = await import('node:events');
   const dir = tmp();
-  const bot = Object.assign(new EventEmitter(), { registry: { itemsByName: { iron_chestplate: {} } } });
+  const bot = { registry: { itemsByName: { iron_chestplate: {} } } };
   let asked = 0;
-  const llm = { ask: async () => (asked++, '{"goal":"철 갑옷 만들기","item":"iron_chestplate","count":1}'), spentUsd: 0 };
-  const events = { log() {}, update() {} };
+  const llm = { ask: async () => (asked++, '{"goal":"철 갑옷 만들기","item":"iron_chestplate","count":1}') };
   const memory = new Memory(dir);
-  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory, events, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'brains'), freeGoalMaxSteps: 2 } });
-  const free = { id: 'free', text: 'x' };
-  const obs = { inv: {}, text: '상태' };
+  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 2 } });
+  const base = { iron_pickaxe: 1 }; // fixed tool path done -> free goals
+  const obs = { inv: base, text: '상태' };
 
-  const g1 = await agent.resolveGoal(free, obs);
+  const g1 = await goals.current(obs);
   assert.equal(g1.text, '철 갑옷 만들기');
   assert.deepEqual(g1.target, { item: 'iron_chestplate', count: 1 });
-  await agent.resolveGoal(free, obs); // kept, no new question
+  await goals.current(obs); // kept, no new question
   assert.equal(asked, 1);
-  await agent.resolveGoal(free, { ...obs, inv: { iron_chestplate: 1 } }); // done -> asks for a new goal
+  await goals.current({ ...obs, inv: { ...base, iron_chestplate: 1 } }); // done -> asks for a new goal
   assert.equal(asked, 2);
   assert.equal(memory.data.goalHistory.at(-1).result, '달성');
-  await agent.resolveGoal(free, obs);
-  await agent.resolveGoal(free, obs);
-  await agent.resolveGoal(free, obs); // over freeGoalMaxSteps -> dropped, new goal
+  await goals.current(obs);
+  await goals.current(obs);
+  await goals.current(obs); // over freeGoalMaxSteps -> dropped, new goal
   assert.equal(memory.data.goalHistory.at(-1).result, '포기');
   // unknown item from the model -> goal without a target, not a crash
   llm.ask = async () => '{"goal":"집 짓기","item":"house","count":1}';
   memory.data.freeGoal = null;
-  assert.equal((await agent.resolveGoal(free, obs)).target, null);
-  // curriculum hands over to free goals after the iron pickaxe
-  const { nextGoal } = await import('../src/curriculum.js');
-  const m2 = new Memory(tmp());
-  assert.equal(nextGoal({ iron_pickaxe: 1 }, m2).id, 'free');
+  assert.equal((await goals.current(obs)).target, null);
+});
+
+test('reading the goal (advance:false) neither spends a turn nor asks the model', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Journal } = await import('../src/journal.js');
+  const dir = tmp();
+  let asked = 0;
+  const llm = { ask: async () => (asked++, '{"goal":"침대 만들기","item":"white_bed","count":1}') };
+  const memory = new Memory(dir);
+  const goals = new Goals({ bot: { registry: { itemsByName: { white_bed: {} } } }, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 } });
+  const obs = { inv: { iron_pickaxe: 1 }, text: '' };
+  const g0 = await goals.current(obs, { advance: false }); // no goal yet: no LLM call
+  assert.equal(asked, 0);
+  assert.equal(g0.id, 'free');
+  await goals.current(obs); // a real turn picks one
+  const steps = memory.data.freeGoal.steps;
+  for (let i = 0; i < 5; i++) await goals.current(obs, { advance: false });
+  assert.equal(memory.data.freeGoal.steps, steps);
+  assert.equal(asked, 1);
+});
+
+test('writeSkill: a reply that fails before running never reuses an older run\'s logs', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const dir = tmp();
+  const bot = Object.assign(new EventEmitter(), { registry: {}, inventory: { items: () => [] } });
+  const sent = [];
+  const llm = { ask: async (tier, sys, msgs) => (sent.push(msgs.map((m) => m.content)), 'no NAME here') };
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b') } });
+  const out = await agent.writeSkill('나무 캐기', { text: '' }, { text: '' }, 2);
+  assert.match(out, /2번 실패/);
+  const feedback = sent[1].at(-1);
+  assert.match(feedback, /실행하기 전에 실패/);
+  assert.doesNotMatch(feedback, /api\.log 출력/);
 });
 
 test('bed: planner hunts sheep for wool instead of looping through dye recipes', async () => {
@@ -607,4 +636,43 @@ test('attack: errors when the mob is not around, walks onto the kill spot for dr
   bot.pathfinder.goto = async (g) => (gotos.push([g.x, g.y, g.z]), orig(g));
   assert.equal(await createApi(bot, { aborted: false }).attack('sheep'), true);
   assert.deepEqual(gotos.at(-1), [2, 64, 0]);
+});
+
+test('one full decision turn: observe -> plan -> model picks a skill -> run -> journal', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const pos = new Vec3(0.5, 64, 0.5);
+  const bot = Object.assign(new EventEmitter(), {
+    registry: reg,
+    entity: { position: pos },
+    entities: {},
+    health: 20,
+    food: 20,
+    time: { timeOfDay: 1000 },
+    inventory: { items: () => [] },
+    findBlocks: () => [],
+    findBlock: () => null,
+    blockAt: () => null,
+    nearestEntity: () => null,
+    pathfinder: { setGoal() {}, goto: async () => {} },
+    clearControlStates() {},
+  });
+  const prompts = [];
+  const llm = {
+    budgetLeft: () => true,
+    spentUsd: 0,
+    ask: async (tier, sys, user) => (prompts.push(user), '{"thought":"원목부터","skill":"collect_logs","args":{"count":1}}'),
+  };
+  const journal = new Journal(dir);
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 5000, freeGoalMaxSteps: 80 } });
+  await agent.step();
+  assert.match(prompts[0], /추천 다음 행동: \{"skill":"collect_logs"/); // planner reached the prompt
+  assert.equal(agent.lastAction, 'collect_logs({"count":1})');
+  assert.match(agent.lastResult, /^실패: no log within 48 blocks/); // ran for real, nothing around
+  assert.equal(journal.entries.at(-1).type, 'skill_fail');
 });

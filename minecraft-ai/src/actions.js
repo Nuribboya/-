@@ -3,10 +3,10 @@ import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
 import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint } from './knowledge.js';
 import { BODY_ACTIONS } from './api-names.js';
+import { sleep, isNight } from './util.js';
 
 const { goals } = pf;
 const TIER = ['netherite', 'diamond', 'iron', 'copper', 'stone', 'golden', 'wooden'];
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NEIGHBORS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
 const EQUIP_SLOTS = { hand: 'hand', 'off-hand': 'off-hand', offhand: 'off-hand', head: 'head', torso: 'torso', chest: 'torso', legs: 'legs', feet: 'feet' };
 const OFF_HAND_SLOT = 45;
@@ -385,10 +385,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     },
 
     /** Is it night (mobs spawn)? */
-    isNight: () => {
-      const t = bot.time?.timeOfDay ?? 0;
-      return t >= 13000 && t < 23000;
-    },
+    isNight: () => isNight(bot),
 
     /**
      * Staircase-mine down to targetY (default -58, diamond level). Checks for lava/water

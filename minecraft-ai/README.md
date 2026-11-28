@@ -86,7 +86,10 @@ cd minecraft-ai && npm install && npm run start:free
 ## 구조
 ```
 src/index.js      접속·재접속
-src/agent.js      관찰→판단→실행 루프, 스킬 작성/수정
+src/agent.js      관찰→판단→실행 루프, 스킬 실행/작성/수정, 반성
+src/goals.js      현재 목표(고정 경로 → 스스로 정한 목표)와 자동 계획 텍스트
+src/knowledge.js  게임 데이터 기반 레시피·도구·계획
+src/util.js       공용 헬퍼 (sleep, 밤 판정 등)
 src/actions.js    스킬 코드가 쓰는 api (gather/craft/smelt/attack/placeAt/digAt/equip/block/nearbyMobs/...)
 src/sandbox.js    생성 코드 실행(금지어 검사 + 타임아웃)
 src/skills.js     스킬 라이브러리 (data/skills)

@@ -1,3 +1,4 @@
+import { isNight } from './util.js';
 const NOTABLE_NAMES = new Set(['stone', 'cobblestone', 'water', 'lava', 'crafting_table', 'furnace', 'chest', 'sand', 'gravel']);
 const NOTABLE = (n) => n.endsWith('_log') || n.endsWith('_ore') || n.endsWith('_bed') || NOTABLE_NAMES.has(n);
 
@@ -29,12 +30,11 @@ export function observe(bot) {
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 8);
 
-  const tod = bot.time?.timeOfDay ?? 0;
   return {
     inv,
     text: [
       `위치: (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) / 체력 ${Math.round(bot.health)}/20 / 허기 ${Math.round(bot.food)}/20`,
-      `시간: ${tod >= 13000 && tod < 23000 ? '밤(위험)' : '낮'}`,
+      `시간: ${isNight(bot) ? '밤(위험)' : '낮'}`,
       `인벤토리: ${Object.keys(inv).length ? JSON.stringify(inv) : '비어있음'}`,
       `주변 블록(24칸, 개수/최단거리): ${Object.keys(near).length ? JSON.stringify(near) : '특별한 것 없음'}`,
       `주변 생물: ${mobs.length ? mobs.map((m) => `${m.name}${m.hostile ? '(적대)' : ''}@${m.dist}`).join(', ') : '없음'}`,
