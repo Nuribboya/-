@@ -6,7 +6,7 @@ const count = (inv, re) =>
 const has = (inv, re) => count(inv, re) > 0;
 
 const MILESTONES = [
-  { id: 'logs', target: { item: 'log', count: 4 }, goal: '나무 원목(log) 4개 이상 모으기', done: (i) => count(i, /_log$/) >= 4 || has(i, /^(crafting_table|wooden_pickaxe|stone_pickaxe|iron_pickaxe)$/) },
+  { id: 'logs', target: { item: 'log', count: 10 }, goal: '나무 원목(log) 10개 이상 모으기', done: (i) => count(i, /_log$/) >= 10 || has(i, /^(crafting_table|wooden_pickaxe|stone_pickaxe|iron_pickaxe)$/) },
   { id: 'table', target: { item: 'crafting_table', count: 1 }, goal: '작업대(crafting_table) 만들기', done: (i) => has(i, /^(crafting_table|wooden_pickaxe|stone_pickaxe|iron_pickaxe)$/) },
   { id: 'wooden_pickaxe', target: { item: 'wooden_pickaxe', count: 1 }, goal: '나무 곡괭이(wooden_pickaxe) 만들기', done: (i) => has(i, /_pickaxe$/) },
   { id: 'stone_pickaxe', target: { item: 'stone_pickaxe', count: 1 }, goal: '돌(cobblestone)을 캐서 돌 곡괭이(stone_pickaxe) 만들기', done: (i) => has(i, /^(stone|iron|diamond)_pickaxe$/) },

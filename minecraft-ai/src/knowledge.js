@@ -56,6 +56,9 @@ export const MOB_DROP = {
   rotten_flesh: 'zombie',
 };
 
+// When the plan says "chop wood", chop at least this much.
+export const MIN_WOOD = 10;
+
 // Items smelted per one fuel item.
 export const FUEL_VALUE = { coal: 8, charcoal: 8, coal_block: 80, stick: 0.5 };
 export const fuelValue = (name) =>
@@ -226,6 +229,8 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
     else if (s.do === 'craft' && prev?.do === 'craft' && prev.item === s.item) prev.times += s.times;
     else merged.push({ ...s });
   }
+  // Wood is needed again and again (tables, sticks, fuel): when chopping anyway, take a stack.
+  for (const s of merged) if (s.do === 'gather' && s.block.endsWith('_log')) s.count = Math.max(s.count, MIN_WOOD);
   return merged;
 }
 

@@ -28,6 +28,17 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     return (b) => b.name === name;
   };
 
+  // Like a player: go for blocks you can see (touching air) before ones buried in the ground,
+  // so the bot walks to a hillside instead of tunnelling toward hidden stone.
+  const pickTarget = (name, maxDistance) => {
+    const found = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 64 });
+    if (!found.length) return null;
+    const me = bot.entity.position;
+    const exposed = (p) => NEIGHBORS.some(([x, y, z]) => isOpen(bot.blockAt(p.offset(x, y, z))));
+    const score = (p) => p.distanceTo(me) + (exposed(p) ? 0 : 20);
+    return found.reduce((best, p) => (score(p) < score(best) ? p : best));
+  };
+
   const goto = async (x, y, z, range = 1) => {
     check();
     if (bot.isSleeping) await bot.wake().catch(() => {});
@@ -295,7 +306,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       let got = 0;
       while (got < count) {
         check();
-        const [pos] = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 1 });
+        const pos = pickTarget(name, maxDistance);
         if (!pos) {
           const y = Math.floor(bot.entity.position.y);
           const hint = name === 'log' && y < 55

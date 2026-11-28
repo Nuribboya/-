@@ -47,7 +47,8 @@ test('skills: seeds exist, save/record/describe', () => {
 test('curriculum advances and persists achievements', () => {
   const m = new Memory(tmp());
   assert.equal(nextGoal({}, m).id, 'logs');
-  assert.equal(nextGoal({ oak_log: 5 }, m).id, 'table');
+  assert.equal(nextGoal({ oak_log: 5 }, m).id, 'logs'); // a few logs is not enough any more
+  assert.equal(nextGoal({ oak_log: 10 }, m).id, 'table');
   assert.equal(nextGoal({ oak_planks: 2 }, m).id, 'table'); // logs stay achieved after crafting
   assert.equal(nextGoal({ wooden_pickaxe: 1 }, m).id, 'stone_pickaxe');
 });
@@ -401,7 +402,7 @@ test('knowledge: plans from real 26.1 game data', async () => {
   // empty hands -> wooden pickaxe: logs first, table placed before the pickaxe
   const wp = plan(reg, {}, 'wooden_pickaxe', 1);
   assert.equal(wp[0].do, 'gather');
-  assert.deepEqual(stepToAction(wp[0]), { skill: 'collect_logs', args: { count: 3 } });
+  assert.deepEqual(stepToAction(wp[0]), { skill: 'collect_logs', args: { count: 10 } }); // a stack, not the bare minimum (3)
   const placeIdx = wp.findIndex((s) => s.do === 'place' && s.block === 'crafting_table');
   const pickIdx = wp.findIndex((s) => s.do === 'craft' && s.item === 'wooden_pickaxe');
   assert.ok(placeIdx >= 0 && placeIdx < pickIdx);
@@ -1078,7 +1079,7 @@ test('plan text offers follow_plan; nextAction gives the first step', async () =
   const goals = new Goals({ bot: { registry: reg, findBlock: () => null }, llm: {}, memory: {}, journal: {}, events: {}, config: {} });
   const goal = { id: 'wooden_pickaxe', target: { item: 'wooden_pickaxe', count: 1 } };
   assert.match(goals.planText(goal, {}), /"skill":"follow_plan","args":\{"steps":5\}/);
-  assert.deepEqual(goals.nextAction(goal, {}), { skill: 'collect_logs', args: { count: 3 } });
+  assert.deepEqual(goals.nextAction(goal, {}), { skill: 'collect_logs', args: { count: 10 } });
   assert.equal(goals.nextAction({ id: 'free', target: null }, {}), null);
   assert.equal(goals.planText({ id: 'logs', target: { item: 'log', count: 4 } }, { oak_log: 5 }), '');
 });
@@ -1248,4 +1249,19 @@ test('new world: progress is reset, skills and general lessons are kept', async 
   assert.deepEqual(m2.data.lessons, ['용암이 보이면 방향을 바꾼다']);
   assert.deepEqual(r, { clearedMilestones: 3, droppedLessons: 1, keptLessons: 1 });
   assert.ok(new Skills(dir).has('my_skill'));
+});
+
+test('gather prefers a block you can see over a closer one buried in the ground', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { Vec3 } = await import('vec3');
+  const { bot } = await fakeWorld();
+  bot.registry.blocksByName.stone = { id: 1 };
+  const buried = new Vec3(0, 60, 0); // 4 blocks below, surrounded by stone
+  const visible = new Vec3(6, 63, 0); // top of the ground, air above
+  bot.findBlocks = () => [buried, visible];
+  const dug = [];
+  const dig = bot.dig;
+  bot.dig = async (b) => (dug.push(b.position.toString()), dig(b));
+  await createApi(bot, { aborted: false }).gather('stone', 1);
+  assert.equal(dug[0], visible.toString());
 });

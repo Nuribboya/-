@@ -5,9 +5,9 @@ const NAME_RE = /^[a-z][a-z0-9_]{2,59}$/;
 
 const SEEDS = {
   collect_logs: {
-    description: '주변에서 원목을 count개 캔다 (기본 5)',
+    description: '주변에서 원목을 count개 캔다 (기본 10)',
     args: { count: 5 },
-    code: `const n = args.count ?? 5;\nawait api.gather('log', n);\nreturn api.inventory();`,
+    code: `const n = args.count ?? 10;\nawait api.gather('log', n);\nreturn api.inventory();`,
   },
   craft_item: {
     description: '아이템을 제작한다. 필요하면 근처 작업대를 자동 사용 (item 이름, count=제작 횟수)',

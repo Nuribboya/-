@@ -43,6 +43,9 @@ function connect() {
     movements.scafoldingBlocks = ['dirt', 'cobbled_deepslate', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack']
       .map((n) => bot.registry.itemsByName[n]?.id)
       .filter((id) => id !== undefined);
+    // Digging through terrain costs more than walking around it (default 1 makes the bot tunnel
+    // through every hill). Mining still works: the target block itself is dug either way.
+    movements.digCost = 4;
     bot.pathfinder.setMovements(movements);
     events.log('스폰 완료. 플레이 시작!');
     agent = new Agent({ bot, llm, skills, memory, events, config, journal });
