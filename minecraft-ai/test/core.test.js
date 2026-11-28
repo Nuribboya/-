@@ -874,3 +874,22 @@ test('smelt: clears leftovers, stops with a reason when the furnace stalls', asy
   assert.deepEqual(taken, ['output', 'input']); // leftovers cleared before putting ours in
   await assert.rejects(createApi(bot, { aborted: false }).smelt('raw_iron', 3, 'coal'), /need 3 raw_iron to smelt \(have 1\)/);
 });
+
+test('smelt: a furnace that never opens fails fast with a reason (not the 120s skill timeout)', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const bot = {
+    registry: { blocksByName: { furnace: { id: 1 } } },
+    entity: { position: { floored: () => ({}) } },
+    findBlock: () => ({ position: { x: 0, y: 64, z: 0 } }),
+    inventory: { items: () => [{ name: 'raw_iron', type: 5, count: 1 }, { name: 'coal', type: 6, count: 1 }] },
+    pathfinder: { goto: async () => {} },
+    openFurnace: () => new Promise(() => {}), // never opens
+  };
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...a) => realSetTimeout(fn, Math.min(ms, 5), ...a); // speed up timers
+  try {
+    await assert.rejects(createApi(bot, { aborted: false }).smelt('raw_iron', 1, 'coal'), /the furnace did not open/);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+});
