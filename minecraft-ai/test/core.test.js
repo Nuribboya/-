@@ -544,10 +544,51 @@ test('self-chosen goals: pick, keep, complete, and give up', async () => {
   await goals.current(obs);
   await goals.current(obs); // over freeGoalMaxSteps -> dropped, new goal
   assert.equal(memory.data.goalHistory.at(-1).result, '포기');
-  // unknown item from the model -> goal without a target, not a crash
+  // unknown item and no candidate known to this tiny registry -> a goal without a target, no crash
   llm.ask = async () => '{"goal":"집 짓기","item":"house","count":1}';
   memory.data.freeGoal = null;
   assert.equal((await goals.current(obs)).target, null);
+});
+
+test('free goals: no repeating what we already own (incl. worn armor) or just did', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Journal } = await import('../src/journal.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const memory = new Memory(dir);
+  const slots = {};
+  const bot = { registry: reg, inventory: { slots } };
+  let reply = '{"goal":"철 도끼 만들기","item":"iron_axe","count":1}';
+  const prompts = [];
+  const llm = { ask: async (t, sys, user) => (prompts.push(user), reply) };
+  const goals = new Goals({ bot, llm, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 } });
+  const inv = { iron_pickaxe: 1, iron_axe: 1 };
+
+  const g = await goals.current({ inv, text: '' });
+  assert.equal(g.target.item, 'shield'); // already has an iron axe -> next sensible goal
+  assert.match(prompts[0], /추천 후보\(아직 없는 것\): shield x1/);
+
+  // worn armor counts as owned: helmet on the head -> not suggested / not a goal
+  slots[5] = { name: 'iron_helmet', count: 1 };
+  memory.data.freeGoal = null;
+  reply = '{"goal":"투구","item":"iron_helmet","count":1}';
+  const g2 = await goals.current({ inv: { ...inv, shield: 1 }, text: '' });
+  assert.notEqual(g2.target.item, 'iron_helmet');
+  assert.doesNotMatch(prompts.at(-1), /iron_helmet x1/);
+
+  // a goal that was just dropped is not picked again right away
+  memory.data.freeGoal = null;
+  memory.data.goalHistory = [{ goal: '흉갑', item: 'iron_chestplate', result: '포기' }];
+  reply = '{"goal":"흉갑","item":"iron_chestplate","count":1}';
+  const g3 = await goals.current({ inv, text: '' });
+  assert.notEqual(g3.target.item, 'iron_chestplate');
+
+  // a fresh, sensible pick by the model is kept as is
+  memory.data.freeGoal = null;
+  reply = '{"goal":"다이아 찾기","item":"diamond","count":3}';
+  const g4 = await goals.current({ inv, text: '' });
+  assert.deepEqual(g4.target, { item: 'diamond', count: 3 });
 });
 
 test('reading the goal (advance:false) neither spends a turn nor asks the model', async () => {
