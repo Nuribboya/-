@@ -85,6 +85,7 @@ npm run new-world
 철 곡괭이 다음부터는 **아직 못 한 발전 과제**를 순서대로 목표로 삼습니다(모델 호출 없이 바로 결정). 서버가 접속 때 보내는 발전 과제 진행 데이터로 이미 달성한 것까지 알고, 채팅의 "has made the advancement" 줄은 예비로 씁니다.
 - 현재 도구로 가능한 것: Suit Up(철 투구 착용) → Husbandry(먹기) → Monster Hunter(적대 몹 처치) → Not Today, Thank You(방패로 화살 막기) → Sweet Dreams(침대에서 자기) → Diamonds! → Cover Me with Diamonds(다이아 투구 착용)
 - 아이템을 만든 뒤 할 일(입기, 먹기, 자기)도 자동 계획에 나옵니다 (`equip_item` 기본 스킬 추가).
+- **밤 전용 과제**(Monster Hunter, Not Today Thank You, Sweet Dreams): 준비물(방패, 침대)은 낮에 만들고, 마지막 단계(몹 처치, 화살 막기, 자기)만 밤까지 미뤄둡니다. 낮엔 다음 과제를 하고, 밤이 되면 돌아옵니다. 미뤄둔 건 "포기"로 치지 않습니다.
 - 다 하면 예전처럼 스스로 목표를 고릅니다. 끄려면 `ADVANCEMENT_GOALS=false`.
 - 오버레이와 `npm run report`에 달성한 발전 과제가 표시됩니다.
 

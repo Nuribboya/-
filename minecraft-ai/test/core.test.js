@@ -1983,3 +1983,31 @@ test('night: the bot is told to keep doing its job, not to dig in', async () => 
   const s = new Skills(tmp());
   assert.match(s.index.night_shelter.description, /밤이라는 이유만으로는 쓰지 않음/);
 });
+
+test('night-only advancements: parked by day (item still made by day), picked up again at night', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { Advancements } = await import('../src/advancements.js');
+  const { Journal } = await import('../src/journal.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const memory = new Memory(dir);
+  const adv = new Advancements();
+  for (const id of ['minecraft:story/obtain_armor', 'minecraft:husbandry/root']) adv.fromChat.add(id);
+  const bot = { registry: reg, findBlock: () => null, inventory: { slots: {} }, time: { timeOfDay: 6000 } };
+  const goals = new Goals({ bot, llm: { ask: async () => '{}' }, memory, journal: new Journal(dir), events: { log() {} }, config: { freeGoalMaxSteps: 80 }, advancements: adv });
+  const inv = { iron_pickaxe: 1 };
+
+  // day: Monster Hunter (nothing to make, night-only) is parked; the shield one has day work
+  assert.match((await goals.current({ inv, text: '' })).text, /Not Today/);
+  // shield made and in the off-hand: only the night step is left -> parked, bed next (made by day)
+  bot.inventory.slots[45] = { name: 'shield', count: 1 };
+  assert.match((await goals.current({ inv, text: '' })).text, /Sweet Dreams/);
+  // bed made too -> parked as well -> Diamonds!
+  assert.match((await goals.current({ inv: { ...inv, white_bed: 1 }, text: '' })).text, /Diamonds!/);
+  assert.ok(!memory.data.goalHistory.some((g) => g.result === '포기')); // parked, never given up
+
+  // night: leave Diamonds for now, go for a night-only one
+  bot.time.timeOfDay = 15000;
+  assert.match((await goals.current({ inv: { ...inv, white_bed: 1 }, text: '' })).text, /Monster Hunter|Not Today|Sweet Dreams/);
+});

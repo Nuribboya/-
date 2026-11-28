@@ -5,6 +5,7 @@ import { nextGoal } from './curriculum.js';
 import { plan as makePlan, stepText, stepToAction } from './knowledge.js';
 import { GOAL_SYSTEM } from './prompts.js';
 import { ADVANCEMENT_GOALS } from './advancements.js';
+import { isNight } from './util.js';
 
 // What a player usually goes for after the iron pickaxe, cheapest/most useful first.
 // Used as suggestions and as the fallback when the model picks something already done.
@@ -76,6 +77,22 @@ export class Goals {
     if (!fg && !advance) return { ...fallback, target: null };
 
     const owned = this.#owned(obs.inv);
+
+    // Night-only advancements (kill a mob, block an arrow, sleep): make their item by day, but the
+    // last step waits for night. By day such a goal is parked (not "given up"); at night it comes
+    // back even if the bot is busy with something else. Only when the time of day is known.
+    const hasTime = !!this.bot.time;
+    const night = hasTime && isNight(this.bot);
+    const day = hasTime && !night;
+    const entryOf = (id) => ADVANCEMENT_GOALS.find((a) => a.id === id);
+    const waitsForNight = (a) => a?.when === 'night' && day && (!a.target || (owned[a.target.item] ?? 0) >= a.target.count);
+    const parked = new Set(ADVANCEMENT_GOALS.filter(waitsForNight).map((a) => a.id));
+    const gaveUp = new Set(m.goalHistory.slice(-3).filter((g) => g.result === '포기').map((g) => g.advId).filter(Boolean));
+    const nightAdvPending = () =>
+      night && this.config.advancementGoals !== false && this.advancements
+        ? ADVANCEMENT_GOALS.find((a) => a.when === 'night' && !this.advancements.isDone(a.id) && !gaveUp.has(a.id))
+        : null;
+
     if (fg) {
       fg.steps = (fg.steps ?? 0) + 1;
       const haveTarget = fg.target && (owned[fg.target.item] ?? 0) >= fg.target.count;
@@ -85,21 +102,31 @@ export class Goals {
         : fg.advId
           ? this.advancements?.isDone(fg.advId) || (haveTarget && !fg.finish)
           : haveTarget;
-      if (!done && fg.steps <= this.config.freeGoalMaxSteps) {
-        this.memory.save();
-        return asGoal(fg);
+      const nightAdv = !done && entryOf(fg.advId)?.when !== 'night' ? nightAdvPending() : null;
+      if (!done && fg.advId && parked.has(fg.advId)) {
+        this.events.log(`🌙 "${entryOf(fg.advId).title}"은(는) 밤에만 가능 - 밤까지 미뤄두고 다른 목표부터`);
+        this.journal.add('self_goal_parked', { goal: fg.text });
+        m.freeGoal = null;
+      } else if (nightAdv) {
+        this.events.log(`🌙 밤이 됨 - "${nightAdv.title}" 하러 감 (지금 목표는 나중에 다시)`);
+        m.freeGoal = null;
+      } else {
+        if (!done && fg.steps <= this.config.freeGoalMaxSteps) {
+          this.memory.save();
+          return asGoal(fg);
+        }
+        m.goalHistory = [...m.goalHistory, { goal: fg.text, item: fg.target?.item ?? null, advId: fg.advId ?? null, result: done ? '달성' : '포기' }].slice(-10);
+        m.freeGoal = null;
+        this.journal.add(done ? 'self_goal_done' : 'self_goal_dropped', { goal: fg.text });
+        this.events.log(done ? `🏁 스스로 정한 목표 달성: ${fg.text}` : `🏳️ 목표 포기 (${fg.steps}턴): ${fg.text}`);
+        if (done) this.snapshot(`self-${fg.target?.item ?? 'goal'}`);
+        else this.memory.addLesson(`"${fg.text}"은(는) ${fg.steps}턴 안에 못 했다 - 더 작게 나누거나 다른 방법`);
       }
-      m.goalHistory = [...m.goalHistory, { goal: fg.text, item: fg.target?.item ?? null, advId: fg.advId ?? null, result: done ? '달성' : '포기' }].slice(-10);
-      m.freeGoal = null;
-      this.journal.add(done ? 'self_goal_done' : 'self_goal_dropped', { goal: fg.text });
-      this.events.log(done ? `🏁 스스로 정한 목표 달성: ${fg.text}` : `🏳️ 목표 포기 (${fg.steps}턴): ${fg.text}`);
-      if (done) this.snapshot(`self-${fg.target?.item ?? 'goal'}`);
-      else this.memory.addLesson(`"${fg.text}"은(는) ${fg.steps}턴 안에 못 했다 - 더 작게 나누거나 다른 방법`);
     }
 
     // Advancements first: deterministic, no model call. Skip ones given up on in the last 3 goals.
     if (this.config.advancementGoals !== false && this.advancements) {
-      const skip = new Set(m.goalHistory.slice(-3).filter((g) => g.result === '포기').map((g) => g.advId).filter(Boolean));
+      const skip = new Set([...gaveUp, ...parked]);
       const adv = this.advancements.next(skip);
       if (adv) {
         m.freeGoal = { text: adv.text, target: adv.target, finish: adv.finish, then: adv.then ?? null, advId: adv.id, steps: 0, setAt: new Date().toISOString() };

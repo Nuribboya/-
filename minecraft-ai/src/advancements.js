@@ -20,6 +20,7 @@ export const ADVANCEMENT_GOALS = [
   },
   {
     id: 'minecraft:adventure/kill_a_mob',
+    when: 'night', // the last step needs night (mobs / sleeping); the item can be made by day
     title: 'Monster Hunter',
     text: '발전 과제 "Monster Hunter"(몬스터 사냥꾼): 적대 몹 하나 처치 (밤에 좀비 추천)',
     target: null,
@@ -27,6 +28,7 @@ export const ADVANCEMENT_GOALS = [
   },
   {
     id: 'minecraft:story/deflect_arrow',
+    when: 'night', // the last step needs night (mobs / sleeping); the item can be made by day
     title: 'Not Today, Thank You',
     text: '발전 과제 "Not Today, Thank You": 방패를 왼손에 들고 스켈레톤 화살을 막기 (밤에 스켈레톤을 찾아 block_arrows)',
     target: { item: 'shield', count: 1 },
@@ -36,6 +38,7 @@ export const ADVANCEMENT_GOALS = [
   },
   {
     id: 'minecraft:adventure/sleep_in_bed',
+    when: 'night', // the last step needs night (mobs / sleeping); the item can be made by day
     title: 'Sweet Dreams',
     text: '발전 과제 "Sweet Dreams": 침대를 만들어 밤에 자기',
     target: { item: 'white_bed', count: 1 },
