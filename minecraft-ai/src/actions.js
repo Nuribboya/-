@@ -1,7 +1,7 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
-import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint, similarItems, similarNames, blockForItem } from './knowledge.js';
+import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint, similarItems, similarNames, blockForItem, SMELT } from './knowledge.js';
 import { BODY_ACTIONS } from './api-names.js';
 import { sleep, isNight, withTimeout } from './util.js';
 
@@ -60,6 +60,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   /** Human/model-readable explanation of why `name` can't be crafted right now. */
   const explainCraft = (name, item, tableNearby) => {
+    if (SMELT[name]) return `${name} is not crafted - it is SMELTED from ${SMELT[name]} in a furnace: smelt_item {item: '${SMELT[name]}', count: N}`;
     const all = bot.recipesAll(item.id, null, true);
     if (!all.length) return `${name} has no crafting recipe - it must be mined, smelted or found`;
     const inv = inventoryOf(bot);
@@ -145,6 +146,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   // Place a block from inventory on the ground next to you. Beds need 2 free cells in a row
   // and are laid out in the direction the bot looks, so look along that row first.
+  /** Place the held item on top of the block under `t`, with a time limit. */
+  const placeOn = (t) =>
+    withTimeout(bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0)), 10000, `placing at (${t.x},${t.y},${t.z}) got no answer from the server`);
+
   const placeRaw = async (name) => {
     check();
     const item = bot.inventory.items().find((i) => i.name === name);
@@ -165,10 +170,30 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await bot.equip(item, 'hand');
       if (isBed) await bot.lookAt(base.offset(2 * dx + 0.5, 0.5, 2 * dz + 0.5), true);
       check();
-      await bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0));
+      await placeOn(t);
       return t;
     }
-    // Nothing right next to us (forest, tunnel...): look up to 4 blocks around, walk over, place there.
+    // Tight tunnel: dig a spot into the wall next to us (no walking around underground).
+    if (!isBed) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const t = base.offset(dx, 0, dz);
+        const b = bot.blockAt(t);
+        const g = bot.blockAt(t.offset(0, -1, 0));
+        if (!b || isOpen(b) || b.diggable === false || !g || g.boundingBox !== 'block') continue;
+        const liquidNear = NEIGHBORS.some(([x, y, z]) => /lava|water/.test(bot.blockAt(t.offset(x, y, z))?.name ?? ''));
+        if (liquidNear) continue;
+        try {
+          await equipFor(b);
+        } catch {} // breaking it by hand is fine, we only need the space
+        check();
+        await withTimeout(bot.dig(b), 25000, `digging a spot for the ${name} took too long`);
+        await bot.equip(item, 'hand');
+        check();
+        await placeOn(t);
+        return t;
+      }
+    }
+    // Nothing right next to us (forest...): look up to 4 blocks around, walk over, place there.
     if (!isBed) {
       const cands = [];
       for (let dx = -4; dx <= 4; dx++)
@@ -185,14 +210,14 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
           .map(([x, z]) => t.offset(x, 0, z))
           .find((c) => free(c) && isOpen(bot.blockAt(c.offset(0, 1, 0))));
         if (!stand) continue;
-        await goto(stand.x, stand.y, stand.z, 0).catch(() => {});
+        await withTimeout(goto(stand.x, stand.y, stand.z, 0), 15000, 'slow path').catch(() => {});
         const feet = bot.entity.position.floored();
         if (feet.x === t.x && feet.z === t.z && (feet.y === t.y || feet.y + 1 === t.y)) continue; // standing in it
         if (bot.entity.position.distanceTo(t) > 4.5) continue;
         await clearCell(t);
         await bot.equip(item, 'hand');
         check();
-        await bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0));
+        await placeOn(t);
         return t;
       }
     }
@@ -278,7 +303,11 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
             : oreHint(name, y);
           throw new Error(`no ${name} within ${maxDistance} blocks (got ${got}/${count}) - ${hint}`);
         }
-        await goto(pos.x, pos.y, pos.z, 2);
+        await withTimeout(
+          goto(pos.x, pos.y, pos.z, 2),
+          45000,
+          `reaching ${name} at (${pos.x},${pos.y},${pos.z}) took over 45s${bestTool('pickaxe') ? '' : ' - you have NO pickaxe, so digging the way through stone is very slow: make a pickaxe first'}`,
+        );
         const block = bot.blockAt(pos);
         if (!block || !matcherFor(name)(block)) continue;
         await equipFor(block);

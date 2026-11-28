@@ -779,16 +779,32 @@ test('place clears leaf litter / grass in the target cell before placing', async
   assert.deepEqual(order, ['dig leaf_litter', 'place at 1,64,0 (was air)']);
 });
 
-test('place: when every cell next to the bot is blocked, walks a few blocks and places there', async () => {
+test('place in a tight spot: dig a spot into the wall; if walls cannot be dug, walk a few blocks', async () => {
   const { createApi } = await import('../src/actions.js');
-  const { bot, blocks } = await fakeWorld({ items: [{ name: 'furnace', type: 1 }] });
-  // wall the bot in: all 8 neighbours at feet level are solid
-  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) blocks.set(`${x},64,${z}`, 'stone');
-  let placedAt = null;
-  bot.placeBlock = async (ref, face) => (placedAt = ref.position.plus(face));
-  const t = await createApi(bot, { aborted: false }).place('furnace');
-  assert.ok(t && placedAt && placedAt.equals(t));
-  assert.ok(Math.abs(t.x) + Math.abs(t.z) >= 2);
+  const wall = async (name) => {
+    const w = await fakeWorld({ items: [{ name: 'crafting_table', type: 1 }] });
+    for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) w.blocks.set(`${x},64,${z}`, name);
+    let placedAt = null;
+    w.bot.placeBlock = async (ref, face) => (placedAt = ref.position.plus(face));
+    const t = await createApi(w.bot, { aborted: false }).place('crafting_table');
+    return { t, placedAt, w };
+  };
+  // tunnel walls (stone): dig the cell next to us and place there - no wandering
+  const a = await wall('stone');
+  assert.ok(a.placedAt.equals(a.t));
+  assert.equal(Math.abs(a.t.x) + Math.abs(a.t.z), 1);
+  // walls that cannot be dug: walk to an open spot nearby
+  const b = await wall('bedrock');
+  assert.ok(b.placedAt.equals(b.t));
+  assert.ok(Math.abs(b.t.x) + Math.abs(b.t.z) >= 2);
+});
+
+test('craft error for furnace items points to smelting', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const bot = { registry: reg, entity: {}, inventory: { items: () => [] }, recipesFor: () => [], findBlock: () => null };
+  await assert.rejects(createApi(bot, { aborted: false }).craft('iron_ingot'), /SMELTED from raw_iron .*smelt_item/);
 });
 
 test('skill list shows builtins first, then learned skills with their record', () => {
