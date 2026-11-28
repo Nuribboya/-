@@ -22,7 +22,7 @@ const FALLING = /^(sand|red_sand|gravel|suspicious_sand|suspicious_gravel)$/;
 export function createApi(bot, ctx, log = () => {}, hooks = {}) {
   const reg = bot.registry;
   const check = () => {
-    if (ctx.aborted) throw new Error('skill timed out / aborted');
+    if (ctx.aborted) throw new Error(ctx.abortReason ?? 'skill timed out / aborted');
   };
 
   const matcherFor = (name) => {
@@ -49,7 +49,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
     } catch (e) {
       // A leftover stop/goal change from earlier code can cancel a fresh move once; retry one time.
-      if (ctx.aborted || !['PathStopped', 'GoalChanged'].includes(e?.name)) throw e;
+      if (ctx.aborted) throw new Error(ctx.abortReason ?? e.message); // cancelled on purpose: say why
+      if (!['PathStopped', 'GoalChanged'].includes(e?.name)) throw e;
       check();
       await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
     }
@@ -714,6 +715,40 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         if ((drop.__skip ?? 0) >= 2) drop.name = 'item_unreachable'; // stop chasing one we cannot reach
       }
       return { visits };
+    },
+
+    /**
+     * Get out of a spot where walking does not work (wedged in a corner, inside a block, in a
+     * 1-block hole): clear the body cells, then try each direction - break what blocks the way
+     * (never next to water/lava) and step 2 blocks; last resort jump forward.
+     */
+    async unstuck() {
+      check();
+      const start = bot.entity.position.clone();
+      const feet = start.floored();
+      const breakIfSolid = async (c) => {
+        const b = bot.blockAt(c);
+        if (!b || isOpen(b) || b.diggable === false || digHazard(c)) return;
+        try {
+          await equipFor(b);
+        } catch {} // by hand is fine, we only need the space
+        await withTimeout(bot.dig(b), 8000, 'dig timeout').catch(() => {});
+      };
+      await breakIfSolid(feet);
+      await breakIfSolid(feet.offset(0, 1, 0));
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => Math.random() - 0.5);
+      for (const [dx, dz] of dirs) {
+        check();
+        await breakIfSolid(feet.offset(dx, 0, dz));
+        await breakIfSolid(feet.offset(dx, 1, dz));
+        await withTimeout(goto(feet.x + dx * 2, feet.y, feet.z + dz * 2, 1), 6000, 'step timeout').catch(() => {});
+        if (bot.entity.position.distanceTo(start) >= 1.5) return { moved: true, dir: [dx, dz] };
+      }
+      bot.setControlState?.('jump', true);
+      bot.setControlState?.('forward', true);
+      await sleep(1500);
+      bot.clearControlStates?.();
+      return { moved: bot.entity.position.distanceTo(start) >= 1 };
     },
 
     /** Walk into a nearby cave (finds cave air with a floor). Returns where it went. */

@@ -177,6 +177,32 @@ export class Agent {
     }
   }
 
+  /**
+   * Stuck detector for a running skill: the pathfinder is trying to walk but the bot has not
+   * moved a block in stuckMs (digging does not count as stuck). Then stop the skill right away
+   * instead of waiting minutes for its timeout, and run unstuck on the next turn.
+   */
+  #watchStuck(ctx) {
+    const limit = this.config.stuckMs ?? 15000;
+    let last = this.bot.entity?.position?.clone?.();
+    let lastMove = Date.now();
+    return setInterval(() => {
+      const p = this.bot.entity?.position;
+      if (!p || !last) return;
+      if (p.distanceTo(last) > 1 || this.bot.targetDigBlock || !this.bot.pathfinder?.isMoving?.()) {
+        if (p.distanceTo(last) > 1) last = p.clone();
+        lastMove = Date.now();
+        return;
+      }
+      if (Date.now() - lastMove < limit || ctx.aborted) return;
+      ctx.abortReason = `stuck: walking but not moving for ${Math.round(limit / 1000)}s (wall/corner) - unstuck runs next`;
+      ctx.aborted = true;
+      this.stuck = { at: p.clone(), time: Date.now() };
+      this.events.log(`🧱 끼임 감지 (${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}) - 하던 일 멈춤`);
+      this.bot.pathfinder?.setGoal?.(null); // make the pending walk give up now
+    }, Math.max(100, Math.min(1000, limit / 3)));
+  }
+
   #where() {
     const p = this.bot.entity?.position;
     return p ? `${p.x.toFixed(0)},${p.y.toFixed(0)},${p.z.toFixed(0)}` : '?';
@@ -284,6 +310,14 @@ export class Agent {
     const obs = observe(this.bot);
     this.lastInv = obs.inv;
     if (await this.#recoverAfterDeath()) return;
+    if (this.stuck) {
+      this.stuck = null;
+      this.events.update({ thought: '🧱 끼임 - 빠져나오는 중' });
+      this.lastAction = 'unstuck()';
+      this.lastResult = await this.useSkill('unstuck', {});
+      this.journal.add('danger', { what: 'stuck', where: this.#where() });
+      return;
+    }
     const goal = await this.goals.current(obs);
     this.currentGoal = goal;
     const lessons = this.memory.data.lessons;
@@ -405,12 +439,14 @@ export class Agent {
 
     const before = snapshotState(this.bot);
     const result = { ok: true, out: undefined, error: null, logs, errors: ctx.errors };
+    const watchdog = this.#watchStuck(ctx);
     try {
       result.out = await runSkill(code, api, args, ctx, timeoutMs);
     } catch (e) {
       result.ok = false;
       result.error = e;
     } finally {
+      clearInterval(watchdog);
       ctx.aborted = true;
       if (this.currentCtx === ctx) this.currentCtx = null;
       // NOT pathfinder.stop(): that only sets a flag, and if the bot is already standing

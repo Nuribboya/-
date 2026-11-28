@@ -1578,3 +1578,66 @@ test('low air: the running skill is stopped and the bot swims up', async () => {
   assert.deepEqual(controls.at(-1), ['jump', false]);
   assert.equal(journal.entries.at(-1).what, 'drowning');
 });
+
+test('stuck: a walk that goes nowhere is cut off fast, then unstuck runs (digging is not stuck)', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  let moving = false;
+  let rejectWalk = null;
+  const bot = Object.assign(new EventEmitter(), {
+    username: 'Bot', registry: reg, entity: { position: new Vec3(0.5, 64, 0.5) }, entities: {}, health: 20, food: 20,
+    time: { timeOfDay: 1000 }, inventory: { items: () => [] }, findBlocks: () => [], findBlock: () => null,
+    blockAt: () => null, nearestEntity: () => null, clearControlStates() {},
+    pathfinder: {
+      isMoving: () => moving,
+      // a walk that never arrives (wedged); setGoal(null) makes it give up like the real pathfinder
+      goto: () => new Promise((_, rej) => ((moving = true), (rejectWalk = rej))),
+      setGoal: (g) => {
+        if (g === null && rejectWalk) {
+          moving = false;
+          const e = new Error('goal changed');
+          e.name = 'GoalChanged';
+          rejectWalk(e);
+          rejectWalk = null;
+        }
+      },
+    },
+  });
+  const skills = new Skills(dir);
+  skills.save('walk_far', 'x', {}, 'await api.goTo(100, 64, 0); return 1;');
+  const agent = new Agent({ bot, llm: { budgetLeft: () => true, spentUsd: 0, ask: async () => '{"thought":"x","wait":true}' }, skills, memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 60000, stuckMs: 300, autopilot: false } });
+  const t0 = Date.now();
+  const res = await agent.useSkill('walk_far', {});
+  assert.ok(Date.now() - t0 < 3000, 'cut off long before the 60s skill timeout');
+  assert.match(res, /stuck: walking but not moving/);
+  assert.ok(agent.stuck);
+
+  const ran = [];
+  const realUse = agent.useSkill.bind(agent);
+  agent.useSkill = async (name, args) => (ran.push(name), name === 'unstuck' ? '성공: 이동 2칸' : realUse(name, args));
+  await agent.step();
+  assert.deepEqual(ran, ['unstuck']);
+  assert.equal(agent.stuck, null);
+
+  // digging in place for a while is NOT stuck
+  bot.targetDigBlock = { name: 'stone' };
+  skills.save('long_dig', 'x', {}, 'await api.sleep(800); return 1;');
+  moving = true;
+  agent.stuck = null;
+  await realUse('long_dig', {});
+  assert.equal(agent.stuck, null);
+});
+
+test('unstuck: walled in on all sides -> breaks a way out and steps away', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const w = await fakeWorld();
+  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const y of [64, 65]) w.blocks.set(`${x},${y},${z}`, 'stone');
+  const r = await createApi(w.bot, { aborted: false }).unstuck();
+  assert.equal(r.moved, true);
+  assert.ok(w.bot.entity.position.distanceTo(new (await import('vec3')).Vec3(0.5, 64, 0.5)) >= 1.5);
+});

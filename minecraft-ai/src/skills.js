@@ -45,6 +45,11 @@ const SEEDS = {
     args: { y: -58 },
     code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
   },
+  unstuck: {
+    description: '벽이나 구석에 끼었을 때 빠져나오기 (막힌 블록을 부수고 다른 방향으로 이동)',
+    args: {},
+    code: `return await api.unstuck();`,
+  },
   recover_items: {
     description: '죽은 자리로 돌아가 떨어진 아이템을 줍는다 (죽고 5분 안에만 남아 있음)',
     args: { x: 0, y: 64, z: 0 },

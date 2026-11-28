@@ -35,6 +35,7 @@ export const config = {
   autopilotMaxStreak: Number(env.AUTOPILOT_MAX_STREAK ?? 5),
   reflectEvery: Number(env.REFLECT_EVERY ?? 25), // decision steps between self-improvement passes
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),
+  stuckMs: Number(env.STUCK_MS ?? 15000), // walking but not moving this long = stuck
   writeTestTimeoutMs: Number(env.WRITE_TEST_TIMEOUT_MS ?? 60000), // first trial run of new code
   overlayPort: Number(env.OVERLAY_PORT ?? 3000),
   dataDir: env.DATA_DIR ?? 'data',
