@@ -1647,3 +1647,40 @@ test('unstuck: walled in on all sides -> breaks a way out and steps away', async
   assert.equal(r.moved, true);
   assert.ok(w.bot.entity.position.distanceTo(new (await import('vec3')).Vec3(0.5, 64, 0.5)) >= 1.5);
 });
+
+test('craft: ingredients stranded in the 2x2 grid are handed back before and after crafting', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const slots = [];
+  slots[1] = { name: 'oak_log', type: 10, count: 16 }; // left over from a broken craft
+  const inv = [];
+  const bot = {
+    registry: { itemsByName: { oak_planks: { id: 20 } }, items: {} },
+    entity: { position: { floored: () => ({}) } },
+    inventory: { slots, items: () => inv, selectedItem: null },
+    closeWindow: () => {
+      // server returns the grid to the inventory
+      for (const i of [1, 2, 3, 4]) if (slots[i]) (inv.push({ ...slots[i] }), (slots[i] = null));
+    },
+    clickWindow: async () => {},
+    recipesFor: () => (inv.some((i) => i.name === 'oak_log') ? [{ delta: [{ id: 10, count: -1 }, { id: 20, count: 4 }] }] : []),
+    craft: async () => {
+      inv.find((i) => i.name === 'oak_log').count--;
+      inv.push({ name: 'oak_planks', type: 20, count: 4 });
+    },
+  };
+  const logs = [];
+  const api = createApi(bot, { aborted: false }, (m) => logs.push(m));
+  assert.equal(await api.craft('oak_planks', 1), 4); // works because the stuck logs came back first
+  assert.match(logs[0], /returned 1 item stack\(s\) stuck in the crafting grid/);
+  assert.equal(inv.find((i) => i.name === 'oak_log').count, 15);
+
+  // a craft that breaks off and leaves logs in the grid: they are handed back after the failure
+  bot.craft = async () => {
+    inv.find((i) => i.name === 'oak_log').count -= 2;
+    slots[2] = { name: 'oak_log', type: 10, count: 2 };
+    throw new Error('Event updateSlot:0 did not fire within timeout of 20000ms');
+  };
+  await assert.rejects(api.craft('oak_planks', 1), /got stuck/);
+  assert.equal(slots[2], null);
+  assert.equal(inv.filter((i) => i.name === 'oak_log').reduce((n, i) => n + i.count, 0), 15);
+});

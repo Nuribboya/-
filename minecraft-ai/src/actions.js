@@ -73,6 +73,25 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     }
   };
 
+  // The 2x2 crafting grid lives in inventory slots 1-4 (and the cursor), outside items().
+  // When a craft breaks off halfway, ingredients stay stranded there: invisible to the bot, and
+  // they block every later craft. Closing the inventory window makes the server hand them back.
+  const strandedInGrid = () =>
+    [1, 2, 3, 4].filter((i) => bot.inventory?.slots?.[i]).length + (bot.inventory?.selectedItem ? 1 : 0);
+  const clearCraftGrid = async () => {
+    const n = strandedInGrid();
+    if (!n) return 0;
+    try {
+      bot.closeWindow(bot.inventory);
+    } catch {}
+    await sleep(600);
+    for (const i of [1, 2, 3, 4]) {
+      if (bot.inventory.slots[i]) await withTimeout(bot.clickWindow(i, 0, 1), 3000, 'grid click timeout').catch(() => {});
+    }
+    log(`returned ${n} item stack(s) stuck in the crafting grid to the inventory`);
+    return n;
+  };
+
   /** Human/model-readable explanation of why `name` can't be crafted right now. */
   const explainCraft = (name, item, tableNearby) => {
     if (SMELT[name]) return `${name} is not crafted - it is SMELTED from ${SMELT[name]} in a furnace: smelt_item {item: '${SMELT[name]}', count: N}`;
@@ -399,6 +418,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     /** Craft `times` times. Uses a nearby crafting table automatically when the recipe needs one. */
     async craft(name, times = 1) {
       check();
+      await clearCraftGrid(); // leftovers from an earlier broken craft would block this one
       const item = reg.itemsByName[name];
       if (!item) throw new Error(`unknown item "${name}" - did you mean: ${similarItems(reg, name).join(', ')}?`);
       let table = null;
@@ -424,6 +444,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       try {
         await bot.craft(recipe, n, table);
       } catch (e) {
+        await clearCraftGrid();
         const made = (inventoryOf(bot)[name] ?? 0) - before;
         if (/did not fire|timeout/i.test(e.message))
           throw new Error(`crafting ${name} got stuck (server did not answer), made ${made} so far - stand next to the crafting table and try again`);
