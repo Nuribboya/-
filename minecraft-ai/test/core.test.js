@@ -1228,3 +1228,24 @@ test('observation shows tool durability and warns before a tool breaks', async (
   assert.match(text, /iron_helmet 100%/);
   assert.doesNotMatch(text, /cobblestone \d+%/);
 });
+
+test('new world: progress is reset, skills and general lessons are kept', async () => {
+  const { resetForNewWorld } = await import('../src/new-world.js');
+  const dir = tmp();
+  const m = new Memory(dir);
+  m.data.achieved = ['logs', 'table', 'iron_pickaxe'];
+  m.data.freeGoal = { text: 'x' };
+  m.data.goalHistory = [{ goal: 'y' }];
+  m.data.deaths = 4;
+  m.data.lessons = ['죽음 #3: lava (밤, 120,-40,-30)', '용암이 보이면 방향을 바꾼다'];
+  const skills = new Skills(dir);
+  skills.save('my_skill', 'x', {}, 'return 1;');
+  const r = resetForNewWorld(m);
+  const m2 = new Memory(dir);
+  assert.deepEqual(m2.data.achieved, []);
+  assert.equal(m2.data.freeGoal, null);
+  assert.equal(m2.data.deaths, 0);
+  assert.deepEqual(m2.data.lessons, ['용암이 보이면 방향을 바꾼다']);
+  assert.deepEqual(r, { clearedMilestones: 3, droppedLessons: 1, keptLessons: 1 });
+  assert.ok(new Skills(dir).has('my_skill'));
+});

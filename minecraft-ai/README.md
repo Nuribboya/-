@@ -47,6 +47,12 @@ npm run report   # 죽음/마일스톤/새 스킬 요약 출력
 - 기본 스킬 추가: `mine_block {block, count}`, `smelt_item {item, count, fuel}`.
 - 굽기 레시피와 광석 위치처럼 데이터에 없는 것은 `src/knowledge.js`에 직접 적어두었습니다.
 
+## 새 월드로 옮길 때
+```bash
+npm run new-world
+```
+배운 스킬과 일지는 그대로 두고, 이전 월드의 진행 기록(마일스톤, 현재 목표, 발전 과제 메모, 사망 횟수, 좌표가 들어간 교훈)만 초기화합니다. 실행 전에 두뇌를 자동 저장하니 `npm run brain -- restore <이름>`으로 되돌릴 수 있습니다. 포트 번호(`MC_PORT`)도 새 월드에 맞게 바꾸세요.
+
 ## 발전 과제 따라가기
 철 곡괭이 다음부터는 **아직 못 한 발전 과제**를 순서대로 목표로 삼습니다(모델 호출 없이 바로 결정). 서버가 접속 때 보내는 발전 과제 진행 데이터로 이미 달성한 것까지 알고, 채팅의 "has made the advancement" 줄은 예비로 씁니다.
 - 현재 도구로 가능한 것: Suit Up(철 투구 착용) → Husbandry(먹기) → Monster Hunter(적대 몹 처치) → Not Today, Thank You(방패로 화살 막기) → Sweet Dreams(침대에서 자기) → Diamonds! → Cover Me with Diamonds(다이아 투구 착용)

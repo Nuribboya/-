@@ -9,6 +9,7 @@
     "start:free": "node --env-file=.env.free src/index.js",
     "report": "node --env-file-if-exists=.env.free src/report.js",
     "brain": "node --env-file-if-exists=.env.free src/brain-cli.js",
+    "new-world": "node --env-file-if-exists=.env.free src/new-world.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {
