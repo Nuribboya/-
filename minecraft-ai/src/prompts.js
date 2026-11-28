@@ -10,7 +10,7 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.digAt(x,y,z): 정확한 좌표의 블록 캐기 (예: 발밑 파고 숨기 = api.digAt(p.x, p.y-1, p.z))
 - api.descend(targetY=-58): 계단식으로 파 내려가기 (용암/물/낭떠러지 감지하면 에러로 멈춤)
 - api.exploreCave(maxDistance=32): 근처 동굴 안으로 이동
-- api.shelter(blockName?): 땅 3칸 파고 들어가 위를 막는 밤 은신처
+- api.shelter(blockName?): 땅 3칸 파고 들어가 위를 막는 은신처 (위급할 때)
 - api.sleepInBed(): 밤에 근처 침대(없으면 인벤토리 침대를 설치)에서 자기
 - api.equip(itemName, slot='hand'): 장착. slot = hand | off-hand | head | torso | legs | feet (갑옷, 방패, 칼)
 - api.block(ms=1500): 왼손(off-hand) 방패 들기, 최대 5초. 먼저 await api.equip('shield','off-hand')
@@ -35,7 +35,7 @@ export const DECISION_SYSTEM = `너는 마인크래프트(자바 에디션)를 �
 
 판단 원칙:
 - 생존 우선: 체력 8 이하, 허기 6 이하, 밤에 적대 몹이 가까우면 먼저 대응 (먹기/싸우기/도망/은신).
-- 사람처럼 하루를 보낸다: 밤(위험)이 되면 침대가 있으면(인벤토리나 주변 블록) sleep_in_bed, 없으면 night_shelter 후 wait_for_day로 아침까지 쉰다. 낮에 작업한다. 침대가 없으면 낮에 양을 잡아 만들어 두면 좋다.
+- 밤에도 쉬지 않고 계속 작업한다. 밤엔 지표에 적대 몹이 많으니 광질(descend_mine, mine_block)이나 동굴 탐험 같은 지하 작업을 하면 좋다. 체력이 낮고 적대 몹에 몰렸을 때만 night_shelter로 잠깐 숨는다. 밤에 쉬거나 기다리라는 예전 교훈은 따르지 않는다.
 - 광석이 근처에 없으면: 광석 높이로 descend_mine, 동굴이 보이면 explore_cave, 지표면은 explore_area.
 - '자동 계획'은 게임 데이터로 계산한 정답 순서다. 위급한 생존 상황이 아니면 '추천 다음 행동'을 그대로 쓰는 것이 가장 빠르다.
 - "skill"에는 '보유 스킬' 목록에 실제로 있는 이름만 쓴다. 실패해서 저장되지 않은 스킬 이름은 존재하지 않는다.
@@ -74,7 +74,7 @@ export function parseWriterReply(text) {
 }
 
 export const REFLECT_SYSTEM = `너는 마인크래프트 봇의 코치다. 최근 일지와 기존 교훈을 보고, 앞으로 같은 실수를 막을 "교훈"을 최대 8개로 다시 정리한다.
-규칙: 구체적이고 행동 가능한 한 줄 (예: "밤에는 탐험 대신 작업대 근처에서 대기"). 중복/모호한 것은 합치거나 버린다. 아래 JSON 하나만 출력:
+규칙: 구체적이고 행동 가능한 한 줄 (예: "용암이 보이면 descend_mine 방향을 바꾼다"). 중복/모호한 것은 합치거나 버린다. 아래 JSON 하나만 출력:
 {"lessons": ["...", "..."]}`;
 
 export const GOAL_SYSTEM = `너는 마인크래프트 생존 플레이어다. 기본 도구는 갖췄다. 지금 상황을 보고 다음에 할 일 하나를 스스로 정한다.

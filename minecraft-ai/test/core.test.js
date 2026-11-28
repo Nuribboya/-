@@ -786,3 +786,25 @@ test('a learned skill that fails 5 times in a row is archived on the spot', asyn
   for (let i = 0; i < 6; i++) await agent.useSkill('eat_food', {});
   assert.ok(skills.has('eat_food'));
 });
+
+test('builtin skill updates (description/code) reach an existing install, stats are kept', () => {
+  const dir = tmp();
+  const s = new Skills(dir);
+  s.record('night_shelter', true);
+  const idxFile = path.join(dir, 'skills', 'index.json');
+  const idx = JSON.parse(fs.readFileSync(idxFile, 'utf8'));
+  idx.night_shelter.description = '옛날 설명';
+  fs.writeFileSync(idxFile, JSON.stringify(idx));
+  fs.writeFileSync(path.join(dir, 'skills', 'night_shelter.js'), 'return "old";');
+  const s2 = new Skills(dir);
+  assert.match(s2.index.night_shelter.description, /위급할 때/);
+  assert.match(s2.code('night_shelter'), /api\.shelter/);
+  assert.equal(s2.index.night_shelter.uses, 1);
+});
+
+test('decision prompt lets the bot work at night', async () => {
+  const { DECISION_SYSTEM, REFLECT_SYSTEM } = await import('../src/prompts.js');
+  assert.match(DECISION_SYSTEM, /밤에도 쉬지 않고 계속 작업/);
+  assert.doesNotMatch(DECISION_SYSTEM, /아침까지 쉰다/);
+  assert.doesNotMatch(REFLECT_SYSTEM, /밤에는 .*대기/);
+});

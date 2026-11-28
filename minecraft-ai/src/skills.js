@@ -40,13 +40,13 @@ const SEEDS = {
     code: `return await api.exploreCave(32);`,
   },
   night_shelter: {
-    description: '밤용 은신처: 땅을 3칸 파고 들어가 위를 막는다 (아침에 이동하면 알아서 파고 나감)',
+    description: '위급할 때 숨기: 땅을 3칸 파고 들어가 위를 막는다 (다음에 이동하면 알아서 파고 나감)',
     args: {},
     passive: true, // "already sheltered" is a fine result, not a failure
     code: `return await api.shelter();`,
   },
   wait_for_day: {
-    description: '은신처 안에서 아침까지 기다린다 (최대 약 100초씩)',
+    description: '(보통은 쓰지 말 것) 은신처 안에서 아침까지 기다린다',
     args: {},
     passive: true,
     code: `for (let i = 0; i < 10 && api.isNight(); i++) await api.sleep(10000);\nreturn { night: api.isNight() };`,
@@ -57,7 +57,7 @@ const SEEDS = {
     code: `for (let i = 0; i < (args.count ?? 1); i++) await api.attack(args.mob ?? 'sheep');\nreturn api.inventory();`,
   },
   sleep_in_bed: {
-    description: '밤에 침대에서 잔다 (근처 침대 또는 인벤토리 침대를 설치). 부활 지점이 침대로 바뀐다',
+    description: '침대에서 자서 밤을 건너뛴다 (근처 침대 또는 인벤토리 침대 설치, 부활 지점도 침대로). 밤에도 작업할 거면 안 써도 됨',
     args: {},
     passive: true,
     code: `return await api.sleepInBed();`,
@@ -87,7 +87,12 @@ export class Skills {
     }
     // Builtins are always present and always the original code (repairs an older overwrite).
     for (const [name, s] of Object.entries(SEEDS)) {
-      if (!this.index[name]?.builtin) this.#write(name, s.description, s.args, s.code, true);
+      const cur = this.index[name];
+      let curCode = null;
+      try {
+        curCode = fs.readFileSync(path.join(this.dir, `${name}.js`), 'utf8');
+      } catch {}
+      if (!cur?.builtin || cur.description !== s.description || curCode !== s.code) this.#write(name, s.description, s.args, s.code, true);
       this.index[name].passive = !!s.passive;
     }
   }

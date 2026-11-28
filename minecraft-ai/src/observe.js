@@ -34,7 +34,7 @@ export function observe(bot) {
     inv,
     text: [
       `위치: (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) / 체력 ${Math.round(bot.health)}/20 / 허기 ${Math.round(bot.food)}/20`,
-      `시간: ${isNight(bot) ? '밤(위험)' : '낮'}`,
+      `시간: ${isNight(bot) ? '밤 (지표에 적대 몹 많음 - 지하 작업 추천)' : '낮'}`,
       `인벤토리: ${Object.keys(inv).length ? JSON.stringify(inv) : '비어있음'}`,
       `주변 블록(24칸, 개수/최단거리): ${Object.keys(near).length ? JSON.stringify(near) : '특별한 것 없음'}`,
       `주변 생물: ${mobs.length ? mobs.map((m) => `${m.name}${m.hostile ? '(적대)' : ''}@${m.dist}`).join(', ') : '없음'}`,
