@@ -297,3 +297,22 @@ export function oreHint(name, y) {
     return `${name} is most common around y=${d} and you are at y=${y}: ${y > d ? `use descend_mine {y: ${d}} (or explore_cave) first` : 'go up / explore_area'}`;
   return 'try explore_cave or explore_area to look somewhere else';
 }
+
+/** Closest real item names for a misspelled/made-up one (e.g. iron_gardener -> iron_chestplate...). */
+export function similarItems(reg, name, n = 3) {
+  const want = String(name).toLowerCase();
+  const words = new Set(want.split('_'));
+  const dist = (a, b) => {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++)
+      for (let j = 1; j <= b.length; j++)
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  };
+  return Object.keys(reg.itemsByName)
+    .map((k) => ({ k, score: k.split('_').filter((w) => words.has(w)).length * 10 - dist(want, k) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n)
+    .map((x) => x.k);
+}

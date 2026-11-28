@@ -1,7 +1,7 @@
 import pf from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { inventoryOf, HOSTILE } from './observe.js';
-import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint } from './knowledge.js';
+import { plan as makePlan, recipeInfo, minTool, fuelValue, stepText, oreHint, similarItems } from './knowledge.js';
 import { BODY_ACTIONS } from './api-names.js';
 import { sleep, isNight } from './util.js';
 
@@ -240,7 +240,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     async craft(name, times = 1) {
       check();
       const item = reg.itemsByName[name];
-      if (!item) throw new Error(`unknown item: ${name}`);
+      if (!item) throw new Error(`unknown item "${name}" - did you mean: ${similarItems(reg, name).join(', ')}?`);
       let table = null;
       let recipe = bot.recipesFor(item.id, null, 1, null)[0];
       if (!recipe) {
@@ -282,23 +282,33 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       if (!furnaceBlock) throw new Error('no furnace nearby - craft and place one');
       const inItem = bot.inventory.items().find((i) => i.name === input);
       const fuelItem = bot.inventory.items().find((i) => i.name === fuel);
-      if (!inItem || inItem.count < count) throw new Error(`need ${count} ${input}`);
+      if (!inItem || inItem.count < count) throw new Error(`need ${count} ${input} to smelt (have ${inItem?.count ?? 0})`);
       if (!fuelItem) throw new Error(`no fuel (${fuel}) in inventory`);
+      const per = fuelValue(fuel) || 1;
+      const fuelCount = Math.max(1, Math.ceil(count / per));
+      if (fuelItem.count < fuelCount) throw new Error(`need ${fuelCount} ${fuel} as fuel to smelt ${count} (have ${fuelItem.count}); coal smelts 8, planks 1.5 each`);
       await goto(furnaceBlock.position.x, furnaceBlock.position.y, furnaceBlock.position.z, 2);
       const furnace = await bot.openFurnace(furnaceBlock);
       try {
-        const per = fuelValue(fuel) || 1;
-        const fuelCount = Math.max(1, Math.ceil(count / per));
-        if (fuelItem.count < fuelCount) throw new Error(`need ${fuelCount} ${fuel} as fuel to smelt ${count} (have ${fuelItem.count}); coal smelts 8, planks 1.5 each`);
+        // Clear whatever an earlier run left behind, so our items fit in the slots.
+        if (furnace.outputItem()) await furnace.takeOutput();
+        if (furnace.inputItem() && furnace.inputItem().type !== inItem.type) await furnace.takeInput();
+        if (furnace.fuelItem() && furnace.fuelItem().type !== fuelItem.type) await furnace.takeFuel();
         await furnace.putFuel(fuelItem.type, null, fuelCount);
         await furnace.putInput(inItem.type, null, count);
+        // One item takes ~10s. If nothing comes out for 15s the furnace is not working: stop with
+        // a reason instead of hanging until the skill times out.
         let collected = 0;
-        for (let i = 0; i < count * 12 && collected < count; i++) {
+        let lastProgress = Date.now();
+        while (collected < count) {
           check();
           await sleep(1000);
           if (furnace.outputItem()) {
             const out = await furnace.takeOutput();
             collected += out?.count ?? 0;
+            lastProgress = Date.now();
+          } else if (Date.now() - lastProgress > 15000) {
+            throw new Error(`furnace stopped smelting after ${collected}/${count} (fuel burning out or the input slot is blocked) - add more fuel and run smelt_item again`);
           }
         }
         return collected;

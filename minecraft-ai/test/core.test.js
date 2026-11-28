@@ -828,3 +828,49 @@ test('pointless skill names: builtin copies and check-only skills are refused wi
   assert.match(out, /^스킬 작성 안 함: .*smelt_item/);
   assert.equal(calls, 1); // stopped after the first reply instead of 3 attempts
 });
+
+test('unknown item names get real suggestions', async () => {
+  const { similarItems } = await import('../src/knowledge.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  assert.ok(similarItems(reg, 'iron_chest_plate').includes('iron_chestplate'));
+  assert.ok(similarItems(reg, 'iron_gardener').some((n) => n.startsWith('iron_')));
+  const { createApi } = await import('../src/actions.js');
+  const api = createApi({ registry: reg, entity: {}, inventory: { items: () => [] } }, { aborted: false });
+  await assert.rejects(api.craft('iron_chest_plate'), /did you mean: .*iron_chestplate/);
+});
+
+test('smelt: clears leftovers, stops with a reason when the furnace stalls', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const slots = { input: { type: 99 }, fuel: null, output: { type: 7, count: 2 } };
+  const taken = [];
+  const furnace = {
+    inputItem: () => slots.input,
+    fuelItem: () => slots.fuel,
+    outputItem: () => slots.output,
+    takeOutput: async () => (taken.push('output'), (slots.output = null), { count: 0 }),
+    takeInput: async () => (taken.push('input'), (slots.input = null)),
+    takeFuel: async () => (slots.fuel = null),
+    putFuel: async () => {},
+    putInput: async () => {},
+    close() {},
+  };
+  const bot = {
+    registry: { blocksByName: { furnace: { id: 1 } } },
+    entity: { position: { floored: () => ({}) } },
+    findBlock: () => ({ position: { x: 0, y: 64, z: 0 } }),
+    inventory: { items: () => [{ name: 'raw_iron', type: 5, count: 1 }, { name: 'coal', type: 6, count: 1 }] },
+    pathfinder: { goto: async () => {} },
+    openFurnace: async () => furnace,
+  };
+  const realNow = Date.now;
+  let t = realNow();
+  Date.now = () => (t += 4000); // time flies: each poll looks like 4s later
+  try {
+    await assert.rejects(createApi(bot, { aborted: false }).smelt('raw_iron', 1, 'coal'), /furnace stopped smelting after 0\/1/);
+  } finally {
+    Date.now = realNow;
+  }
+  assert.deepEqual(taken, ['output', 'input']); // leftovers cleared before putting ours in
+  await assert.rejects(createApi(bot, { aborted: false }).smelt('raw_iron', 3, 'coal'), /need 3 raw_iron to smelt \(have 1\)/);
+});
