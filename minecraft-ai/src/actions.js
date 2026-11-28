@@ -30,6 +30,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   const goto = async (x, y, z, range = 1) => {
     check();
+    if (bot.isSleeping) await bot.wake().catch(() => {});
     try {
       await bot.pathfinder.goto(new goals.GoalNear(x, y, z, range));
     } catch (e) {
@@ -123,6 +124,32 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     return target;
   };
 
+  // Place a block from inventory on the ground next to you. Beds need 2 free cells in a row
+  // and are laid out in the direction the bot looks, so look along that row first.
+  const placeRaw = async (name) => {
+    check();
+    const item = bot.inventory.items().find((i) => i.name === name);
+    if (!item) throw new Error(`no ${name} in inventory`);
+    const isBed = name.endsWith('_bed');
+    const base = bot.entity.position.floored();
+    const free = (p) => {
+      const g = bot.blockAt(p.offset(0, -1, 0));
+      const t = bot.blockAt(p);
+      return g && g.boundingBox === 'block' && t && isOpen(t) && !t.name.includes('water') && !t.name.includes('lava');
+    };
+    const dirs = isBed ? [[1, 0], [-1, 0], [0, 1], [0, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]];
+    for (const [dx, dz] of dirs) {
+      const t = base.offset(dx, 0, dz);
+      if (!free(t) || (isBed && !free(base.offset(2 * dx, 0, 2 * dz)))) continue;
+      await bot.equip(item, 'hand');
+      if (isBed) await bot.lookAt(base.offset(2 * dx + 0.5, 0.5, 2 * dz + 0.5), true);
+      check();
+      await bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0));
+      return t;
+    }
+    throw new Error(isBed ? 'no flat 2-block spot next to you for the bed - move to open flat ground' : 'no free spot to place the block here - move first');
+  };
+
   const api = {
     log,
     /** Run another saved skill by name from inside a skill: await api.useSkill('collect_logs', {count: 3}) */
@@ -188,22 +215,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     },
 
     /** Place one block from inventory on the ground next to you. */
-    async place(name) {
-      check();
-      const item = bot.inventory.items().find((i) => i.name === name);
-      if (!item) throw new Error(`no ${name} in inventory`);
-      await bot.equip(item, 'hand');
-      const base = bot.entity.position.floored();
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) {
-        const ground = bot.blockAt(base.offset(dx, -1, dz));
-        const target = bot.blockAt(base.offset(dx, 0, dz));
-        if (ground && ground.boundingBox === 'block' && target && target.name === 'air') {
-          await bot.placeBlock(ground, new Vec3(0, 1, 0));
-          return base.offset(dx, 0, dz);
-        }
-      }
-      throw new Error('no free spot to place the block here - move first');
-    },
+    place: (name) => placeRaw(name),
 
     /** Smelt `count` of `input` (e.g. raw_iron) in a nearby furnace using `fuel`. */
     async smelt(input, count = 1, fuel = 'coal') {
@@ -251,11 +263,20 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       check();
       const sword = bestTool('sword') ?? bestTool('axe');
       if (sword) await bot.equip(sword, 'hand');
+      const me = () => bot.entity.position;
+      if (!bot.nearestEntity((e) => e.name === name && e.position.distanceTo(me()) < 32))
+        throw new Error(`no ${name} within 32 blocks - explore_area to find some`);
       const deadline = Date.now() + 20000;
+      let last = null;
       while (Date.now() < deadline) {
         check();
-        const target = bot.nearestEntity((e) => e.name === name);
-        if (!target) return true;
+        const target = bot.nearestEntity((e) => e.name === name && e.position.distanceTo(me()) < 32);
+        if (!target) {
+          // Killed (or gone): walk onto the spot to pick up the drops.
+          if (last) await goto(last.x, last.y, last.z, 0).catch(() => {});
+          return true;
+        }
+        last = target.position.clone();
         if (target.position.distanceTo(bot.entity.position) > 3) {
           await goto(target.position.x, target.position.y, target.position.z, 2).catch(() => {});
         }
@@ -264,6 +285,34 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         await sleep(600);
       }
       return false;
+    },
+
+    /**
+     * Sleep in a bed nearby (or place the one in the inventory first). Only works at night with no
+     * monsters close. Waits until morning or ~100s. In multiplayer the night only skips when enough
+     * players sleep (gamerule playersSleepingPercentage).
+     */
+    async sleepInBed() {
+      check();
+      const isBed = (b) => b.name.endsWith('_bed');
+      let bed = bot.findBlock({ matching: isBed, maxDistance: 32 });
+      if (!bed) {
+        const item = bot.inventory.items().find((i) => i.name.endsWith('_bed'));
+        if (!item) throw new Error('no bed nearby or in inventory - craft one: 3 wool of one color (from sheep) + 3 planks at a crafting table');
+        await placeRaw(item.name);
+        bed = bot.findBlock({ matching: isBed, maxDistance: 8 });
+        if (!bed) throw new Error('placed the bed but cannot find it');
+      }
+      if (!api.isNight() && !(bot.isRaining && bot.thunderState > 0)) throw new Error('you can only sleep at night - the bed is ready, try again after dark');
+      if (bot.entity.position.distanceTo(bed.position) > 2) await goto(bed.position.x, bed.position.y, bed.position.z, 2);
+      check();
+      await bot.sleep(bed);
+      const until = Date.now() + 100000;
+      while (bot.isSleeping && Date.now() < until) {
+        if (ctx.aborted) break;
+        await sleep(1000);
+      }
+      return { slept: true, stillSleeping: !!bot.isSleeping };
     },
 
     /** Recipe from game data: {ingredients: {name: count}, makes, requiresTable} or null if not craftable. */

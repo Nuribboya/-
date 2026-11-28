@@ -551,3 +551,60 @@ test('self-chosen goals: pick, keep, complete, and give up', async () => {
   const m2 = new Memory(tmp());
   assert.equal(nextGoal({ iron_pickaxe: 1 }, m2).id, 'free');
 });
+
+test('bed: planner hunts sheep for wool instead of looping through dye recipes', async () => {
+  const { plan, stepToAction } = await import('../src/knowledge.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const p = plan(reg, { stone_pickaxe: 1 }, 'white_bed', 1);
+  assert.ok(p.length <= 8, `plan has ${p.length} steps`);
+  assert.ok(!p.some((s) => s.do === 'unknown'));
+  assert.deepEqual(stepToAction(p[0]), { skill: 'hunt_animal', args: { mob: 'sheep', count: 3 } });
+  assert.equal(p.at(-1).item, 'white_bed');
+  // cooked food chain: cow -> furnace
+  const food = plan(reg, {}, 'cooked_beef', 1);
+  assert.ok(food.some((s) => s.do === 'hunt' && s.mob === 'cow') && food.at(-1).do === 'smelt');
+});
+
+test('sleepInBed: places the bed from inventory, refuses in daytime, sleeps at night', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot, blocks, Vec3 } = await fakeWorld({ items: [{ name: 'white_bed', type: 5 }] });
+  bot.placeBlock = async (ref, face) => blocks.set(`${ref.position.x + face.x},${ref.position.y + face.y},${ref.position.z + face.z}`, 'white_bed');
+  bot.lookAt = async () => {};
+  bot.findBlock = ({ matching }) => {
+    for (const [k, name] of blocks) if (matching({ name })) return { name, position: new Vec3(...k.split(',').map(Number)) };
+    return null;
+  };
+  bot.time = { timeOfDay: 6000 };
+  const api = createApi(bot, { aborted: false });
+  await assert.rejects(api.sleepInBed(), /only sleep at night/);
+  assert.ok([...blocks.values()].includes('white_bed')); // bed got placed anyway, ready for tonight
+
+  bot.time = { timeOfDay: 18000 };
+  let slept = false;
+  bot.sleep = async () => {
+    slept = true;
+    bot.isSleeping = true;
+    setTimeout(() => (bot.isSleeping = false), 30); // morning
+  };
+  const r = await api.sleepInBed();
+  assert.ok(slept && r.slept && !r.stillSleeping);
+});
+
+test('attack: errors when the mob is not around, walks onto the kill spot for drops', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot, Vec3 } = await fakeWorld();
+  bot.nearestEntity = () => null;
+  await assert.rejects(createApi(bot, { aborted: false }).attack('sheep'), /no sheep within 32/);
+
+  const sheep = { name: 'sheep', height: 1.3, position: new Vec3(2, 64, 0) };
+  let alive = true;
+  bot.nearestEntity = (f) => (alive && f(sheep) ? sheep : null);
+  bot.lookAt = async () => {};
+  bot.attack = () => (alive = false);
+  const gotos = [];
+  const orig = bot.pathfinder.goto;
+  bot.pathfinder.goto = async (g) => (gotos.push([g.x, g.y, g.z]), orig(g));
+  assert.equal(await createApi(bot, { aborted: false }).attack('sheep'), true);
+  assert.deepEqual(gotos.at(-1), [2, 64, 0]);
+});

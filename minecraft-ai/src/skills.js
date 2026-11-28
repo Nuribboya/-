@@ -51,6 +51,17 @@ const SEEDS = {
     passive: true,
     code: `for (let i = 0; i < 10 && api.isNight(); i++) await api.sleep(10000);\nreturn { night: api.isNight() };`,
   },
+  hunt_animal: {
+    description: '동물을 count마리 잡고 떨어진 아이템을 줍는다 (sheep→양털/양고기, cow→가죽/소고기, pig, chicken)',
+    args: { mob: 'sheep', count: 1 },
+    code: `for (let i = 0; i < (args.count ?? 1); i++) await api.attack(args.mob ?? 'sheep');\nreturn api.inventory();`,
+  },
+  sleep_in_bed: {
+    description: '밤에 침대에서 잔다 (근처 침대 또는 인벤토리 침대를 설치). 부활 지점이 침대로 바뀐다',
+    args: {},
+    passive: true,
+    code: `return await api.sleepInBed();`,
+  },
   eat_food: {
     description: '가진 음식 중 가장 좋은 것을 먹는다',
     args: {},

@@ -42,6 +42,20 @@ const MINE = {
   clay_ball: 'clay',
 };
 
+// Items you get by killing a mob (white wool: sheep are mostly white).
+export const MOB_DROP = {
+  white_wool: 'sheep',
+  mutton: 'sheep',
+  beef: 'cow',
+  leather: 'cow',
+  porkchop: 'pig',
+  chicken: 'chicken',
+  feather: 'chicken',
+  string: 'spider',
+  bone: 'skeleton',
+  rotten_flesh: 'zombie',
+};
+
 // Items smelted per one fuel item.
 export const FUEL_VALUE = { coal: 8, charcoal: 8, coal_block: 80, stick: 0.5 };
 export const fuelValue = (name) =>
@@ -75,16 +89,24 @@ export function hasToolAtLeast(inv, toolName) {
 // Can we get this item at all (mine / smelt / craft)? Used to avoid recipe variants
 // that need exotic ingredients (blackstone, cobbled_deepslate...).
 function obtainable(reg, name) {
-  if (MINE[name] || name.endsWith('_log') || SMELT[name]) return true;
+  if (MINE[name] || MOB_DROP[name] || name.endsWith('_log') || SMELT[name]) return true;
   const item = reg.itemsByName[name];
   return !!item && recipesOf(reg).find(item.id).length > 0;
 }
 
-/** Pick the recipe variant we are closest to (counting logs as 4 planks), oak on ties. */
-function bestVariant(reg, recipes, inv) {
+const family = (n) => n.split('_').slice(1).join('_') || n; // white_bed -> bed
+
+/**
+ * Pick the recipe variant we are closest to (counting logs as 4 planks), oak on ties.
+ * Skips "recolor" recipes (red_bed + dye -> white_bed) and anything that needs an item we
+ * are already trying to make - those send the planner in circles.
+ */
+function bestVariant(reg, recipes, inv, target = null, stack = new Set()) {
   let best = null;
   let bestScore = Infinity;
   for (const r of recipes) {
+    const ins = r.delta.filter((d) => d.count < 0).map((d) => reg.items[d.id]?.name);
+    if (ins.some((n) => !n || stack.has(n) || (target && n !== target && family(n) === family(target) && family(target) !== target))) continue;
     let score = 0;
     for (const d of r.delta) {
       if (d.count >= 0) continue;
@@ -103,10 +125,10 @@ function bestVariant(reg, recipes, inv) {
   return best;
 }
 
-export function recipeInfo(reg, name, inv = {}) {
+export function recipeInfo(reg, name, inv = {}, stack = new Set()) {
   const item = reg.itemsByName[name];
   if (!item) return null;
-  const r = bestVariant(reg, recipesOf(reg).find(item.id), inv);
+  const r = bestVariant(reg, recipesOf(reg).find(item.id), inv, name, stack);
   if (!r) return null;
   const ingredients = {};
   let makes = 1;
@@ -137,7 +159,17 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
     steps.push({ do: 'place', block });
   };
 
+  const stack = new Set();
   function obtain(name, n, depth) {
+    stack.add(name);
+    try {
+      obtainInner(name, n, depth);
+    } finally {
+      stack.delete(name);
+    }
+  }
+
+  function obtainInner(name, n, depth) {
     const have = Math.max(0, inv[name] ?? 0);
     if (have >= n) return take(name, n);
     const missing = n - have;
@@ -154,6 +186,8 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
       return steps.push({ do: 'gather', block: mineFrom, item: name, count: missing, tool });
     }
 
+    if (MOB_DROP[name]) return steps.push({ do: 'hunt', mob: MOB_DROP[name], item: name, count: missing });
+
     if (SMELT[name]) {
       const input = SMELT[name];
       obtain(input, missing, depth + 1);
@@ -166,7 +200,7 @@ export function plan(reg, inv0, target, count = 1, { tableNearby = false, furnac
       return steps.push({ do: 'smelt', input, item: name, count: missing, fuel });
     }
 
-    const info = recipeInfo(reg, name, inv);
+    const info = recipeInfo(reg, name, inv, stack);
     if (info) {
       const times = Math.ceil(missing / info.makes);
       for (const [ing, c] of Object.entries(info.ingredients)) obtain(ing, c * times, depth + 1);
@@ -206,6 +240,8 @@ export function stepToAction(s) {
       return { skill: 'craft_item', args: { item: s.item, count: s.times } };
     case 'smelt':
       return { skill: 'smelt_item', args: { item: s.input, count: s.count, fuel: s.fuel } };
+    case 'hunt':
+      return { skill: 'hunt_animal', args: { mob: s.mob, count: s.count } };
     case 'place':
       return { skill: 'place_block', args: { block: s.block } };
     default:
@@ -223,6 +259,8 @@ export function stepText(s) {
       return `화로에서 ${s.input} x${s.count} 굽기 → ${s.item} (연료 ${s.fuel})`;
     case 'place':
       return `${s.block} 설치`;
+    case 'hunt':
+      return `${s.mob} 잡기 x${s.count} → ${s.item}`;
     default:
       return `${s.item} x${s.count} 얻는 방법 모름 (탐색 필요)`;
   }
@@ -236,6 +274,7 @@ export function knowledgeText(reg) {
     `- 채굴 도구: 원목/흙/모래=맨손, stone→cobblestone=${tool('stone')}, coal_ore=${tool('coal_ore')}, iron_ore=${tool('iron_ore')}, diamond_ore=${tool('diamond_ore')} (이상 등급이면 됨, 등급: wooden<stone=copper<iron<diamond)`,
     '- 제작: 원목1→판자4, 판자2→막대기4, 작업대=판자4, 곡괭이=재료3+막대기2(작업대 필요), 화로=조약돌8(작업대 필요)',
     '- 굽기(화로): raw_iron→iron_ingot, sand→glass, 연료 coal 1개=8개 굽기, 판자 1개=1.5개',
+    '- 침대=같은 색 양털3+판자3(작업대). 양털은 양을 잡으면 1개. 밤에만 잘 수 있고 근처에 몬스터가 있으면 못 잔다. 자면 부활 지점이 침대로 바뀐다.',
     `- 광석 깊이: ${Object.entries(ORE_DEPTH).map(([k, v]) => `${k} y≈${v}`).join(', ')}. 깊이 내려갈 땐 descend_mine, 동굴은 explore_cave. 용암 주의.`,
   ].join('\n');
 }

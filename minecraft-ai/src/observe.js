@@ -1,5 +1,5 @@
 const NOTABLE_NAMES = new Set(['stone', 'cobblestone', 'water', 'lava', 'crafting_table', 'furnace', 'chest', 'sand', 'gravel']);
-const NOTABLE = (n) => n.endsWith('_log') || n.endsWith('_ore') || NOTABLE_NAMES.has(n);
+const NOTABLE = (n) => n.endsWith('_log') || n.endsWith('_ore') || n.endsWith('_bed') || NOTABLE_NAMES.has(n);
 
 export const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'drowned', 'husk', 'pillager', 'phantom']);
 
