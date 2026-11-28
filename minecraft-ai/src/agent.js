@@ -342,7 +342,6 @@ export class Agent {
         (e) => HOSTILE.has(e.name) && e.position.distanceTo(me) < (e.name === 'creeper' ? pol.creeperRadius : pol.hostileRadius),
       );
     if (danger) return null;
-    if (pol.nightSurfaceDanger && isNight(bot) && !this.#underground()) return null;
     let p;
     try {
       p = this.goals.plan(goal, obs.inv);

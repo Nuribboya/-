@@ -866,7 +866,7 @@ test('builtin skill updates (description/code) reach an existing install, stats 
 
 test('decision prompt lets the bot work at night', async () => {
   const { DECISION_SYSTEM, REFLECT_SYSTEM } = await import('../src/prompts.js');
-  assert.match(DECISION_SYSTEM, /밤에도 쉬지 않고 계속 작업/);
+  assert.match(DECISION_SYSTEM, /밤에도 낮과 똑같이 지금 목표를 계속/);
   assert.doesNotMatch(DECISION_SYSTEM, /아침까지 쉰다/);
   assert.doesNotMatch(REFLECT_SYSTEM, /밤에는 .*대기/);
 });
@@ -1460,7 +1460,7 @@ test('death patterns: classify causes and turn repeated ones into behaviour chan
   assert.deepEqual(analyzeDeaths([]).policy, DEFAULT_POLICY);
   const night = (cause) => ({ cause, night: true, underground: false, armor: 0 });
   const a = analyzeDeaths([night('was shot by Skeleton'), night('was slain by Zombie'), { cause: 'was slain by Zombie', night: false, underground: true, armor: 0 }]);
-  assert.equal(a.policy.nightSurfaceDanger, true);
+  assert.equal(a.policy.hostileRadius, 14); // night surface deaths: be ready, don't hide
   assert.equal(a.policy.gearFirst, true);
   assert.equal(a.policy.hostileRadius, 14);
   assert.deepEqual(a.patterns.map((p) => p.key).sort(), ['mobs', 'night_surface', 'no_armor']);
@@ -1491,7 +1491,7 @@ test('agent: deaths are recorded with context, new patterns change behaviour rig
   });
   const journal = new Journal(dir);
   const agent = new Agent({ bot, llm: { budgetLeft: () => true, spentUsd: 0, ask: async () => '{"thought":"x","wait":true}' }, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 3000, freeGoalMaxSteps: 80 } });
-  assert.equal(agent.policy.nightSurfaceDanger, false);
+  assert.equal(agent.policy.gearFirst, false);
 
   const die = async (cause) => {
     bot.emit('messagestr', `Bot ${cause}`);
@@ -1512,7 +1512,7 @@ test('agent: deaths are recorded with context, new patterns change behaviour rig
 
   await die('was shot by Skeleton');
   await die('was slain by Zombie');
-  assert.equal(agent.policy.nightSurfaceDanger, true);
+  assert.equal(agent.policy.hostileRadius, 14);
   assert.equal(agent.goals.preferGear, true);
 });
 
@@ -1970,4 +1970,16 @@ test('blockArrows: equips the shield, faces the skeleton and holds the shield up
   assert.equal(events.at(-1), 'lower');
   skeleton.position = new Vec3(60, 64, 0); // too far
   await assert.rejects(api.blockArrows(1), /no skeleton within 24/);
+});
+
+test('night: the bot is told to keep doing its job, not to dig in', async () => {
+  const { DECISION_SYSTEM } = await import('../src/prompts.js');
+  const { observe } = await import('../src/observe.js');
+  const { Vec3 } = await import('vec3');
+  assert.match(DECISION_SYSTEM, /밤에도 낮과 똑같이 지금 목표를 계속/);
+  assert.doesNotMatch(DECISION_SYSTEM, /지하 작업을 하면 좋다/);
+  const bot = { entity: { position: new Vec3(0, 64, 0) }, entities: {}, health: 20, food: 20, time: { timeOfDay: 18000 }, findBlocks: () => [], inventory: { items: () => [] } };
+  assert.doesNotMatch(observe(bot).text, /지하 작업 추천/);
+  const s = new Skills(tmp());
+  assert.match(s.index.night_shelter.description, /밤이라는 이유만으로는 쓰지 않음/);
 });

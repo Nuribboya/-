@@ -95,7 +95,7 @@ const SEEDS = {
     code: `return await api.exploreCave(32);`,
   },
   night_shelter: {
-    description: '위급할 때 숨기: 땅을 3칸 파고 들어가 위를 막는다 (다음에 이동하면 알아서 파고 나감)',
+    description: '위급할 때만 (체력 6 이하로 몹에게 몰림): 땅을 3칸 파고 들어가 위를 막는다. 밤이라는 이유만으로는 쓰지 않음',
     args: {},
     passive: true, // "already sheltered" is a fine result, not a failure
     code: `return await api.shelter();`,

@@ -28,7 +28,6 @@ const KO = {
 export const DEFAULT_POLICY = {
   hostileRadius: 10, // autopilot hands control to the model when a hostile is this close
   creeperRadius: 10,
-  nightSurfaceDanger: false, // night + open sky counts as danger
   gearFirst: false, // armor/shield before other self-chosen goals
   descendScan: 1, // how far (blocks) to the sides descend checks for lava
   maxDropDown: 4, // pathfinder: highest drop it will jump down
@@ -49,8 +48,10 @@ export function analyzeDeaths(deaths, window = 12) {
   const byMob = count((d) => MOB.includes(d.kind));
   const nightSurface = count((d) => MOB.includes(d.kind) && d.night && d.underground === false);
   if (nightSurface >= 2) {
-    policy.nightSurfaceDanger = true;
-    add('night_surface', nightSurface, `밤에 지상에서 몹에게 ${nightSurface}번`, '밤에 지상에 있으면 위험으로 보고 지하 작업/은신');
+    // Keep playing at night, but come prepared: look out further and get armor/weapons first.
+    policy.hostileRadius = Math.max(policy.hostileRadius, 14);
+    policy.gearFirst = true;
+    add('night_surface', nightSurface, `밤에 지상에서 몹에게 ${nightSurface}번`, '밤에도 활동하되 경계 거리 14칸, 갑옷·무기 먼저');
   }
   const creeper = count((d) => d.kind === 'creeper');
   if (creeper >= 2) {
