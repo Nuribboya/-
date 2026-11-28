@@ -377,7 +377,33 @@ export class Agent {
     return true;
   }
 
+  /**
+   * No pickaxe = no point breaking stone: by hand it takes ages and drops nothing. While there is
+   * no pickaxe, the pathfinder may not break blocks that need one (it walks around or over them;
+   * dirt, sand, wood are still fine). Lifted as soon as a pickaxe is in the inventory.
+   */
+  #pickaxeDigRule() {
+    const mv = this.bot.__movements;
+    const reg = this.bot.registry;
+    if (!mv?.blocksCantBreak || !reg?.blocksArray) return;
+    this.pickaxeBlockIds ??= reg.blocksArray
+      .filter((b) => b.harvestTools && Object.keys(b.harvestTools).some((id) => reg.items[id]?.name?.endsWith('_pickaxe')))
+      .map((b) => b.id);
+    const hasPick = (this.bot.inventory?.items?.() ?? []).some((i) => i.name.endsWith('_pickaxe'));
+    if (hasPick === this.lastHasPick) return;
+    this.lastHasPick = hasPick;
+    if (!hasPick) {
+      this.addedCantBreak = this.pickaxeBlockIds.filter((id) => !mv.blocksCantBreak.has(id));
+      for (const id of this.addedCantBreak) mv.blocksCantBreak.add(id);
+      this.events.log('⛏️ 곡괭이 없음 - 돌·광석은 파고 지나가지 않음 (곡괭이부터)');
+    } else {
+      for (const id of this.addedCantBreak ?? []) mv.blocksCantBreak.delete(id);
+      this.addedCantBreak = [];
+    }
+  }
+
   async step() {
+    this.#pickaxeDigRule();
     const obs = observe(this.bot);
     this.lastInv = obs.inv;
     if (await this.#recoverAfterDeath()) return;

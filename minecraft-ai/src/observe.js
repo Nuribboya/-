@@ -19,7 +19,9 @@ function toolsText(bot) {
     const pct = Math.round((left / it.maxDurability) * 100);
     parts.push(`${it.name} ${pct}%${pct <= 15 ? '(곧 부서짐! 새로 만들 재료 준비)' : ''}`);
   }
-  return parts.length ? `도구 내구도: ${parts.join(', ')}` : '도구 내구도: 도구 없음';
+  const noPick = !bot.inventory.items().some((i) => i.name.endsWith('_pickaxe'));
+  const warn = noPick ? '\n⚠️ 곡괭이 없음: 돌·광석을 캐거나 돌을 파고 지나갈 수 없다 - 곡괭이부터 만들 것 (나무 곡괭이 = 판자 3 + 막대기 2, 작업대)' : '';
+  return (parts.length ? `도구 내구도: ${parts.join(', ')}` : '도구 내구도: 도구 없음') + warn;
 }
 
 /** Text snapshot of the world for the model. */

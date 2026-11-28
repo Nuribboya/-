@@ -1739,3 +1739,34 @@ test('water: idle bot stays afloat; escaping heads for the nearest dry land', as
   assert.ok(goal && goal.x >= 8, `escape goal should be on land, got ${goal && goal.x}`);
   agent.stop();
 });
+
+test('no pickaxe: pathfinder may not break stone/ores (dirt/wood still fine); lifted once a pickaxe exists', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { observe } = await import('../src/observe.js');
+  const { EventEmitter } = await import('node:events');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const movements = { blocksCantBreak: new Set([reg.blocksByName.chest.id]) };
+  const inv = [];
+  const bot = Object.assign(new EventEmitter(), {
+    username: 'Bot', registry: reg, entity: { position: new Vec3(0.5, 64, 0.5) }, entities: {}, health: 20, food: 20,
+    time: { timeOfDay: 1000 }, inventory: { items: () => inv, slots: {} }, findBlocks: () => [], findBlock: () => null,
+    blockAt: () => null, nearestEntity: () => null, pathfinder: { setGoal() {}, goto: async () => {} }, clearControlStates() {},
+    __movements: movements,
+  });
+  const agent = new Agent({ bot, llm: { budgetLeft: () => true, spentUsd: 0, ask: async () => '{"thought":"x","wait":true}' }, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), autopilot: false } });
+  await agent.step();
+  const id = (n) => reg.blocksByName[n].id;
+  assert.ok(movements.blocksCantBreak.has(id('stone')) && movements.blocksCantBreak.has(id('iron_ore')) && movements.blocksCantBreak.has(id('deepslate')));
+  assert.ok(!movements.blocksCantBreak.has(id('dirt')) && !movements.blocksCantBreak.has(id('oak_log')));
+  assert.match(observe(bot).text, /곡괭이 없음/);
+
+  inv.push({ name: 'wooden_pickaxe', count: 1, maxDurability: 59, durabilityUsed: 0 });
+  await agent.step();
+  assert.ok(!movements.blocksCantBreak.has(id('stone')));
+  assert.ok(movements.blocksCantBreak.has(id('chest'))); // the pathfinder's own defaults are untouched
+  assert.doesNotMatch(observe(bot).text, /곡괭이 없음/);
+});
