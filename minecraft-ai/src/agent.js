@@ -110,7 +110,8 @@ export class Agent {
       const under = Date.now() - this.underwaterSince;
       const air = bot.oxygenLevel;
       const airLow = typeof air === 'number' && air >= 0 && air <= 20 && air <= 8;
-      if (!this.escapingWater && (under >= (this.config.drownAfterMs ?? 7000) || (airLow && under >= 2000))) this.#escapeWater();
+      const cooledDown = Date.now() - (this.lastEscapeAt ?? 0) > 10000; // one escape at a time, not every second
+      if (!this.escapingWater && cooledDown && (under >= (this.config.drownAfterMs ?? 7000) || (airLow && under >= 2000))) this.#escapeWater();
     }, Math.min(1000, Math.max(50, (this.config.drownAfterMs ?? 7000) / 5)));
     this.drownWatch.unref?.();
 
@@ -172,7 +173,9 @@ export class Agent {
   async #escapeWater() {
     const bot = this.bot;
     this.escapingWater = true;
+    this.lastEscapeAt = Date.now();
     const secs = this.underwaterSince ? Math.round((Date.now() - this.underwaterSince) / 1000) : 0;
+    this.underwaterSince = null; // count again from zero after this escape
     this.events.log(`🫧 머리가 물속에 ${secs}초 - 하던 일 멈추고 물 밖으로`);
     this.journal.add('danger', { what: 'drowning', where: this.#where() });
     if (this.currentCtx) this.currentCtx.aborted = true; // stop the running skill
@@ -235,12 +238,20 @@ export class Agent {
     clearInterval(this.drownWatch);
   }
 
-  /** Is the bot's head inside water (water, bubble column, kelp, seagrass, waterlogged block)? */
+  /**
+   * Is the bot really under water (cannot breathe)? The eye cell must be water AND the cell above
+   * it must not be open air: a bot swimming at the surface has its eyes above the water line
+   * even though its eye cell counts as water (water blocks are not full height).
+   */
   #headInWater() {
     const p = this.bot.entity?.position;
     if (!p || !this.bot.blockAt) return false;
-    const b = this.bot.blockAt(p.offset(0, 1.62, 0).floored());
-    return !!b && (/water|bubble_column|kelp|seagrass/.test(b.name) || !!b.getProperties?.()?.waterlogged);
+    const wet = (b) => !!b && (/water|bubble_column|kelp|seagrass/.test(b.name) || !!b.getProperties?.()?.waterlogged);
+    const eye = p.offset(0, 1.62, 0).floored();
+    if (!wet(this.bot.blockAt(eye))) return false;
+    const above = this.bot.blockAt(eye.offset(0, 1, 0));
+    const surface = above && above.boundingBox === 'empty' && !wet(above); // air right above: at the surface
+    return !surface;
   }
 
   async run() {

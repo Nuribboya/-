@@ -1585,6 +1585,33 @@ test('drowning watch: trusts the world (head in water for a while), not the air 
   agent.stop();
 });
 
+test('drowning watch: swimming at the surface is fine; a flooded tunnel is not; no escape spam', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { Vec3 } = await import('vec3');
+  const make = (aboveEye) => {
+    const dir = tmp();
+    const escapes = [];
+    const bot = Object.assign(new EventEmitter(), {
+      username: 'Bot', registry: {}, entity: { position: new Vec3(0.5, 60, 0.5) }, oxygenLevel: -1,
+      // eye cell (y=61) is water; what is above it decides surface vs. submerged
+      blockAt: (q) => (q.y === 61 ? { name: 'water', boundingBox: 'empty' } : q.y === 62 ? aboveEye : { name: 'stone', boundingBox: 'block' }),
+      pathfinder: { setGoal() {}, goto: async () => {} },
+      setControlState: (k, v) => k === 'jump' && v && escapes.push(Date.now()),
+    });
+    const agent = new Agent({ bot, llm: {}, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), drownAfterMs: 200 } });
+    return { agent, escapes };
+  };
+  const surface = make({ name: 'air', boundingBox: 'empty' });
+  const tunnel = make({ name: 'stone', boundingBox: 'block' });
+  await new Promise((r) => setTimeout(r, 1200));
+  assert.equal(surface.escapes.length, 0); // eyes above the water line: breathing
+  assert.equal(tunnel.escapes.length, 1); // really under: one escape, not one per second
+  surface.agent.stop();
+  tunnel.agent.stop();
+});
+
 test('stuck: a walk that goes nowhere is cut off fast, then unstuck runs (digging is not stuck)', async () => {
   const { Agent } = await import('../src/agent.js');
   const { Journal } = await import('../src/journal.js');
