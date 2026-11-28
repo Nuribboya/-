@@ -102,6 +102,13 @@ export class Agent {
     // so look at the world instead: is the head really in water, and for how long?
     this.underwaterSince = null;
     this.drownWatch = setInterval(() => {
+      // In water and nobody is steering (e.g. waiting for the model): hold jump to stay afloat
+      // instead of slowly sinking to the bottom.
+      const idleInWater = !!bot.entity?.isInWater && !bot.pathfinder?.isMoving?.() && !this.escapingWater;
+      if (idleInWater !== !!this.floating) {
+        this.floating = idleInWater;
+        bot.setControlState?.('jump', idleInWater);
+      }
       if (!this.#headInWater()) {
         this.underwaterSince = null;
         return;
@@ -183,9 +190,15 @@ export class Agent {
       bot.pathfinder?.setGoal?.(null);
       bot.setControlState?.('jump', true); // swim up
       await sleep(1500);
-      const y = Math.floor(bot.entity?.position?.y ?? 0);
-      const target = Math.max(63, y + 6);
-      await withTimeout(bot.pathfinder.goto(new pf.goals.GoalY(target)), 12000, 'escape timeout').catch(() => {});
+      // Head for the nearest dry land, otherwise the next task walks right back into the water.
+      const land = this.#nearestDryLand(24);
+      if (land) {
+        this.events.log(`🏝️ 가장 가까운 육지로 (${land.x},${land.y},${land.z})`);
+        await withTimeout(bot.pathfinder.goto(new pf.goals.GoalNear(land.x, land.y, land.z, 1)), 20000, 'escape timeout').catch(() => {});
+      } else {
+        const y = Math.floor(bot.entity?.position?.y ?? 0);
+        await withTimeout(bot.pathfinder.goto(new pf.goals.GoalY(Math.max(63, y + 6))), 12000, 'escape timeout').catch(() => {});
+      }
     } catch {}
     finally {
       bot.setControlState?.('jump', false);
@@ -217,6 +230,31 @@ export class Agent {
       this.events.log(`🧱 끼임 감지 (${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}) - 하던 일 멈춤`);
       this.bot.pathfinder?.setGoal?.(null); // make the pending walk give up now
     }, Math.max(100, Math.min(1000, limit / 3)));
+  }
+
+  /** Closest spot with solid, non-wet ground and 2 free (non-water) cells above it. */
+  #nearestDryLand(r = 24) {
+    const me = this.bot.entity?.position?.floored?.();
+    if (!me || !this.bot.blockAt) return null;
+    const wet = (b) => !!b && /water|bubble_column|kelp|seagrass|lava/.test(b.name);
+    const free = (b) => !b || (b.boundingBox === 'empty' && !wet(b));
+    let best = null;
+    for (let dx = -r; dx <= r; dx += 2)
+      for (let dz = -r; dz <= r; dz += 2) {
+        // find the top surface of this column near our height
+        for (let dy = 8; dy >= -6; dy--) {
+          const g = this.bot.blockAt(me.offset(dx, dy, dz));
+          if (!g || g.boundingBox !== 'block' || wet(g)) continue;
+          const c1 = this.bot.blockAt(me.offset(dx, dy + 1, dz));
+          const c2 = this.bot.blockAt(me.offset(dx, dy + 2, dz));
+          if (free(c1) && free(c2)) {
+            const spot = me.offset(dx, dy + 1, dz);
+            if (!best || spot.distanceTo(me) < best.distanceTo(me)) best = spot;
+          }
+          break;
+        }
+      }
+    return best;
   }
 
   #where() {

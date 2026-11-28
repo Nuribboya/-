@@ -1711,3 +1711,31 @@ test('craft: ingredients stranded in the 2x2 grid are handed back before and aft
   assert.equal(slots[2], null);
   assert.equal(inv.filter((i) => i.name === 'oak_log').reduce((n, i) => n + i.count, 0), 15);
 });
+
+test('water: idle bot stays afloat; escaping heads for the nearest dry land', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { Vec3 } = await import('vec3');
+  const dir = tmp();
+  // a lake: water from y=55..62 for x<8, land (stone up to y=62, air above) for x>=8
+  const blockAt = (q) => {
+    if (q.x >= 8) return q.y <= 62 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' };
+    if (q.y >= 55 && q.y <= 62) return { name: 'water', boundingBox: 'empty' };
+    return q.y < 55 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' };
+  };
+  const controls = [];
+  let goal = null;
+  let moving = false;
+  const bot = Object.assign(new EventEmitter(), {
+    username: 'Bot', registry: {}, entity: { position: new Vec3(0.5, 56, 0.5), isInWater: true }, oxygenLevel: -1, blockAt,
+    pathfinder: { isMoving: () => moving, setGoal() {}, goto: async (g) => (goal = g) },
+    setControlState: (k, v) => controls.push([k, v]),
+  });
+  const agent = new Agent({ bot, llm: {}, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), drownAfterMs: 200 } });
+  await new Promise((r) => setTimeout(r, 120));
+  assert.deepEqual(controls[0], ['jump', true]); // idle in water -> float up
+  await new Promise((r) => setTimeout(r, 2200)); // under water (eye cell water, water above) -> escape
+  assert.ok(goal && goal.x >= 8, `escape goal should be on land, got ${goal && goal.x}`);
+  agent.stop();
+});

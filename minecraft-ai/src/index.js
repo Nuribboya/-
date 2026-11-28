@@ -69,6 +69,9 @@ function connect({ name, memory, journal, events }) {
     // Digging through terrain costs more than walking around it (default 1 makes the bot tunnel
     // through every hill). Mining still works: the target block itself is dug either way.
     movements.digCost = 4;
+    // Water paths cost as much as land by default, so the bot happily walks across the sea floor
+    // and drowns. Prefer land; water only when there is no other way.
+    movements.liquidCost = 30;
     bot.pathfinder.setMovements(movements);
     bot.__movements = movements; // death-pattern policy adjusts it (e.g. maxDropDown)
     events.log('스폰 완료. 플레이 시작!');
