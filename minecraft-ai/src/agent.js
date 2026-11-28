@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseJson } from './llm.js';
-import { observe, inventoryOf, snapshotState, diffState } from './observe.js';
+import { observe, inventoryOf, snapshotState, diffState, HOSTILE } from './observe.js';
 import { createApi } from './actions.js';
 import { runSkill } from './sandbox.js';
 import { Skills } from './skills.js';
@@ -150,11 +150,50 @@ export class Agent {
     }
   }
 
+  /**
+   * Autopilot: the next plan step when it is safe to skip the model this turn, else null.
+   * Ask the model instead after a failure/no-effect, in danger, without a plan, or every
+   * autopilotMaxStreak turns (so it keeps an eye on things and the overlay keeps "thinking").
+   */
+  #autopilotAction(goal, obs) {
+    if (this.config.autopilot === false) return null;
+    if ((this.autoStreak ?? 0) >= (this.config.autopilotMaxStreak ?? 5)) return null;
+    const lastOk = this.lastResult === '아직 없음' || /^(성공|새 스킬)/.test(this.lastResult);
+    if (!lastOk) return null;
+    const bot = this.bot;
+    if ((bot.health ?? 20) <= 8 || (bot.food ?? 20) <= 6) return null;
+    const me = bot.entity?.position;
+    const danger = me && Object.values(bot.entities ?? {}).some((e) => HOSTILE.has(e.name) && e.position.distanceTo(me) < 10);
+    if (danger) return null;
+    let p;
+    try {
+      p = this.goals.plan(goal, obs.inv);
+    } catch {
+      return null;
+    }
+    const first = p?.steps?.[0]?.action;
+    if (!first || !this.skills.has(first.skill)) return null;
+    return p.steps.length > 1 ? { skill: 'follow_plan', args: { steps: Math.min(5, p.steps.length) } } : first;
+  }
+
   async step() {
     const obs = observe(this.bot);
     const goal = await this.goals.current(obs);
     this.currentGoal = goal;
     const lessons = this.memory.data.lessons;
+
+    const auto = this.#autopilotAction(goal, obs);
+    if (auto) {
+      this.autoStreak = (this.autoStreak ?? 0) + 1;
+      const thought = `📋 계획대로 진행: ${auto.skill}${auto.skill === 'follow_plan' ? ` (${auto.args.steps}단계)` : ''}`;
+      this.events.update({ thought, goal: goal.text });
+      this.events.log(thought);
+      this.lastAction = `${auto.skill}(${short(auto.args, 80)})`;
+      this.lastResult = await this.useSkill(auto.skill, auto.args);
+      this.events.update({ lastAction: this.lastAction });
+      return;
+    }
+    this.autoStreak = 0;
 
     const planText = this.goals.planText(goal, obs.inv);
     const recent = this.journal.recentText(8);

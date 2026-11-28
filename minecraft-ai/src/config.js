@@ -25,7 +25,11 @@ export const config = {
   ollamaKeepAlive: env.OLLAMA_KEEP_ALIVE ?? '60m',
 
   dailyBudgetUsd: Number(env.DAILY_BUDGET_USD ?? 15),
-  decisionIntervalMs: Number(env.DECISION_INTERVAL_MS ?? 2000),
+  decisionIntervalMs: Number(env.DECISION_INTERVAL_MS ?? 300),
+  // Autopilot: while the plan is going fine, run its next step without asking the model.
+  // The model is still asked after a failure, in danger, without a plan, and every N turns.
+  autopilot: env.AUTOPILOT !== 'false',
+  autopilotMaxStreak: Number(env.AUTOPILOT_MAX_STREAK ?? 5),
   reflectEvery: Number(env.REFLECT_EVERY ?? 25), // decision steps between self-improvement passes
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),
   writeTestTimeoutMs: Number(env.WRITE_TEST_TIMEOUT_MS ?? 60000), // first trial run of new code

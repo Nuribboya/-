@@ -715,7 +715,7 @@ test('one full decision turn: observe -> plan -> model picks a skill -> run -> j
     ask: async (tier, sys, user) => (prompts.push(user), '{"thought":"원목부터","skill":"collect_logs","args":{"count":1}}'),
   };
   const journal = new Journal(dir);
-  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 5000, freeGoalMaxSteps: 80 } });
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 5000, freeGoalMaxSteps: 80, autopilot: false } });
   await agent.step();
   assert.match(prompts[0], /추천 다음 행동: \{"skill":"collect_logs"/); // planner reached the prompt
   assert.equal(agent.lastAction, 'collect_logs({"count":1})');
@@ -1264,4 +1264,47 @@ test('gather prefers a block you can see over a closer one buried in the ground'
   bot.dig = async (b) => (dug.push(b.position.toString()), dig(b));
   await createApi(bot, { aborted: false }).gather('stone', 1);
   assert.equal(dug[0], visible.toString());
+});
+
+test('autopilot: runs the plan without the model while things go fine, asks the model otherwise', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const pos = new Vec3(0.5, 64, 0.5);
+  const bot = Object.assign(new EventEmitter(), {
+    registry: reg, entity: { position: pos }, entities: {}, health: 20, food: 20, time: { timeOfDay: 1000 },
+    inventory: { items: () => [] }, findBlocks: () => [], findBlock: () => null, blockAt: () => null,
+    nearestEntity: () => null, pathfinder: { setGoal() {}, goto: async () => {} }, clearControlStates() {},
+  });
+  let asked = 0;
+  const llm = { budgetLeft: () => true, spentUsd: 0, ask: async () => (asked++, '{"thought":"생각","skill":"explore_area","args":{}}') };
+  const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 5000, freeGoalMaxSteps: 80, autopilotMaxStreak: 3 } });
+
+  await agent.step(); // fresh start + plan exists -> no model call
+  assert.equal(asked, 0);
+  assert.match(agent.lastAction, /^collect_logs/);
+  assert.match(agent.lastResult, /^실패/); // nothing to chop in this empty world
+
+  await agent.step(); // last step failed -> the model thinks
+  assert.equal(asked, 1);
+
+  agent.lastResult = '성공: oak_log +3';
+  bot.entities = { 9: { name: 'creeper', position: new Vec3(3, 64, 0) } }; // danger nearby
+  await agent.step();
+  assert.equal(asked, 2);
+
+  bot.entities = {};
+  agent.lastResult = '성공: oak_log +3';
+  for (let i = 0; i < 3; i++) {
+    agent.lastResult = '성공: oak_log +3';
+    await agent.step(); // autopilot streak
+  }
+  assert.equal(asked, 2);
+  agent.lastResult = '성공: oak_log +3';
+  await agent.step(); // streak limit reached -> model checks in
+  assert.equal(asked, 3);
 });
