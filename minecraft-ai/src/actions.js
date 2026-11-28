@@ -160,7 +160,35 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       await bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0));
       return t;
     }
-    throw new Error(isBed ? 'no flat 2-block spot next to you for the bed - move to open flat ground' : 'no free spot to place the block here - move first');
+    // Nothing right next to us (forest, tunnel...): look up to 4 blocks around, walk over, place there.
+    if (!isBed) {
+      const cands = [];
+      for (let dx = -4; dx <= 4; dx++)
+        for (let dz = -4; dz <= 4; dz++)
+          for (const dy of [0, -1, 1]) {
+            if (Math.abs(dx) + Math.abs(dz) < 2) continue;
+            const t = base.offset(dx, dy, dz);
+            if (free(t) && isOpen(bot.blockAt(t.offset(0, 1, 0)))) cands.push(t);
+          }
+      cands.sort((a, b) => a.distanceTo(base) - b.distanceTo(base));
+      for (const t of cands.slice(0, 5)) {
+        // Stand on a free cell next to the target (not on the target itself).
+        const stand = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+          .map(([x, z]) => t.offset(x, 0, z))
+          .find((c) => free(c) && isOpen(bot.blockAt(c.offset(0, 1, 0))));
+        if (!stand) continue;
+        await goto(stand.x, stand.y, stand.z, 0).catch(() => {});
+        const feet = bot.entity.position.floored();
+        if (feet.x === t.x && feet.z === t.z && (feet.y === t.y || feet.y + 1 === t.y)) continue; // standing in it
+        if (bot.entity.position.distanceTo(t) > 4.5) continue;
+        await clearCell(t);
+        await bot.equip(item, 'hand');
+        check();
+        await bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0));
+        return t;
+      }
+    }
+    throw new Error(isBed ? 'no flat 2-block spot next to you for the bed - move to open flat ground' : 'no free spot within 4 blocks to place the block - explore_area to open ground first');
   };
 
   const api = {

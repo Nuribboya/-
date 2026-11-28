@@ -733,3 +733,15 @@ test('place clears leaf litter / grass in the target cell before placing', async
   await createApi(bot, { aborted: false }).place('furnace');
   assert.deepEqual(order, ['dig leaf_litter', 'place at 1,64,0 (was air)']);
 });
+
+test('place: when every cell next to the bot is blocked, walks a few blocks and places there', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot, blocks } = await fakeWorld({ items: [{ name: 'furnace', type: 1 }] });
+  // wall the bot in: all 8 neighbours at feet level are solid
+  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) blocks.set(`${x},64,${z}`, 'stone');
+  let placedAt = null;
+  bot.placeBlock = async (ref, face) => (placedAt = ref.position.plus(face));
+  const t = await createApi(bot, { aborted: false }).place('furnace');
+  assert.ok(t && placedAt && placedAt.equals(t));
+  assert.ok(Math.abs(t.x) + Math.abs(t.z) >= 2);
+});
