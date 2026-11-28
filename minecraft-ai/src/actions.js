@@ -621,9 +621,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       let steps = 0;
       while (p.y > targetY && steps < maxSteps) {
         check();
-        for (let ox = -1; ox <= 1; ox++)
+        const r = hooks.descendScan ?? 1; // wider after a lava death
+        for (let ox = -r; ox <= r; ox++)
           for (let oy = -3; oy <= 1; oy++)
-            for (let oz = -1; oz <= 1; oz++) {
+            for (let oz = -r; oz <= r; oz++) {
               const b = bot.blockAt(p.offset(dx + ox, oy, dz + oz));
               if (danger(b)) throw new Error(`stopped descending at y=${p.y}: ${b.name} ahead - call descend again (new random direction) or stop here`);
             }

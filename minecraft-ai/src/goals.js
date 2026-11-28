@@ -94,7 +94,12 @@ export class Goals {
     // Items we already have enough of, or went for in the last 5 goals, are not new goals.
     const recent = new Set(m.goalHistory.slice(-5).map((g) => g.item).filter(Boolean));
     const isFresh = (item, count) => !!reg.itemsByName[item] && (owned[item] ?? 0) < count && !recent.has(item);
-    const candidates = NEXT_GOALS.filter((c) => isFresh(c.item, c.count));
+    let candidates = NEXT_GOALS.filter((c) => isFresh(c.item, c.count));
+    // Died to mobs without armor more than once: protection first.
+    if (this.preferGear) {
+      const gear = (c) => /_(helmet|chestplate|leggings|boots)$|^shield$/.test(c.item);
+      candidates = [...candidates.filter(gear), ...candidates.filter((c) => !gear(c))];
+    }
 
     const text = await this.llm.ask(
       'fast',

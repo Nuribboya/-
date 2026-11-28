@@ -70,6 +70,7 @@ function connect({ name, memory, journal, events }) {
     // through every hill). Mining still works: the target block itself is dug either way.
     movements.digCost = 4;
     bot.pathfinder.setMovements(movements);
+    bot.__movements = movements; // death-pattern policy adjusts it (e.g. maxDropDown)
     events.log('스폰 완료. 플레이 시작!');
     agent = new Agent({ bot, llm, skills, memory, events, config, journal });
     agent.run();

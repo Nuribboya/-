@@ -9,6 +9,7 @@ import { Journal } from './journal.js';
 import { Brains } from './brain.js';
 import { Goals } from './goals.js';
 import { Advancements } from './advancements.js';
+import { analyzeDeaths, classifyDeath, patternsText } from './deaths.js';
 import { knowledgeText } from './knowledge.js';
 import { wikiFor } from './wiki.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
@@ -45,7 +46,44 @@ export class Agent {
     this.running = false;
     this.lastResult = '아직 없음';
     this.lastAction = '';
+    this.deathAnalysis = analyzeDeaths(this.journal.of('death'));
+    this.#applyPolicy();
     this.#listen();
+  }
+
+  get policy() {
+    return this.deathAnalysis.policy;
+  }
+
+  /** Push the death-pattern policy into the pathfinder and goals. */
+  #applyPolicy() {
+    const p = this.policy;
+    if (this.bot.__movements) this.bot.__movements.maxDropDown = p.maxDropDown;
+    this.goals.preferGear = p.gearFirst;
+  }
+
+  /** Re-analyze all deaths; announce patterns that are new and apply the policy. */
+  #reanalyzeDeaths() {
+    const before = new Set(this.deathAnalysis.patterns.map((p) => p.key));
+    this.deathAnalysis = analyzeDeaths(this.journal.of('death'));
+    for (const p of this.deathAnalysis.patterns) {
+      if (before.has(p.key)) continue;
+      this.events.log(`🧠 죽음 패턴 발견: ${p.text} → ${p.change}`);
+      this.journal.add('death_pattern', { key: p.key, text: p.text, change: p.change });
+      this.memory.addLesson(`${p.text} → ${p.change}`);
+    }
+    this.#applyPolicy();
+  }
+
+  /** Is there solid ground above (cave/tunnel/inside) rather than open sky? */
+  #underground() {
+    const me = this.bot.entity?.position?.floored?.();
+    if (!me || !this.bot.blockAt) return false;
+    for (let d = 2; d < 18; d++) {
+      const b = this.bot.blockAt(me.offset(0, d, 0));
+      if (b && b.boundingBox !== 'empty') return true;
+    }
+    return false;
   }
 
   // ---------- world events -> journal ----------
@@ -87,6 +125,11 @@ export class Agent {
     bot.on('death', () => {
       const night = isNight(bot);
       const where = this.#where();
+      const y = Math.floor(bot.entity?.position?.y ?? 0);
+      const underground = this.#underground();
+      const slots = bot.inventory?.slots ?? [];
+      const armor = [5, 6, 7, 8].filter((i) => slots[i]).length;
+      const weapon = Object.keys(this.lastInv ?? {}).some((n) => /_(sword|axe)$/.test(n));
       const p = bot.entity?.position;
       // Remember where and with what we died, to go back for the items after respawning.
       if (p && Object.keys(this.lastInv ?? {}).length)
@@ -100,7 +143,8 @@ export class Agent {
         const recent = Date.now() - this.lastSelfMsg.at < 6000;
         const cause = recent ? this.lastSelfMsg.text.slice(bot.username.length + 1) : this.#nearestThreat() ?? '원인불명';
         if (this.pendingRecovery) this.pendingRecovery.cause = cause;
-        this.journal.add('death', { cause, where, night, lastAction, lastResult });
+        this.journal.add('death', { cause, kind: classifyDeath(cause), where, y, underground, night, armor, weapon, lastAction, lastResult });
+        this.#reanalyzeDeaths();
         this.memory.addLesson(`죽음 #${this.memory.data.deaths}: ${cause} (${night ? '밤' : '낮'}, ${where}), 직전 행동 "${lastAction}"`);
         this.events.log(`💀 죽었다: ${cause}`);
       }, 1000);
@@ -166,10 +210,16 @@ export class Agent {
     const lastOk = this.lastResult === '아직 없음' || /^(성공|새 스킬)/.test(this.lastResult);
     if (!lastOk) return null;
     const bot = this.bot;
-    if ((bot.health ?? 20) <= 8 || (bot.food ?? 20) <= 6) return null;
+    const pol = this.policy;
+    if ((bot.health ?? 20) <= 8 || (bot.food ?? 20) <= pol.foodMin) return null;
     const me = bot.entity?.position;
-    const danger = me && Object.values(bot.entities ?? {}).some((e) => HOSTILE.has(e.name) && e.position.distanceTo(me) < 10);
+    const danger =
+      me &&
+      Object.values(bot.entities ?? {}).some(
+        (e) => HOSTILE.has(e.name) && e.position.distanceTo(me) < (e.name === 'creeper' ? pol.creeperRadius : pol.hostileRadius),
+      );
     if (danger) return null;
+    if (pol.nightSurfaceDanger && isNight(bot) && !this.#underground()) return null;
     let p;
     try {
       p = this.goals.plan(goal, obs.inv);
@@ -244,6 +294,7 @@ export class Agent {
         : '',
       `최근 일지:\n${recent || '- 없음'}`,
       this.journal.deathSummary() ? `누적: ${this.journal.deathSummary()}` : '',
+      patternsText(this.deathAnalysis),
       `교훈:\n${lessons.length ? lessons.map((l) => '- ' + l).join('\n') : '- 아직 없음'}`,
     ].join('\n\n');
 
@@ -291,6 +342,7 @@ export class Agent {
     let depth = 0;
     const hooks = {
       torches: this.config.torches,
+      descendScan: this.policy.descendScan,
       planNext: () => this.goals.nextAction(this.currentGoal, inventoryOf(this.bot)),
       useSkill: async (name, a) => {
         if (!this.skills.has(name)) throw new Error(`no saved skill "${name}". Saved skills: ${Object.keys(this.skills.index).join(', ')}`);

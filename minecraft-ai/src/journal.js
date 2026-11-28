@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { analyzeDeaths } from './deaths.js';
 import path from 'node:path';
 
 /** Append-only event log (data/journal.jsonl): deaths, damage, skill results, milestones. */
@@ -73,6 +74,7 @@ export class Journal {
         case 'skill_fail': return `${time} ❌ ${e.name}: ${e.error}`;
         case 'new_skill': return `${time} 🎓 ${e.name}`;
         case 'milestone': return `${time} 🏁 ${e.id}`;
+        case 'death_pattern': return `${time} 🧠 죽음 패턴: ${e.text} → ${e.change}`;
         case 'recover': return `${time} 💼 아이템 회수: ${e.result}`;
         case 'advancement': return `${time} 🏆 발전 과제: ${e.title}`;
         case 'self_goal': return `${time} 🎯 새 목표: ${e.goal}`;
@@ -97,6 +99,10 @@ export class Journal {
     lines.push('\n[죽음]');
     for (const e of this.of('death'))
       lines.push(`  ${e.t.slice(0, 16).replace('T', ' ')}  ${e.cause ?? '원인불명'} @ ${e.where} (${e.night ? '밤' : '낮'}) 직전행동: ${e.lastAction}`);
+    const analysis = analyzeDeaths(this.of('death'));
+    lines.push('\n[죽음 패턴 → 바뀐 행동]');
+    for (const p of analysis.patterns) lines.push(`  ${p.text} → ${p.change}`);
+    if (!analysis.patterns.length) lines.push('  (아직 반복된 패턴 없음)');
     lines.push('\n[발전 과제]');
     for (const e of this.of('advancement')) lines.push(`  ${e.t.slice(0, 16).replace('T', ' ')}  ${e.title}`);
     lines.push('\n[새로 배운 스킬]');

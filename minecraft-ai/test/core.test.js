@@ -1444,3 +1444,74 @@ test('after dying the agent goes back for its items (not after lava, not when em
   await c.agent.step();
   assert.equal(c.ran.length, 0); // nothing to recover
 });
+
+test('death patterns: classify causes and turn repeated ones into behaviour changes', async () => {
+  const { classifyDeath, analyzeDeaths, DEFAULT_POLICY } = await import('../src/deaths.js');
+  assert.equal(classifyDeath('was shot by Skeleton'), 'skeleton');
+  assert.equal(classifyDeath('was slain by Zombie'), 'zombie');
+  assert.equal(classifyDeath('was slain by Drowned'), 'zombie'); // the mob, not drowning
+  assert.equal(classifyDeath('drowned'), 'drown');
+  assert.equal(classifyDeath('tried to swim in lava'), 'lava');
+  assert.equal(classifyDeath('was blown up by Creeper'), 'creeper');
+  assert.equal(classifyDeath('fell from a high place'), 'fall');
+  assert.equal(classifyDeath('hit the ground too hard'), 'fall');
+  assert.equal(classifyDeath('starved to death'), 'starve');
+
+  assert.deepEqual(analyzeDeaths([]).policy, DEFAULT_POLICY);
+  const night = (cause) => ({ cause, night: true, underground: false, armor: 0 });
+  const a = analyzeDeaths([night('was shot by Skeleton'), night('was slain by Zombie'), { cause: 'was slain by Zombie', night: false, underground: true, armor: 0 }]);
+  assert.equal(a.policy.nightSurfaceDanger, true);
+  assert.equal(a.policy.gearFirst, true);
+  assert.equal(a.policy.hostileRadius, 14);
+  assert.deepEqual(a.patterns.map((p) => p.key).sort(), ['mobs', 'night_surface', 'no_armor']);
+
+  const b = analyzeDeaths([{ cause: 'tried to swim in lava' }, { cause: 'fell from a high place' }, { cause: 'hit the ground too hard' }, { cause: 'starved to death' }, { cause: 'was blown up by Creeper' }, { cause: 'was blown up by Creeper' }]);
+  assert.equal(b.policy.descendScan, 2);
+  assert.equal(b.policy.maxDropDown, 2);
+  assert.equal(b.policy.foodMin, 12);
+  assert.equal(b.policy.creeperRadius, 16);
+  // one zombie death is not a pattern yet
+  assert.equal(analyzeDeaths([night('was slain by Zombie')]).patterns.length, 0);
+});
+
+test('agent: deaths are recorded with context, new patterns change behaviour right away', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { createRequire } = await import('node:module');
+  const { Vec3 } = await import('vec3');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const dir = tmp();
+  const movements = { maxDropDown: 4 };
+  const bot = Object.assign(new EventEmitter(), {
+    username: 'Bot', registry: reg, entity: { position: new Vec3(0.5, 70, 0.5) }, entities: {}, health: 20, food: 20,
+    time: { timeOfDay: 18000 }, inventory: { items: () => [], slots: {} }, findBlocks: () => [], findBlock: () => null,
+    blockAt: () => ({ name: 'air', boundingBox: 'empty' }), nearestEntity: () => null,
+    pathfinder: { setGoal() {}, goto: async () => {} }, clearControlStates() {}, __movements: movements,
+  });
+  const journal = new Journal(dir);
+  const agent = new Agent({ bot, llm: { budgetLeft: () => true, spentUsd: 0, ask: async () => '{"thought":"x","wait":true}' }, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 3000, freeGoalMaxSteps: 80 } });
+  assert.equal(agent.policy.nightSurfaceDanger, false);
+
+  const die = async (cause) => {
+    bot.emit('messagestr', `Bot ${cause}`);
+    bot.emit('death');
+    await new Promise((r) => setTimeout(r, 1100)); // cause is read 1s after the death event
+  };
+  await die('fell from a high place');
+  const d = journal.of('death')[0];
+  assert.equal(d.kind, 'fall');
+  assert.equal(d.underground, false);
+  assert.equal(d.night, true);
+  assert.equal(d.armor, 0);
+  assert.equal(movements.maxDropDown, 4);
+  await die('hit the ground too hard');
+  assert.equal(movements.maxDropDown, 2); // applied to the pathfinder
+  assert.equal(journal.of('death_pattern')[0].key, 'fall');
+  assert.ok(agent.memory.data.lessons.some((l) => /낙사 2번/.test(l)));
+
+  await die('was shot by Skeleton');
+  await die('was slain by Zombie');
+  assert.equal(agent.policy.nightSurfaceDanger, true);
+  assert.equal(agent.goals.preferGear, true);
+});
