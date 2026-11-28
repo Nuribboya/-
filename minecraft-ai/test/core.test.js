@@ -893,3 +893,23 @@ test('smelt: a furnace that never opens fails fast with a reason (not the 120s s
     globalThis.setTimeout = realSetTimeout;
   }
 });
+
+test('wiki notes: only the ones relevant to the situation, size-limited', async () => {
+  const { wikiFor, WIKI_TOPICS } = await import('../src/wiki.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  assert.ok(WIKI_TOPICS.length >= 15);
+  const creeper = wikiFor('주변 생물: creeper(적대)@4', reg);
+  assert.match(creeper, /크리퍼/);
+  assert.doesNotMatch(creeper, /엔더맨/);
+  const armor = wikiFor('현재 목표: 철 갑옷 만들기\niron_chestplate', reg);
+  assert.match(armor, /iron_chestplate\) 철 8/);
+  // words that are in every observation must not pull notes in by themselves
+  assert.equal(wikiFor('위치: (0, 64, 0) / 체력 20/20 / 허기 20/20\n인벤토리: {"iron_pickaxe":1,"crafting_table":1}', reg), '');
+  const food = wikiFor('허기 4/20\n배고픔', reg);
+  assert.match(food, /회복량 좋은 음식\(게임 데이터/);
+  assert.match(food, /cooked_beef|cooked_porkchop/);
+  assert.equal(wikiFor('아무 관련 없는 말', reg), '');
+  const many = wikiFor('creeper skeleton zombie spider enderman lava diamond armor shield bed chest nether enchant food', reg);
+  assert.ok(many.split('\n- ').length - 1 <= 3 && many.length < 1100);
+});

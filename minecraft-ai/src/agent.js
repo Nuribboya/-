@@ -9,6 +9,7 @@ import { Journal } from './journal.js';
 import { Brains } from './brain.js';
 import { Goals } from './goals.js';
 import { knowledgeText } from './knowledge.js';
+import { wikiFor } from './wiki.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
 import { sleep, short, isNight } from './util.js';
 
@@ -134,17 +135,24 @@ export class Agent {
     const goal = await this.goals.current(obs);
     const lessons = this.memory.data.lessons;
 
+    const planText = this.goals.planText(goal, obs.inv);
+    const recent = this.journal.recentText(8);
+    const wiki = wikiFor(
+      [goal.text, goal.target?.item, obs.text, this.lastResult, planText, recent, (this.bot.food ?? 20) <= 12 ? '배고픔' : ''].join('\n'),
+      this.bot.registry,
+    );
     const user = [
       `현재 목표: ${goal.text}`,
       obs.text,
       `직전 행동: ${this.lastAction || '없음'}`,
       `직전 결과: ${short(this.lastResult)}`,
-      this.goals.planText(goal, obs.inv),
+      planText,
+      wiki,
       `보유 스킬:\n${this.skills.describe()}`,
       this.writeCooldown > 0
         ? `⛔ 스킬 작성이 연속 실패해서 앞으로 ${this.writeCooldown}턴 동안 write_skill 금지. 반드시 보유 스킬 중 하나를 "skill"로 실행할 것 (예: collect_logs, craft_item, place_block, explore_area).`
         : '',
-      `최근 일지:\n${this.journal.recentText(8) || '- 없음'}`,
+      `최근 일지:\n${recent || '- 없음'}`,
       this.journal.deathSummary() ? `누적: ${this.journal.deathSummary()}` : '',
       `교훈:\n${lessons.length ? lessons.map((l) => '- ' + l).join('\n') : '- 아직 없음'}`,
     ].join('\n\n');
@@ -294,7 +302,15 @@ export class Agent {
     const messages = [
       {
         role: 'user',
-        content: `요청: ${request}\n현재 목표: ${goal.text}\n${obs.text}\n\n기존 스킬:\n${this.skills.describe()}`,
+        content: [
+          `요청: ${request}`,
+          `현재 목표: ${goal.text}`,
+          obs.text,
+          wikiFor(`${request}\n${goal.text}\n${goal.target?.item ?? ''}`, this.bot.registry, { max: 2 }),
+          `기존 스킬:\n${this.skills.describe()}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
       },
     ];
     let lastErr = '';
