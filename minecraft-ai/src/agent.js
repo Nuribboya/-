@@ -98,9 +98,21 @@ export class Agent {
     });
 
     // Running out of air (flooded tunnel, deep water): drop everything and swim up.
-    bot.on('breath', () => {
-      if ((bot.oxygenLevel ?? 20) <= 8 && !this.escapingWater) this.#escapeWater();
-    });
+    // The reported air value is not reliable on every version (26.1 sends -1/0 on dry land),
+    // so look at the world instead: is the head really in water, and for how long?
+    this.underwaterSince = null;
+    this.drownWatch = setInterval(() => {
+      if (!this.#headInWater()) {
+        this.underwaterSince = null;
+        return;
+      }
+      this.underwaterSince ??= Date.now();
+      const under = Date.now() - this.underwaterSince;
+      const air = bot.oxygenLevel;
+      const airLow = typeof air === 'number' && air >= 0 && air <= 20 && air <= 8;
+      if (!this.escapingWater && (under >= (this.config.drownAfterMs ?? 7000) || (airLow && under >= 2000))) this.#escapeWater();
+    }, Math.min(1000, Math.max(50, (this.config.drownAfterMs ?? 7000) / 5)));
+    this.drownWatch.unref?.();
 
     // Advancement progress: the server sends all of it on join, then updates.
     bot._client?.on?.('advancements', (packet) => {
@@ -160,7 +172,8 @@ export class Agent {
   async #escapeWater() {
     const bot = this.bot;
     this.escapingWater = true;
-    this.events.log(`🫧 숨 부족 (${bot.oxygenLevel}/20) - 하던 일 멈추고 물 밖으로`);
+    const secs = this.underwaterSince ? Math.round((Date.now() - this.underwaterSince) / 1000) : 0;
+    this.events.log(`🫧 머리가 물속에 ${secs}초 - 하던 일 멈추고 물 밖으로`);
     this.journal.add('danger', { what: 'drowning', where: this.#where() });
     if (this.currentCtx) this.currentCtx.aborted = true; // stop the running skill
     try {
@@ -219,6 +232,15 @@ export class Agent {
 
   stop() {
     this.running = false;
+    clearInterval(this.drownWatch);
+  }
+
+  /** Is the bot's head inside water (water, bubble column, kelp, seagrass, waterlogged block)? */
+  #headInWater() {
+    const p = this.bot.entity?.position;
+    if (!p || !this.bot.blockAt) return false;
+    const b = this.bot.blockAt(p.offset(0, 1.62, 0).floored());
+    return !!b && (/water|bubble_column|kelp|seagrass/.test(b.name) || !!b.getProperties?.()?.waterlogged);
   }
 
   async run() {

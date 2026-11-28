@@ -1549,7 +1549,7 @@ test('under the sea: never dig a block that touches water; skip ores next to wat
   await assert.rejects(createApi(w2.bot, { aborted: false }).gather('iron_ore', 1), /next to water\/lava/);
 });
 
-test('low air: the running skill is stopped and the bot swims up', async () => {
+test('drowning watch: trusts the world (head in water for a while), not the air number', async () => {
   const { Agent } = await import('../src/agent.js');
   const { Journal } = await import('../src/journal.js');
   const { EventEmitter } = await import('node:events');
@@ -1557,26 +1557,32 @@ test('low air: the running skill is stopped and the bot swims up', async () => {
   const dir = tmp();
   const controls = [];
   let goal = null;
+  let water = false;
   const bot = Object.assign(new EventEmitter(), {
-    username: 'Bot', registry: {}, entity: { position: new Vec3(0, 40, 0) }, oxygenLevel: 20,
+    username: 'Bot', registry: {}, entity: { position: new Vec3(0.5, 40, 0.5) }, oxygenLevel: -1, // bogus value like 26.1 sends
+    blockAt: () => ({ name: water ? 'water' : 'air', boundingBox: 'empty' }),
     pathfinder: { setGoal() {}, goto: async (g) => (goal = g) },
     setControlState: (k, v) => controls.push([k, v]),
   });
   const journal = new Journal(dir);
-  const agent = new Agent({ bot, llm: {}, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b') } });
+  const agent = new Agent({ bot, llm: {}, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b'), drownAfterMs: 300 } });
   const ctx = { aborted: false };
   agent.currentCtx = ctx;
-  bot.oxygenLevel = 15;
-  bot.emit('breath');
-  assert.equal(ctx.aborted, false); // still fine
-  bot.oxygenLevel = 7;
-  bot.emit('breath');
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(ctx.aborted, false); // dry land: a bogus -1 air value is ignored
+  assert.equal(controls.length, 0);
+
+  water = true; // head goes under water
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(ctx.aborted, false); // not yet: only after being under for a while
+  await new Promise((r) => setTimeout(r, 400));
   assert.equal(ctx.aborted, true); // skill stopped
   assert.deepEqual(controls[0], ['jump', true]);
   await new Promise((r) => setTimeout(r, 1700));
   assert.equal(goal.y, 63); // heading for the surface
-  assert.deepEqual(controls.at(-1), ['jump', false]);
-  assert.equal(journal.entries.at(-1).what, 'drowning');
+  assert.equal(journal.of('danger')[0].what, 'drowning');
+  water = false;
+  agent.stop();
 });
 
 test('stuck: a walk that goes nowhere is cut off fast, then unstuck runs (digging is not stuck)', async () => {
