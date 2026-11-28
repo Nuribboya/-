@@ -87,6 +87,10 @@ export class Agent {
     bot.on('death', () => {
       const night = isNight(bot);
       const where = this.#where();
+      const p = bot.entity?.position;
+      // Remember where and with what we died, to go back for the items after respawning.
+      if (p && Object.keys(this.lastInv ?? {}).length)
+        this.pendingRecovery = { x: p.x, y: p.y, z: p.z, at: Date.now(), cause: '', items: this.lastInv };
       const lastAction = this.lastAction;
       const lastResult = short(this.lastResult, 120);
       this.memory.addDeath();
@@ -95,6 +99,7 @@ export class Agent {
       setTimeout(() => {
         const recent = Date.now() - this.lastSelfMsg.at < 6000;
         const cause = recent ? this.lastSelfMsg.text.slice(bot.username.length + 1) : this.#nearestThreat() ?? '원인불명';
+        if (this.pendingRecovery) this.pendingRecovery.cause = cause;
         this.journal.add('death', { cause, where, night, lastAction, lastResult });
         this.memory.addLesson(`죽음 #${this.memory.data.deaths}: ${cause} (${night ? '밤' : '낮'}, ${where}), 직전 행동 "${lastAction}"`);
         this.events.log(`💀 죽었다: ${cause}`);
@@ -176,8 +181,33 @@ export class Agent {
     return p.steps.length > 1 ? { skill: 'follow_plan', args: { steps: Math.min(5, p.steps.length) } } : first;
   }
 
+  /**
+   * Right after dying: go back for the items (no model call). Only once per death, only while
+   * the items still exist (~5 min), and not when they are gone anyway (lava, void).
+   */
+  async #recoverAfterDeath() {
+    const r = this.pendingRecovery;
+    if (!r || this.bot.isAlive === false) return false;
+    this.pendingRecovery = null;
+    const age = Date.now() - r.at;
+    if (age > 4.5 * 60000) return false;
+    if (/lava|burn|fell out of the world|void|withered/i.test(r.cause)) {
+      this.events.log(`💼 아이템 회수 안 함: ${r.cause} (아이템이 이미 사라짐)`);
+      return false;
+    }
+    const thought = `💼 죽은 자리로 아이템 회수하러 감 (${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.z)})`;
+    this.events.update({ thought });
+    this.events.log(thought);
+    this.lastAction = `recover_items(${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.z)})`;
+    this.lastResult = await this.useSkill('recover_items', { x: r.x, y: r.y, z: r.z });
+    this.journal.add('recover', { where: `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.z)}`, result: short(this.lastResult, 120) });
+    return true;
+  }
+
   async step() {
     const obs = observe(this.bot);
+    this.lastInv = obs.inv;
+    if (await this.#recoverAfterDeath()) return;
     const goal = await this.goals.current(obs);
     this.currentGoal = goal;
     const lessons = this.memory.data.lessons;

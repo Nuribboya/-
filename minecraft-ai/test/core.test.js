@@ -1374,3 +1374,73 @@ test('several bots: lessons and journal are shared, progress is per bot', async 
   assert.match(j2.recentText(), /\[Bot_2\] .*lava/);
   assert.match(journal.deathSummary(), /죽음 1회: lava/); // everyone's deaths teach everyone
 });
+
+test('recoverDrops: walks back to the death spot and onto each dropped item', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const { bot, Vec3 } = await fakeWorld();
+  const drops = [
+    { name: 'item', position: new Vec3(20, 64, 0) },
+    { name: 'item', position: new Vec3(22, 64, 1) },
+    { name: 'zombie', position: new Vec3(21, 64, 0) },
+    { name: 'item', position: new Vec3(80, 64, 0) }, // too far from the death spot
+  ];
+  const visited = [];
+  const goto = bot.pathfinder.goto;
+  bot.pathfinder.goto = async (g) => {
+    visited.push([g.x, g.y, g.z]);
+    await goto(g);
+    // standing on an item picks it up
+    for (let i = drops.length - 1; i >= 0; i--) if (drops[i].name === 'item' && drops[i].position.distanceTo(bot.entity.position) < 1.5) drops.splice(i, 1);
+  };
+  bot.nearestEntity = (f) => drops.filter(f).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] ?? null;
+  const r = await createApi(bot, { aborted: false }).recoverDrops(20, 64, 0);
+  assert.deepEqual(visited[0], [20, 64, 0]); // death spot first
+  assert.equal(r.visits, 1); // the item on the death spot itself is picked up on arrival
+  assert.deepEqual(drops.map((d) => d.name), ['zombie', 'item']); // the far item was left alone
+  await assert.rejects(createApi(bot, { aborted: false }).recoverDrops(undefined, 64, 0), /needs the death position/);
+});
+
+test('after dying the agent goes back for its items (not after lava, not when empty-handed)', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { Vec3 } = await import('vec3');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const make = async () => {
+    const dir = tmp();
+    const bot = Object.assign(new EventEmitter(), {
+      username: 'Bot', registry: reg, entity: { position: new Vec3(5, -40, 5) }, entities: {}, health: 20, food: 20,
+      time: { timeOfDay: 1000 }, inventory: { items: () => [] }, findBlocks: () => [], findBlock: () => null,
+      blockAt: () => null, nearestEntity: () => null, pathfinder: { setGoal() {}, goto: async () => {} }, clearControlStates() {},
+    });
+    let asked = 0;
+    const llm = { budgetLeft: () => true, spentUsd: 0, ask: async () => (asked++, '{"thought":"x","wait":true}') };
+    const agent = new Agent({ bot, llm, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal: new Journal(dir), config: { dataDir: dir, brainsDir: path.join(dir, 'b'), skillTimeoutMs: 3000, freeGoalMaxSteps: 80, autopilot: false } });
+    const ran = [];
+    agent.useSkill = async (name, args) => (ran.push([name, args]), '성공');
+    return { agent, bot, ran, asked: () => asked };
+  };
+
+  const a = await make();
+  a.agent.lastInv = { iron_pickaxe: 1, raw_iron: 4 };
+  a.bot.emit('death');
+  await a.agent.step();
+  assert.equal(a.ran[0][0], 'recover_items');
+  assert.deepEqual(a.ran[0][1], { x: 5, y: -40, z: 5 });
+  assert.equal(a.asked(), 0); // no model call for this
+  assert.equal(a.agent.pendingRecovery, null); // only once per death
+
+  const b = await make();
+  b.agent.lastInv = { iron_pickaxe: 1 };
+  b.bot.emit('death');
+  b.agent.pendingRecovery.cause = 'tried to swim in lava';
+  await b.agent.step();
+  assert.equal(b.ran.length, 0); // items burned, don't go back into the lava
+
+  const c = await make();
+  c.agent.lastInv = {};
+  c.bot.emit('death');
+  await c.agent.step();
+  assert.equal(c.ran.length, 0); // nothing to recover
+});

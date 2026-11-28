@@ -661,6 +661,32 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       return Math.floor(bot.entity.position.y);
     },
 
+    /**
+     * Go back to where we died and pick up the dropped items (they vanish after ~5 minutes).
+     * Walks onto each item entity near the spot until none are left.
+     */
+    async recoverDrops(x, y, z, radius = 10) {
+      check();
+      if ([x, y, z].some((v) => typeof v !== 'number' || Number.isNaN(v))) throw new Error('recoverDrops needs the death position x, y, z');
+      const spot = new Vec3(x, y, z);
+      await withTimeout(goto(x, y, z, 2), 90000, `could not get back to the death spot (${Math.round(x)},${Math.round(y)},${Math.round(z)}) within 90s`);
+      const isDrop = (e) => e.name === 'item' && e.position.distanceTo(spot) <= radius;
+      let visits = 0;
+      const until = Date.now() + 40000;
+      while (Date.now() < until && visits < 40) {
+        check();
+        const drop = bot.nearestEntity(isDrop);
+        if (!drop) break;
+        const p = drop.position;
+        await withTimeout(goto(p.x, p.y, p.z, 0), 10000, 'drop out of reach').catch(() => {});
+        await sleep(250);
+        visits++;
+        if (bot.nearestEntity((e) => e === drop)) drop.__skip = (drop.__skip ?? 0) + 1;
+        if ((drop.__skip ?? 0) >= 2) drop.name = 'item_unreachable'; // stop chasing one we cannot reach
+      }
+      return { visits };
+    },
+
     /** Walk into a nearby cave (finds cave air with a floor). Returns where it went. */
     async exploreCave(maxDistance = 32) {
       check();

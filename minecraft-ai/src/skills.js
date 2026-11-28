@@ -45,6 +45,11 @@ const SEEDS = {
     args: { y: -58 },
     code: `const y = await api.descend(args.y ?? -58);\nreturn { y };`,
   },
+  recover_items: {
+    description: '죽은 자리로 돌아가 떨어진 아이템을 줍는다 (죽고 5분 안에만 남아 있음)',
+    args: { x: 0, y: 64, z: 0 },
+    code: `return await api.recoverDrops(args.x, args.y, args.z);`,
+  },
   go_to_surface: {
     description: '지하에서 지상으로 올라간다 (기본 y=70). 나무가 필요하거나 지하에 갇혔을 때',
     args: { y: 70 },
