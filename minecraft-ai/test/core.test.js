@@ -1308,3 +1308,39 @@ test('autopilot: runs the plan without the model while things go fine, asks the 
   await agent.step(); // streak limit reached -> model checks in
   assert.equal(asked, 3);
 });
+
+test('torches: dark tunnel gets a torch every ~8 blocks (crafted from coal if needed); not under open sky', async () => {
+  const { createApi } = await import('../src/actions.js');
+  // deep underground staircase: rock everywhere below y=64, bot starts at y=50 (dark, covered)
+  const w = await fakeWorld({ start: [0.5, 50, 0.5], items: [] });
+  const torches = [];
+  const inv = [{ name: 'coal', type: 1, count: 2 }, { name: 'stick', type: 2, count: 2 }];
+  w.bot.inventory.items = () => inv;
+  w.bot.registry.itemsByName = { torch: { id: 3 } };
+  w.bot.recipesFor = (id) => (id === 3 && inv.some((i) => i.name === 'coal' && i.count > 0) ? [{ id: 'torch-recipe' }] : []);
+  w.bot.craft = async () => {
+    inv.find((i) => i.name === 'coal').count--;
+    inv.push({ name: 'torch', type: 3, count: 4 });
+  };
+  const place = w.bot.placeBlock;
+  w.bot.placeBlock = async (ref, face) => {
+    torches.push(ref.position.plus(face));
+    inv.find((i) => i.name === 'torch').count--;
+    return place(ref, face);
+  };
+  const logs = [];
+  const y = await createApi(w.bot, { aborted: false, }, (m) => logs.push(m), { torches: true }).descend(30);
+  assert.ok(y <= 30);
+  assert.ok(torches.length >= 2 && torches.length <= 4, `placed ${torches.length} torches over ~20 steps`);
+  assert.ok(logs.includes('crafted 4 torches'));
+  for (let i = 1; i < torches.length; i++) assert.ok(torches[i].distanceTo(torches[i - 1]) >= 7);
+
+  // surface (open sky above): no torches
+  const w2 = await fakeWorld({ items: [{ name: 'torch', type: 3, count: 10 }] });
+  let placed = 0;
+  w2.bot.placeBlock = async () => placed++;
+  w2.bot.findBlocks = () => [];
+  w2.bot.registry.blocksByName.stone = { id: 1 };
+  await createApi(w2.bot, { aborted: false }, () => {}, { torches: true }).descend(62); // first steps, sky still open above
+  assert.equal(placed, 0);
+});

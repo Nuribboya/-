@@ -29,6 +29,7 @@ export const config = {
   // Autopilot: while the plan is going fine, run its next step without asking the model.
   // The model is still asked after a failure, in danger, without a plan, and every N turns.
   autopilot: env.AUTOPILOT !== 'false',
+  torches: env.TORCHES !== 'false', // light up dark tunnels/caves every ~8 blocks
   autopilotMaxStreak: Number(env.AUTOPILOT_MAX_STREAK ?? 5),
   reflectEvery: Number(env.REFLECT_EVERY ?? 25), // decision steps between self-improvement passes
   skillTimeoutMs: Number(env.SKILL_TIMEOUT_MS ?? 120000),

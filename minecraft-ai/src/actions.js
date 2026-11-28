@@ -157,6 +157,50 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   // Place a block from inventory on the ground next to you. Beds need 2 free cells in a row
   // and are laid out in the direction the bot looks, so look along that row first.
+  // A cell we can stand/place in: solid ground below, open (air/grass...) and no liquid.
+  const freeCell = (p) => {
+    const g = bot.blockAt(p.offset(0, -1, 0));
+    const t = bot.blockAt(p);
+    return g && g.boundingBox === 'block' && t && isOpen(t) && !t.name.includes('water') && !t.name.includes('lava');
+  };
+
+  /**
+   * Underground and dark: put a torch down every ~8 blocks (crafts torches from coal/charcoal +
+   * stick when there are none). Mobs spawn in darkness, so lit tunnels are safer. Never fails
+   * the calling action.
+   */
+  const autoTorch = async () => {
+    if (hooks.torches === false) return;
+    try {
+      const feet = bot.entity.position.floored();
+      const covered = [...Array(16).keys()].some((d) => !isOpen(bot.blockAt(feet.offset(0, 2 + d, 0))));
+      if (!covered) return; // open sky: daylight / not a tunnel
+      const here = bot.blockAt(feet);
+      if (Math.max(here?.light ?? 0, here?.skyLight ?? 0) >= 8) return;
+      if (bot.__lastTorch && bot.__lastTorch.distanceTo(feet) < 8) return;
+      let torch = bot.inventory.items().find((i) => i.name === 'torch');
+      if (!torch && reg.itemsByName?.torch) {
+        const r = bot.recipesFor?.(reg.itemsByName.torch.id, null, 1, null)?.[0];
+        if (!r) return;
+        await withTimeout(bot.craft(r, 1, null), 10000, 'torch craft timeout');
+        torch = bot.inventory.items().find((i) => i.name === 'torch');
+        if (!torch) return;
+        log('crafted 4 torches');
+      }
+      if (!torch) return;
+      // Next to us, or one step up/down (in a staircase tunnel the step behind is the open spot).
+      const spots = [0, 1, -1].flatMap((dy) => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => feet.offset(dx, dy, dz)));
+      for (const t of spots) {
+        if (!freeCell(t)) continue;
+        await bot.equip(torch, 'hand');
+        await placeOn(t);
+        bot.__lastTorch = feet;
+        log(`🔦 torch at (${t.x},${t.y},${t.z})`);
+        return;
+      }
+    } catch {}
+  };
+
   /** Place the held item on top of the block under `t`, with a time limit. */
   const placeOn = (t) =>
     withTimeout(bot.placeBlock(bot.blockAt(t.offset(0, -1, 0)), new Vec3(0, 1, 0)), 10000, `placing at (${t.x},${t.y},${t.z}) got no answer from the server`);
@@ -167,11 +211,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     if (!item) throw new Error(`no ${name} in inventory`);
     const isBed = name.endsWith('_bed');
     const base = bot.entity.position.floored();
-    const free = (p) => {
-      const g = bot.blockAt(p.offset(0, -1, 0));
-      const t = bot.blockAt(p);
-      return g && g.boundingBox === 'block' && t && isOpen(t) && !t.name.includes('water') && !t.name.includes('lava');
-    };
+    const free = freeCell;
     const dirs = isBed ? [[1, 0], [-1, 0], [0, 1], [0, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]];
     for (const [dx, dz] of dirs) {
       const t = base.offset(dx, 0, dz);
@@ -324,6 +364,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         await equipFor(block);
         await bot.dig(block);
         got++;
+        await autoTorch();
         await goto(pos.x, pos.y, pos.z, 0).catch(() => {});
         await sleep(250);
       }
@@ -602,6 +643,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         await goto(t.x, t.y, t.z, 0);
         p = bot.entity.position.floored();
         steps++;
+        await autoTorch();
       }
       return p.y;
     },
@@ -631,6 +673,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       if (!spots.length) throw new Error('no cave nearby - use descend_mine to dig down, or explore_area to look elsewhere');
       const t = spots[Math.floor(Math.random() * spots.length)];
       await goto(t.x, t.y, t.z, 1);
+      await autoTorch();
       return { x: t.x, y: t.y, z: t.z };
     },
 

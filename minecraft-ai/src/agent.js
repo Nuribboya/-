@@ -260,6 +260,7 @@ export class Agent {
     const logs = [];
     let depth = 0;
     const hooks = {
+      torches: this.config.torches,
       planNext: () => this.goals.nextAction(this.currentGoal, inventoryOf(this.bot)),
       useSkill: async (name, a) => {
         if (!this.skills.has(name)) throw new Error(`no saved skill "${name}". Saved skills: ${Object.keys(this.skills.index).join(', ')}`);
