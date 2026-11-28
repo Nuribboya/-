@@ -13,7 +13,8 @@ import { analyzeDeaths, classifyDeath, patternsText } from './deaths.js';
 import { knowledgeText } from './knowledge.js';
 import { wikiFor } from './wiki.js';
 import { DECISION_SYSTEM, WRITER_SYSTEM, REFLECT_SYSTEM, parseWriterReply } from './prompts.js';
-import { sleep, short, isNight } from './util.js';
+import { sleep, short, isNight, withTimeout } from './util.js';
+import pf from 'mineflayer-pathfinder';
 
 /**
  * Why a run that finished without throwing still changed nothing.
@@ -96,6 +97,11 @@ export class Agent {
       if (msg.startsWith(bot.username)) this.lastSelfMsg = { text: msg, at: Date.now() };
     });
 
+    // Running out of air (flooded tunnel, deep water): drop everything and swim up.
+    bot.on('breath', () => {
+      if ((bot.oxygenLevel ?? 20) <= 8 && !this.escapingWater) this.#escapeWater();
+    });
+
     // Advancement progress: the server sends all of it on join, then updates.
     bot._client?.on?.('advancements', (packet) => {
       try {
@@ -149,6 +155,26 @@ export class Agent {
         this.events.log(`💀 죽었다: ${cause}`);
       }, 1000);
     });
+  }
+
+  async #escapeWater() {
+    const bot = this.bot;
+    this.escapingWater = true;
+    this.events.log(`🫧 숨 부족 (${bot.oxygenLevel}/20) - 하던 일 멈추고 물 밖으로`);
+    this.journal.add('danger', { what: 'drowning', where: this.#where() });
+    if (this.currentCtx) this.currentCtx.aborted = true; // stop the running skill
+    try {
+      bot.pathfinder?.setGoal?.(null);
+      bot.setControlState?.('jump', true); // swim up
+      await sleep(1500);
+      const y = Math.floor(bot.entity?.position?.y ?? 0);
+      const target = Math.max(63, y + 6);
+      await withTimeout(bot.pathfinder.goto(new pf.goals.GoalY(target)), 12000, 'escape timeout').catch(() => {});
+    } catch {}
+    finally {
+      bot.setControlState?.('jump', false);
+      this.escapingWater = false;
+    }
   }
 
   #where() {
@@ -338,6 +364,7 @@ export class Agent {
    */
   async #run(code, args, timeoutMs = this.config.skillTimeoutMs) {
     const ctx = { aborted: false, errors: [], actions: 0 };
+    this.currentCtx = ctx;
     const logs = [];
     let depth = 0;
     const hooks = {
@@ -385,6 +412,7 @@ export class Agent {
       result.error = e;
     } finally {
       ctx.aborted = true;
+      if (this.currentCtx === ctx) this.currentCtx = null;
       // NOT pathfinder.stop(): that only sets a flag, and if the bot is already standing
       // still the flag stays set and cancels the NEXT skill's first move ("Path was stopped").
       // setGoal(null) clears the path right away (and also clears a stale stop flag).

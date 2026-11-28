@@ -11,6 +11,9 @@ const NEIGHBORS = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 
 const EQUIP_SLOTS = { hand: 'hand', 'off-hand': 'off-hand', offhand: 'off-hand', head: 'head', torso: 'torso', chest: 'torso', legs: 'legs', feet: 'feet' };
 const OFF_HAND_SLOT = 45;
 const isOpen = (b) => !b || b.boundingBox === 'empty'; // air, grass, water, flowers...
+// Water-filled blocks (kelp/seagrass/bubble columns are water too) and blocks that fall when undermined.
+const LIQUID = /water|lava|bubble_column|kelp|seagrass/;
+const FALLING = /^(sand|red_sand|gravel|suspicious_sand|suspicious_gravel)$/;
 
 /**
  * The only surface generated skill code can touch. Every method checks ctx.aborted
@@ -30,8 +33,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   // Like a player: go for blocks you can see (touching air) before ones buried in the ground,
   // so the bot walks to a hillside instead of tunnelling toward hidden stone.
-  const pickTarget = (name, maxDistance) => {
-    const found = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 64 });
+  const pickTarget = (name, maxDistance, skip = new Set()) => {
+    const found = bot.findBlocks({ matching: matcherFor(name), maxDistance, count: 64 }).filter((p) => !skip.has(p.toString()));
     if (!found.length) return null;
     const me = bot.entity.position;
     const exposed = (p) => NEIGHBORS.some(([x, y, z]) => isOpen(bot.blockAt(p.offset(x, y, z))));
@@ -157,6 +160,20 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
 
   // Place a block from inventory on the ground next to you. Beds need 2 free cells in a row
   // and are laid out in the direction the bot looks, so look along that row first.
+  /**
+   * Why digging the block at `pos` is dangerous (null if safe): water or lava touching it would
+   * flood in (a tunnel under the sea drowns you), sand/gravel above would fall in.
+   */
+  const digHazard = (pos) => {
+    for (const [x, y, z] of NEIGHBORS) {
+      const n = bot.blockAt(pos.offset(x, y, z));
+      if (n && (LIQUID.test(n.name) || n.getProperties?.()?.waterlogged)) return `${n.name} touches it (digging it would let the ${/lava/.test(n.name) ? 'lava' : 'water'} flood in)`;
+    }
+    const above = bot.blockAt(pos.offset(0, 1, 0));
+    if (above && FALLING.test(above.name)) return `${above.name} above it would fall in`;
+    return null;
+  };
+
   // A cell we can stand/place in: solid ground below, open (air/grass...) and no liquid.
   const freeCell = (p) => {
     const g = bot.blockAt(p.offset(0, -1, 0));
@@ -231,8 +248,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         const b = bot.blockAt(t);
         const g = bot.blockAt(t.offset(0, -1, 0));
         if (!b || isOpen(b) || b.diggable === false || !g || g.boundingBox !== 'block') continue;
-        const liquidNear = NEIGHBORS.some(([x, y, z]) => /lava|water/.test(bot.blockAt(t.offset(x, y, z))?.name ?? ''));
-        if (liquidNear) continue;
+        if (digHazard(t)) continue;
         try {
           await equipFor(b);
         } catch {} // breaking it by hand is fine, we only need the space
@@ -344,9 +360,11 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         name = block;
       }
       let got = 0;
+      const unsafe = new Set();
       while (got < count) {
         check();
-        const pos = pickTarget(name, maxDistance);
+        const pos = pickTarget(name, maxDistance, unsafe);
+        if (!pos && unsafe.size) throw new Error(`the only ${name} nearby (got ${got}/${count}) are next to water/lava or under sand - unsafe to dig, look elsewhere`);
         if (!pos) {
           const y = Math.floor(bot.entity.position.y);
           const hint = name === 'log' && y < 55
@@ -361,6 +379,12 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         );
         const block = bot.blockAt(pos);
         if (!block || !matcherFor(name)(block)) continue;
+        const hazard = digHazard(pos);
+        if (hazard) {
+          log(`skipping ${name} at (${pos.x},${pos.y},${pos.z}): ${hazard}`);
+          unsafe.add(pos.toString());
+          continue;
+        }
         await equipFor(block);
         await bot.dig(block);
         got++;
@@ -574,6 +598,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       const block = bot.blockAt(new Vec3(Math.floor(x), Math.floor(y), Math.floor(z)));
       if (!block || isOpen(block)) throw new Error(`nothing to dig at (${x},${y},${z})`);
       if (block.diggable === false) throw new Error(`${block.name} cannot be dug`);
+      const hazard = digHazard(block.position);
+      if (hazard) throw new Error(`not digging ${block.name} at (${x},${y},${z}): ${hazard}`);
       if (bot.entity.position.distanceTo(block.position) > 4) await goto(block.position.x, block.position.y, block.position.z, 3);
       await equipFor(block);
       check();
@@ -623,7 +649,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
         check();
         const r = hooks.descendScan ?? 1; // wider after a lava death
         for (let ox = -r; ox <= r; ox++)
-          for (let oy = -3; oy <= 1; oy++)
+          for (let oy = -3; oy <= 2; oy++)
             for (let oz = -r; oz <= r; oz++) {
               const b = bot.blockAt(p.offset(dx + ox, oy, dz + oz));
               if (danger(b)) throw new Error(`stopped descending at y=${p.y}: ${b.name} ahead - call descend again (new random direction) or stop here`);
@@ -636,6 +662,8 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
           const b = bot.blockAt(c);
           if (!b || isOpen(b)) continue;
           if (b.diggable === false) throw new Error(`cannot dig ${b.name} at y=${c.y}`);
+          const hazard = digHazard(c);
+          if (hazard) throw new Error(`stopped descending at y=${p.y}: ${hazard} - call descend again (new random direction) or stop here`);
           await equipFor(b);
           check();
           await bot.dig(b);
@@ -715,6 +743,10 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       for (const b of below)
         if (!b || isOpen(b) || b.name.includes('lava') || b.diggable === false)
           throw new Error(`cannot dig a shelter here (${b?.name ?? 'nothing'} below) - move to solid ground first`);
+      for (const b of below.slice(0, 3)) {
+        const hazard = digHazard(b.position);
+        if (hazard) throw new Error(`cannot dig a shelter here: ${hazard} - move away from water`);
+      }
       const COVER = ['dirt', 'cobblestone', 'cobbled_deepslate', 'stone', 'andesite', 'diorite', 'granite', 'netherrack', 'gravel', 'sand'];
       const cover =
         blockName ??

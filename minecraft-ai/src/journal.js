@@ -75,6 +75,7 @@ export class Journal {
         case 'new_skill': return `${time} 🎓 ${e.name}`;
         case 'milestone': return `${time} 🏁 ${e.id}`;
         case 'death_pattern': return `${time} 🧠 죽음 패턴: ${e.text} → ${e.change}`;
+        case 'danger': return `${time} ⚠️ 위험: ${e.what} (${e.where})`;
         case 'recover': return `${time} 💼 아이템 회수: ${e.result}`;
         case 'advancement': return `${time} 🏆 발전 과제: ${e.title}`;
         case 'self_goal': return `${time} 🎯 새 목표: ${e.goal}`;

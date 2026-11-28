@@ -1515,3 +1515,66 @@ test('agent: deaths are recorded with context, new patterns change behaviour rig
   assert.equal(agent.policy.nightSurfaceDanger, true);
   assert.equal(agent.goals.preferGear, true);
 });
+
+test('under the sea: never dig a block that touches water; skip ores next to water', async () => {
+  const { createApi } = await import('../src/actions.js');
+  // ocean: water from y=57 up to 63, sea floor below. The bot is inside the rock at y=52.
+  const water = {};
+  for (let x = -6; x <= 6; x++) for (let z = -6; z <= 6; z++) for (let y = 57; y <= 63; y++) water[`${x},${y},${z}`] = 'water';
+  // The bot stands right under the sea floor (feet y=55): the first step's ceiling (y=56) touches the sea.
+  const w = await fakeWorld({ start: [0.5, 55, 0.5], overrides: water });
+  const dug = [];
+  const dig = w.bot.dig;
+  w.bot.dig = async (b) => (dug.push(b.position.y), dig(b));
+  await assert.rejects(createApi(w.bot, { aborted: false }).descend(30), /water/);
+  assert.ok(!dug.some((y) => y >= 56), 'nothing touching the water was dug');
+  // the digHazard check itself (not just the look-ahead): water only directly above one cell
+  const w3 = await fakeWorld({ start: [0.5, 50, 0.5], overrides: { '1,52,0': 'water', '-1,52,0': 'water', '0,52,1': 'water', '0,52,-1': 'water' } });
+  await assert.rejects(createApi(w3.bot, { aborted: false }).descend(30), /water/);
+
+  // gather: two iron ores, the closer one touches water -> the safe one is mined
+  const w2 = await fakeWorld({ overrides: { '2,62,0': 'iron_ore', '2,62,1': 'water', '-5,62,0': 'iron_ore' } });
+  w2.bot.registry.blocksByName.iron_ore = { id: 9 };
+  const { Vec3 } = await import('vec3');
+  w2.bot.findBlocks = () => [new Vec3(2, 62, 0), new Vec3(-5, 62, 0)];
+  const logs = [];
+  const mined = [];
+  const dig2 = w2.bot.dig;
+  w2.bot.dig = async (b) => (b.name === 'iron_ore' && mined.push(b.position.x), dig2(b));
+  await createApi(w2.bot, { aborted: false }, (m) => logs.push(m)).gather('iron_ore', 1);
+  assert.deepEqual(mined, [-5]);
+  assert.ok(logs.some((l) => /skipping iron_ore at \(2,62,0\): water touches it/.test(l)));
+  // only unsafe ones left -> clear error instead of digging into the sea
+  w2.bot.findBlocks = () => [new Vec3(2, 62, 0)];
+  await assert.rejects(createApi(w2.bot, { aborted: false }).gather('iron_ore', 1), /next to water\/lava/);
+});
+
+test('low air: the running skill is stopped and the bot swims up', async () => {
+  const { Agent } = await import('../src/agent.js');
+  const { Journal } = await import('../src/journal.js');
+  const { EventEmitter } = await import('node:events');
+  const { Vec3 } = await import('vec3');
+  const dir = tmp();
+  const controls = [];
+  let goal = null;
+  const bot = Object.assign(new EventEmitter(), {
+    username: 'Bot', registry: {}, entity: { position: new Vec3(0, 40, 0) }, oxygenLevel: 20,
+    pathfinder: { setGoal() {}, goto: async (g) => (goal = g) },
+    setControlState: (k, v) => controls.push([k, v]),
+  });
+  const journal = new Journal(dir);
+  const agent = new Agent({ bot, llm: {}, skills: new Skills(dir), memory: new Memory(dir), events: { log() {}, update() {} }, journal, config: { dataDir: dir, brainsDir: path.join(dir, 'b') } });
+  const ctx = { aborted: false };
+  agent.currentCtx = ctx;
+  bot.oxygenLevel = 15;
+  bot.emit('breath');
+  assert.equal(ctx.aborted, false); // still fine
+  bot.oxygenLevel = 7;
+  bot.emit('breath');
+  assert.equal(ctx.aborted, true); // skill stopped
+  assert.deepEqual(controls[0], ['jump', true]);
+  await new Promise((r) => setTimeout(r, 1700));
+  assert.equal(goal.y, 63); // heading for the surface
+  assert.deepEqual(controls.at(-1), ['jump', false]);
+  assert.equal(journal.entries.at(-1).what, 'drowning');
+});
