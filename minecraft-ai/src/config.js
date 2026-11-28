@@ -21,6 +21,8 @@ export const config = {
   },
   ollamaCtx: Number(env.OLLAMA_CTX ?? 8192), // Ollama's default 2048 would cut off the prompt
   ollamaUrl: env.OLLAMA_URL ?? 'http://localhost:11434',
+  // Keep the model in (GPU) memory between calls instead of Ollama's default 5 minutes.
+  ollamaKeepAlive: env.OLLAMA_KEEP_ALIVE ?? '60m',
 
   dailyBudgetUsd: Number(env.DAILY_BUDGET_USD ?? 15),
   decisionIntervalMs: Number(env.DECISION_INTERVAL_MS ?? 2000),

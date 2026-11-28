@@ -199,6 +199,34 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
       if (!hooks.useSkill) throw new Error('useSkill is not available here');
       return hooks.useSkill(name, args);
     },
+    /**
+     * Run the next `steps` steps of the automatic plan for the current goal, one after another,
+     * without asking the model in between. Stops early when the plan is done, a step fails,
+     * or a step changes nothing.
+     */
+    followPlan: async (steps = 4) => {
+      check();
+      if (!hooks.planNext || !hooks.useSkill) throw new Error('followPlan is not available here');
+      const done = [];
+      const max = Math.max(1, Math.min(8, Math.floor(Number(steps)) || 4));
+      for (let i = 0; i < max; i++) {
+        check();
+        const action = hooks.planNext();
+        if (!action) break;
+        const before = JSON.stringify(inventoryOf(bot));
+        try {
+          await hooks.useSkill(action.skill, action.args ?? {});
+        } catch (e) {
+          const msg = `step ${i + 1} ${action.skill}(${JSON.stringify(action.args ?? {})}) failed: ${e.message}`;
+          if (!done.length) throw new Error(msg);
+          return { done, stopped: msg };
+        }
+        done.push(`${action.skill}(${JSON.stringify(action.args ?? {})})`);
+        log(`plan step ${i + 1}: ${done.at(-1)}`);
+        if (JSON.stringify(inventoryOf(bot)) === before) return { done, stopped: 'last step changed nothing' };
+      }
+      return { done };
+    },
     sleep: async (ms) => {
       check();
       await sleep(Math.min(ms, 10000));
@@ -596,7 +624,7 @@ export function createApi(bot, ctx, log = () => {}, hooks = {}) {
     if (!ctx.errors) ctx.errors = [];
     if (ctx.errors.length < 10) ctx.errors.push(`api.${k}: ${e?.message ?? e}`);
   };
-  const ACTIONS = new Set([...BODY_ACTIONS, 'useSkill']);
+  const ACTIONS = new Set([...BODY_ACTIONS, 'useSkill', 'followPlan']);
   for (const [k, fn] of Object.entries(api)) {
     if (typeof fn !== 'function') continue;
     api[k] = (...a) => {

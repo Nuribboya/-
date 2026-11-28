@@ -64,7 +64,7 @@ export class Goals {
         this.journal.deathSummary() ? `죽음 기록: ${this.journal.deathSummary()}` : '',
         `최근 목표: ${m.goalHistory.length ? m.goalHistory.map((g) => `${g.goal}(${g.result})`).join(', ') : '없음'}`,
       ].join('\n'),
-      { maxTokens: 800 },
+      { maxTokens: 800, localMaxTokens: 250 },
     );
     let g = {};
     try {
@@ -83,26 +83,46 @@ export class Goals {
     return asGoal(m.freeGoal);
   }
 
+  /**
+   * Plan for the goal from the current inventory: { steps: [{text, action}], label } or null.
+   * One source for both the prompt text and follow_plan, so they always agree.
+   */
+  plan(goal, inv) {
+    const t = goal?.target;
+    if (!t) return null;
+    if (t.item === 'log') {
+      const have = Object.entries(inv).reduce((n, [k, v]) => (k.endsWith('_log') ? n + v : n), 0);
+      if (have >= t.count) return { label: '원목', steps: [] };
+      const n = t.count - have;
+      return { label: '원목', steps: [{ text: `원목 캐기 x${n}`, action: { skill: 'collect_logs', args: { count: n } } }] };
+    }
+    const reg = this.bot.registry;
+    const near = (b) => !!this.bot.findBlock({ matching: reg.blocksByName[b].id, maxDistance: 32 });
+    const steps = makePlan(reg, inv, t.item, t.count, { tableNearby: near('crafting_table'), furnaceNearby: near('furnace') });
+    return { label: `${t.item} x${t.count}`, steps: steps.map((st) => ({ text: stepText(st), action: stepToAction(st) })) };
+  }
+
+  /** The next concrete skill call of the plan (null if there is no plan, it is done, or unknown). */
+  nextAction(goal, inv) {
+    try {
+      return this.plan(goal, inv)?.steps[0]?.action ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Data-driven plan for the goal + the concrete next skill call, as prompt text. */
   planText(goal, inv) {
-    const t = goal.target;
-    if (!t) return '';
     try {
-      if (t.item === 'log') {
-        const have = Object.entries(inv).reduce((n, [k, v]) => (k.endsWith('_log') ? n + v : n), 0);
-        const next = { skill: 'collect_logs', args: { count: Math.max(1, t.count - have) } };
-        return `자동 계획(게임 데이터):\n1. 원목 캐기 x${next.args.count}\n추천 다음 행동: ${JSON.stringify(next)}`;
-      }
-      const reg = this.bot.registry;
-      const near = (b) => !!this.bot.findBlock({ matching: reg.blocksByName[b].id, maxDistance: 32 });
-      const steps = makePlan(reg, inv, t.item, t.count, { tableNearby: near('crafting_table'), furnaceNearby: near('furnace') });
-      if (!steps.length) return '';
-      const next = stepToAction(steps[0]);
+      const p = this.plan(goal, inv);
+      if (!p || !p.steps.length) return '';
+      const next = p.steps[0].action;
       return (
-        `자동 계획(게임 데이터, ${t.item} x${t.count}):\n` +
-        steps.slice(0, 8).map((st, i) => `${i + 1}. ${stepText(st)}`).join('\n') +
-        (steps.length > 8 ? `\n... (${steps.length - 8}단계 더)` : '') +
-        (next ? `\n추천 다음 행동: ${JSON.stringify(next)}` : '')
+        `자동 계획(게임 데이터, ${p.label}):\n` +
+        p.steps.slice(0, 8).map((st, i) => `${i + 1}. ${st.text}`).join('\n') +
+        (p.steps.length > 8 ? `\n... (${p.steps.length - 8}단계 더)` : '') +
+        (next ? `\n추천 다음 행동: ${JSON.stringify(next)}` : '') +
+        (next && p.steps.length > 1 ? `\n여러 단계를 한 번에(가장 빠름): {"skill":"follow_plan","args":{"steps":${Math.min(5, p.steps.length)}}}` : '')
       );
     } catch (e) {
       return `자동 계획 실패: ${e.message}`;

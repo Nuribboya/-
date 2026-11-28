@@ -133,6 +133,7 @@ export class Agent {
   async step() {
     const obs = observe(this.bot);
     const goal = await this.goals.current(obs);
+    this.currentGoal = goal;
     const lessons = this.memory.data.lessons;
 
     const planText = this.goals.planText(goal, obs.inv);
@@ -158,7 +159,7 @@ export class Agent {
     ].join('\n\n');
 
     this.system ??= `${DECISION_SYSTEM}\n\n${knowledgeText(this.bot.registry)}`;
-    const reply = await this.llm.ask('fast', this.system, user, { maxTokens: 1500 });
+    const reply = await this.llm.ask('fast', this.system, user, { maxTokens: 1500, localMaxTokens: 450 });
     const d = parseJson(reply);
     this.events.update({ thought: d.thought ?? '', goal: goal.text });
     this.events.log(`🧠 ${d.thought ?? ''}`);
@@ -200,6 +201,7 @@ export class Agent {
     const logs = [];
     let depth = 0;
     const hooks = {
+      planNext: () => this.goals.nextAction(this.currentGoal, inventoryOf(this.bot)),
       useSkill: async (name, a) => {
         if (!this.skills.has(name)) throw new Error(`no saved skill "${name}". Saved skills: ${Object.keys(this.skills.index).join(', ')}`);
         if (depth >= 3) throw new Error('skills nested too deeply (max 3)');
@@ -275,7 +277,7 @@ export class Agent {
       name = alt;
     }
 
-    const r = await this.#run(this.skills.code(name), args);
+    const r = await this.#run(this.skills.code(name), args, this.config.skillTimeoutMs * (this.skills.index[name]?.timeoutMul ?? 1));
     if (!r.ok) {
       this.events.log(`❌ ${name}: ${r.error.message}`);
       this.#recordFail(name, short(r.error.message, 160));
@@ -315,7 +317,7 @@ export class Agent {
     ];
     let lastErr = '';
     for (let i = 1; i <= maxAttempts; i++) {
-      const reply = await this.llm.ask('smart', WRITER_SYSTEM, messages, { maxTokens: 8000 });
+      const reply = await this.llm.ask('smart', WRITER_SYSTEM, messages, { maxTokens: 8000, localMaxTokens: 1500 });
       messages.push({ role: 'assistant', content: reply });
       let parsed = null;
       let r = null; // only this attempt's run - never an older one
@@ -415,7 +417,7 @@ export class Agent {
       'smart',
       REFLECT_SYSTEM,
       `기존 교훈:\n${this.memory.data.lessons.map((l) => '- ' + l).join('\n') || '- 없음'}\n\n최근 일지:\n${this.journal.recentText(40)}\n\n${this.journal.deathSummary()}`,
-      { maxTokens: 2000 },
+      { maxTokens: 2000, localMaxTokens: 600 },
     );
     const { lessons } = parseJson(text);
     if (Array.isArray(lessons) && lessons.length) {

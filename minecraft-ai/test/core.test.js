@@ -73,6 +73,10 @@ test('ollama adapter sends ctx/json format and reads reply', async () => {
     assert.equal(body.format, 'json');
     assert.equal(body.options.num_ctx, 8192);
     assert.equal(body.messages[0].role, 'system');
+    assert.equal(body.keep_alive, '60m');
+    assert.equal(body.options.num_predict, 1500); // default: min(maxTokens, 2048)
+    await llm.ask('fast', 'sys', 'hi', { maxTokens: 1500, localMaxTokens: 350 });
+    assert.equal(body.options.num_predict, 350);
     await llm.ask('smart', 'sys', 'hi');
     assert.equal(body.format, undefined);
   } finally {
@@ -959,4 +963,65 @@ test('smelt picks a fuel we actually have when coal is missing', async () => {
   assert.match(logs[0], /using oak_planks as fuel/);
   items.splice(1, 2);
   await assert.rejects(api.smelt('raw_iron', 1), /not enough fuel to smelt 1 .*you have: none/);
+});
+
+test('followPlan runs plan steps back to back and stops on done / failure / no progress', async () => {
+  const { createApi } = await import('../src/actions.js');
+  const inv = [];
+  const bot = { registry: {}, entity: {}, inventory: { items: () => inv } };
+  const queue = [
+    { skill: 'collect_logs', args: { count: 3 } },
+    { skill: 'craft_item', args: { item: 'oak_planks', count: 2 } },
+    { skill: 'craft_item', args: { item: 'stick', count: 1 } },
+  ];
+  const ran = [];
+  const hooks = {
+    planNext: () => queue[0] ?? null,
+    useSkill: async (name, args) => {
+      ran.push(name);
+      queue.shift();
+      inv.push({ name: `x${ran.length}`, count: 1, type: ran.length }); // progress
+    },
+  };
+  const logs = [];
+  const api = createApi(bot, { aborted: false }, (m) => logs.push(m), hooks);
+  const r = await api.followPlan(5);
+  assert.deepEqual(ran, ['collect_logs', 'craft_item', 'craft_item']);
+  assert.equal(r.done.length, 3); // plan finished before 5 steps
+  assert.equal(r.stopped, undefined);
+
+  // a failing later step: keep what was done, report where it stopped
+  queue.push({ skill: 'mine_block', args: { block: 'stone' } }, { skill: 'craft_item', args: { item: 'stone_pickaxe' } });
+  hooks.useSkill = async (name) => {
+    queue.shift();
+    if (name === 'craft_item') throw new Error('needs a crafting_table');
+    inv.push({ name: 'cobblestone', count: 3, type: 99 });
+  };
+  const r2 = await api.followPlan(5);
+  assert.equal(r2.done.length, 1);
+  assert.match(r2.stopped, /step 2 craft_item.*needs a crafting_table/);
+
+  // first step fails -> the whole call fails (so it counts as a failed skill)
+  queue.push({ skill: 'craft_item', args: {} });
+  await assert.rejects(api.followPlan(3), /step 1 craft_item/);
+
+  // a step that changes nothing stops the loop instead of repeating forever
+  queue.push({ skill: 'place_block', args: {} });
+  hooks.planNext = () => ({ skill: 'place_block', args: {} });
+  hooks.useSkill = async () => {};
+  const r3 = await api.followPlan(5);
+  assert.equal(r3.done.length, 1);
+  assert.match(r3.stopped, /changed nothing/);
+});
+
+test('plan text offers follow_plan; nextAction gives the first step', async () => {
+  const { Goals } = await import('../src/goals.js');
+  const { createRequire } = await import('node:module');
+  const reg = createRequire(import.meta.url)('prismarine-registry')('26.1');
+  const goals = new Goals({ bot: { registry: reg, findBlock: () => null }, llm: {}, memory: {}, journal: {}, events: {}, config: {} });
+  const goal = { id: 'wooden_pickaxe', target: { item: 'wooden_pickaxe', count: 1 } };
+  assert.match(goals.planText(goal, {}), /"skill":"follow_plan","args":\{"steps":5\}/);
+  assert.deepEqual(goals.nextAction(goal, {}), { skill: 'collect_logs', args: { count: 3 } });
+  assert.equal(goals.nextAction({ id: 'free', target: null }, {}), null);
+  assert.equal(goals.planText({ id: 'logs', target: { item: 'log', count: 4 } }, { oak_log: 5 }), '');
 });

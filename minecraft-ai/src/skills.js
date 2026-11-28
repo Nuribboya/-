@@ -19,6 +19,12 @@ const SEEDS = {
     args: { block: 'crafting_table' },
     code: `await api.place(args.block ?? args.item ?? args.name);\nreturn 'placed';`,
   },
+  follow_plan: {
+    description: '자동 계획의 다음 단계들을 한 번에 연달아 실행한다 (가장 빠름). 자동 계획이 있으면 우선 사용',
+    args: { steps: 4 },
+    timeoutMul: 4,
+    code: `return await api.followPlan(args.steps ?? 4);`,
+  },
   mine_block: {
     description: '블록을 count개 캔다 (예: stone→조약돌, iron_ore→raw_iron, coal_ore→석탄; raw_iron처럼 아이템 이름도 됨). 맞는 곡괭이 필요',
     args: { block: 'stone', count: 3 },
@@ -94,6 +100,7 @@ export class Skills {
       } catch {}
       if (!cur?.builtin || cur.description !== s.description || curCode !== s.code) this.#write(name, s.description, s.args, s.code, true);
       this.index[name].passive = !!s.passive;
+      this.index[name].timeoutMul = s.timeoutMul ?? 1;
     }
   }
 

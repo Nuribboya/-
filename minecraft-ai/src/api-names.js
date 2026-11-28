@@ -4,5 +4,6 @@ export const BODY_ACTIONS = [
   'gather', 'craft', 'place', 'smelt', 'goTo', 'explore', 'attack', 'eat',
   'placeAt', 'digAt', 'equip', 'block', 'descend', 'exploreCave', 'shelter', 'sleepInBed',
 ];
-// Async but not queued (sleep) or queue-free by design (useSkill calls body actions itself).
-export const OTHER_ASYNC = ['sleep', 'useSkill'];
+// Async but not queued: sleep, and useSkill/followPlan which call body actions themselves
+// (queuing them would deadlock).
+export const OTHER_ASYNC = ['sleep', 'useSkill', 'followPlan'];

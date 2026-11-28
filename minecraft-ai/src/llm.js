@@ -34,10 +34,15 @@ export class LLM {
    * @param {string} system  stable instructions (cached on Anthropic)
    * @param {string|Array<{role:string,content:string}>} messages
    */
-  async ask(tier, system, messages, { maxTokens = 1500 } = {}) {
+  /**
+   * `localMaxTokens`: answer length cap for local (Ollama) models only. Short JSON answers come
+   * back much faster when the model is told to stop early. Claude keeps `maxTokens`, because its
+   * thinking also counts toward that limit.
+   */
+  async ask(tier, system, messages, { maxTokens = 1500, localMaxTokens = null } = {}) {
     const { provider, model } = this.config[tier];
     const msgs = typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages;
-    if (provider === 'ollama') return this.#ollama(model, system, msgs, tier === 'fast');
+    if (provider === 'ollama') return this.#ollama(model, system, msgs, tier === 'fast', localMaxTokens ?? Math.min(maxTokens, 2048));
     if (provider === 'anthropic') return this.#anthropicCall(tier, model, system, msgs, maxTokens);
     throw new Error(`unknown provider: ${provider}`);
   }
@@ -84,15 +89,16 @@ export class LLM {
     this.spentUsd += cost;
   }
 
-  async #ollama(model, system, messages, json) {
+  async #ollama(model, system, messages, json, numPredict) {
     const res = await fetch(`${this.config.ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
         stream: false,
+        keep_alive: this.config.ollamaKeepAlive ?? '60m',
         ...(json ? { format: 'json' } : {}),
-        options: { num_ctx: this.config.ollamaCtx, temperature: 0.4 },
+        options: { num_ctx: this.config.ollamaCtx, temperature: 0.4, num_predict: numPredict },
         messages: [{ role: 'system', content: system }, ...messages],
       }),
     });

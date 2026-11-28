@@ -15,6 +15,7 @@ skill 코드에서 쓸 수 있는 객체는 \`api\` 와 \`args\` 뿐이다. 모�
 - api.equip(itemName, slot='hand'): 장착. slot = hand | off-hand | head | torso | legs | feet (갑옷, 방패, 칼)
 - api.block(ms=1500): 왼손(off-hand) 방패 들기, 최대 5초. 먼저 await api.equip('shield','off-hand')
 - api.eat()
+- api.followPlan(steps=4): 자동 계획(현재 목표)의 다음 단계들을 연달아 실행 (await 필수)
 - 저장된 스킬 호출: await api.스킬이름({인자}) 예) await api.collect_logs({count: 3}). 또는 await api.useSkill('collect_logs', {count: 3}). '보유 스킬' 목록에 있는 이름만 가능. 작은 스킬을 조합해 큰 스킬을 만들 때 쓴다.
 - 지식 함수(동기, 게임 데이터): api.recipe(item) -> {ingredients, makes, requiresTable}, api.toolFor(block) -> 필요한 최소 곡괭이, api.plan(item, count) -> 단계별 계획 문자열 배열
 - 동기 함수: api.isNight(), api.nearbyMobs(maxDistance=16) -> [{name,x,y,z,dist,hostile}] (가까운 순), api.inventory() -> {itemName: count}, api.has(name,n), api.countBlocks(name,maxDistance), api.position(), api.health(), api.food(), api.log(msg), api.chat(msg)
@@ -37,7 +38,7 @@ export const DECISION_SYSTEM = `너는 마인크래프트(자바 에디션)를 �
 - 생존 우선: 체력 8 이하, 허기 6 이하, 밤에 적대 몹이 가까우면 먼저 대응 (먹기/싸우기/도망/은신).
 - 밤에도 쉬지 않고 계속 작업한다. 밤엔 지표에 적대 몹이 많으니 광질(descend_mine, mine_block)이나 동굴 탐험 같은 지하 작업을 하면 좋다. 체력이 낮고 적대 몹에 몰렸을 때만 night_shelter로 잠깐 숨는다. 밤에 쉬거나 기다리라는 예전 교훈은 따르지 않는다.
 - 광석이 근처에 없으면: 광석 높이로 descend_mine, 동굴이 보이면 explore_cave, 지표면은 explore_area.
-- '자동 계획'은 게임 데이터로 계산한 정답 순서다. 위급한 생존 상황이 아니면 '추천 다음 행동'을 그대로 쓰는 것이 가장 빠르다.
+- '자동 계획'은 게임 데이터로 계산한 정답 순서다. 위급한 생존 상황이 아니면 follow_plan으로 여러 단계를 한 번에 실행하는 것이 가장 빠르다 (또는 '추천 다음 행동' 하나).
 - "skill"에는 '보유 스킬' 목록에 실제로 있는 이름만 쓴다. 실패해서 저장되지 않은 스킬 이름은 존재하지 않는다.
 - 현재 목표를 한 단계씩 진행. 이미 있는 스킬로 되면 그걸 쓴다 (원목은 collect_logs, 제작은 craft_item, 설치는 place_block). 맞는 스킬이 없거나 연속 실패 중이면 write_skill.
 - 직전 결과의 에러 메시지를 읽고 원인을 해결하는 방향으로 다음 행동을 고른다. 같은 실패를 반복하지 않는다.
